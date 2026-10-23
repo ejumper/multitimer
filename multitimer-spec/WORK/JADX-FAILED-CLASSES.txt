@@ -1,0 +1,66 @@
+# jadx 1.5.6 failed decompiles — com.persapps.multitimer v1.14.1 (282) — 2026-10-22
+# 103 method-level errors; affected classes below. Fallback: smali in WORK/decompiled/apktool/smali/
+
+## Error types:
+     73 JadxOverflowException
+     13 JadxRuntimeException
+      9 Types fix failed
+      2 StackOverflowError
+
+## Affected classes (class — failing methods):
+  2  ys0.p
+  2  xu2.d
+  2  xd4.c
+  2  xa.p
+  2  ww1.c
+  2  wf0.l
+  2  w33.p
+  2  vz3.K
+  2  vz3.J
+  2  vj3.d
+  2  v0.p
+  2  ux0.p
+  2  ue.p
+  2  ts0.d
+  2  ts0.c
+  2  ts0.a
+  2  t64.a
+  2  t26.q
+  2  t26.f
+  2  t0.p
+  2  sp0.k
+  2  rb.p
+  2  qk2.r
+  2  qb.p
+  2  o92.f
+  2  o9.dispatchGenericMotionEvent
+  2  n80.H
+  2  mv3.p
+  2  m24.p
+  2  lu2.p
+  2  l74.v
+  2  l74.j
+  2  ky4.a
+  2  ka.a
+  2  jb4.a
+  2  h13.p
+  2  gy5.s
+  2  ev.a
+  2  eb4.p
+  2  e31.b
+  2  dj.p
+  2  c50.p
+  2  bi2.m
+  2  az4.h
+  2  az4.d
+  2  ak4.f
+  2  ak4.a
+  1  z61.p
+  1  yp3.p
+  1  wa4.remove
+  1  sa4.p
+  1  qs0.p
+  1  oz2.h
+  1  os0.p
+  1  is3.c
+  1  i33.p

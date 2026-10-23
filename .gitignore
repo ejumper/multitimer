@@ -1,0 +1,14 @@
+# --- binaries / copyrighted source material (kept local only) ---
+multitimer-spec/APK/
+multitimer-spec/WORK/decompiled/
+multitimer-spec/WORK/apk-manifest-check/
+multitimer-spec/WORK/xapk-extract/
+multitimer-spec/WORK/rejected/
+# multitimer.net help-center content fetched verbatim — do NOT publish (public repo)
+multitimer-spec/REFERENCE/
+
+# --- local tooling ---
+multitimer-spec/WORK/tools/
+
+# --- scratch ---
+*.log
