@@ -5,27 +5,16 @@ import 'package:planner/alert_selector.dart';
 import 'fakes.dart';
 
 /// Recording play fake that ALSO mirrors the desktop player's stop() hook —
-/// the shared [RecordingPlayer] records play() calls only, and these tests
-/// assert preview auto-stop. (Not an override: the play-only port declares
-/// no stop().)
-class _StopRecordingPlayer extends RecordingPlayer {
-  int stopped = 0;
-
-  Future<void> stop() async {
-    stopped++;
-  }
-}
-
 /// AlertSelectorScreen widget tests (P4.3): row order ("No alert" first,
 /// files alphabetical without the extension), the selection checkmark,
 /// preview ▶ plus stop-on-selection-change, the null option, and the
 /// empty-state path copy.
 void main() {
-  late _StopRecordingPlayer player;
+  late RecordingPlayer player;
   late List<String?> selections;
 
   setUp(() {
-    player = _StopRecordingPlayer();
+    player = RecordingPlayer();
     selections = [];
   });
 
@@ -121,7 +110,7 @@ void main() {
 
     await tester.tap(find.byKey(const Key('as-row-beta.mp3')));
     await tester.pump();
-    expect(player.stopped, 1); // stop FIRST, then the selection callback
+    expect(player.stopCount, 1); // stop FIRST, then the selection callback
     expect(selections, ['beta.mp3']);
   });
 
@@ -133,7 +122,7 @@ void main() {
     await tester.pump();
 
     expect(selections, [null]);
-    expect(player.stopped, 1); // the previous preview is cut too
+    expect(player.stopCount, 1); // the previous preview is cut too
   });
 
   // 15. Empty listing → the explanatory state, quoting the sounds path.

@@ -114,10 +114,16 @@ Date-triggered interval details:
 - Import/export formats; stats/insights beyond the run log.
 - App name.
 
-## 9. Open questions
+## 9. Potential Settings
+
+- max time to loop manual finish alerts: currently alerts loop for 10 minutes max, this should eventually be a setting that can be configured for a given amount of time or with no limit.
+
+
+## 10. Open questions
 1. Day board: exactly one day chain + independent side timers? (assumed)
 2. Completion-state defaults: auto-set `completed` when a duration interval runs its full course? Default after cut/skip? (assumed: cut/skip/moved → not completed)
 3. Wall firing on a never-started day (§2.2) — confirm behavior.
 4. Date-triggered interval ends early → chain continues per next interval's finish method (assumed).
 5. Sync mechanism (§7).
 6. v1 scope — next discussion.
+

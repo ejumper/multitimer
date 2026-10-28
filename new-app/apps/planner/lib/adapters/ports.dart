@@ -22,6 +22,17 @@ abstract interface class Notifier {
 
 /// Alert-sound playback.
 abstract interface class SoundPlayer {
-  /// Plays the mp3 at the absolute [filePath] to completion.
-  Future<void> play(String filePath);
+  /// Plays the mp3 at the absolute [filePath].
+  ///
+  /// [loop] repeats the sound until [stop] or the [maxDuration] cap — the
+  /// cap is a HARD cut (mid-pass is fine). [maxDuration] also truncates a
+  /// one-shot play. A new [play] INTERRUPTS whatever is playing.
+  Future<void> play(
+    String filePath, {
+    bool loop = false,
+    Duration? maxDuration,
+  });
+
+  /// Cuts the current sound immediately (also cancels a pending cap).
+  Future<void> stop();
 }

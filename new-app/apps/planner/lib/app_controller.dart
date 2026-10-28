@@ -44,6 +44,10 @@ class AppController extends ChangeNotifier {
   late RunEventProcessor processor;
   late TimerSession session;
 
+  /// The alert sink of the CURRENT session ([_buildSession] rebuilds both
+  /// together) — held so the advance actions can cut a looping alert.
+  late AlertHandler alerts;
+
   Timer? _ticker;
 
   /// The session's projection at [clock.now].
@@ -98,16 +102,17 @@ class AppController extends ChangeNotifier {
   Future<void> _buildSession() async {
     final tree = await store.loadTree(timer.id);
     instances = flatten(tree);
+    alerts = AlertHandler(
+      player: player,
+      notifier: notifier,
+      soundsDir: soundsDir,
+    );
     processor = RunEventProcessor(
       instances: instances,
       store: store,
       timerName: timer.name,
       soundDirectoryListing: soundListing,
-      alertSink: AlertHandler(
-        player: player,
-        notifier: notifier,
-        soundsDir: soundsDir,
-      ),
+      alertSink: alerts,
     );
     session = TimerSession(instances, clock: clock, sink: processor);
   }
@@ -141,18 +146,23 @@ class AppController extends ChangeNotifier {
 
   bool skipNext() {
     final skipped = session.skipNext();
+    // Advancing completes a held-at-zero interval — its looping alert is
+    // cut immediately (sound policy in AlertHandler).
+    if (skipped) alerts.stopAlerts();
     notifyListeners();
     return skipped;
   }
 
   bool jumpTo(int ordinal) {
     final jumped = session.jumpTo(ordinal);
+    if (jumped) alerts.stopAlerts();
     notifyListeners();
     return jumped;
   }
 
   void reset() {
     session.reset();
+    alerts.stopAlerts(); // abandoning the run cuts any alert sound
     notifyListeners();
   }
 

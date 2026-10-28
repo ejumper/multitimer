@@ -263,6 +263,167 @@ void main() {
     await store.close();
   });
 
+  // AUTO-FINISH alert: the sound plays ONCE, hard-cut at 75% of the NEXT
+  // instance's duration so consecutive alerts can never overlap.
+  test('auto_alert_sound_cut_at_75_of_next_interval', () async {
+    final c = makeController(soundListing: () => ['x.mp3']);
+    addTearDown(c.dispose);
+    await c.init();
+    await store.saveTree(
+      c.timer.id,
+      IntervalTree([
+        DefNode(IntervalDef(
+          id: 'd1',
+          timerId: c.timer.id,
+          color: '#0055ff',
+          durationSeconds: 60,
+          autoFinish: true,
+          endAlertSoundFile: 'x.mp3',
+        )),
+        DefNode(IntervalDef(
+          id: 'd2',
+          timerId: c.timer.id,
+          color: '#0055ff',
+          durationSeconds: 20,
+          autoFinish: true,
+        )),
+      ]),
+      eventKind: 'tree.edit',
+    );
+    await c.reload();
+
+    c.start();
+    clock.current = clock.current.add(const Duration(seconds: 61));
+    await c.tick();
+
+    expect(player.played, ['/sounds/x.mp3']);
+    expect(player.lastLoop, isFalse);
+    expect(player.lastMaxDuration, const Duration(milliseconds: 20 * 750));
+  });
+
+  // Last instance of the run: no next interval → no cut.
+  test('auto_alert_last_interval_uncapped', () async {
+    final c = makeController(soundListing: () => ['x.mp3']);
+    addTearDown(c.dispose);
+    await c.init();
+    await store.saveTree(
+      c.timer.id,
+      IntervalTree([
+        DefNode(IntervalDef(
+          id: 'd1',
+          timerId: c.timer.id,
+          color: '#0055ff',
+          durationSeconds: 60,
+          autoFinish: true,
+          endAlertSoundFile: 'x.mp3',
+        )),
+      ]),
+      eventKind: 'tree.edit',
+    );
+    await c.reload();
+
+    c.start();
+    clock.current = clock.current.add(const Duration(seconds: 61));
+    await c.tick();
+
+    expect(player.played, ['/sounds/x.mp3']);
+    expect(player.lastLoop, isFalse);
+    expect(player.lastMaxDuration, isNull);
+  });
+
+  // MANUAL-FINISH alert: loops with a hard 10-minute cap (cut, not
+  // "finish the last pass").
+  test('manual_alert_loops_with_10_minute_cap', () async {
+    final c = makeController(soundListing: () => ['x.mp3']);
+    addTearDown(c.dispose);
+    await c.init();
+    await store.saveTree(
+      c.timer.id,
+      IntervalTree([
+        DefNode(IntervalDef(
+          id: 'd1',
+          timerId: c.timer.id,
+          color: '#0055ff',
+          durationSeconds: 60,
+          autoFinish: false,
+          endAlertSoundFile: 'x.mp3',
+        )),
+      ]),
+      eventKind: 'tree.edit',
+    );
+    await c.reload();
+
+    c.start();
+    clock.current = clock.current.add(const Duration(seconds: 61));
+    await c.tick();
+
+    expect(player.played, ['/sounds/x.mp3']);
+    expect(player.lastLoop, isTrue);
+    expect(player.lastMaxDuration, const Duration(minutes: 10));
+    expect(c.snapshot.state, SessionState.awaitingAdvance);
+  });
+
+  // Completing the held interval (tap-to-continue / notification Continue
+  // / skip — all funnel through skipNext) cuts the loop immediately.
+  test('advance_cuts_looping_alert', () async {
+    final c = makeController(soundListing: () => ['x.mp3']);
+    addTearDown(c.dispose);
+    await c.init();
+    await store.saveTree(
+      c.timer.id,
+      IntervalTree([
+        DefNode(IntervalDef(
+          id: 'd1',
+          timerId: c.timer.id,
+          color: '#0055ff',
+          durationSeconds: 60,
+          autoFinish: false,
+          endAlertSoundFile: 'x.mp3',
+        )),
+      ]),
+      eventKind: 'tree.edit',
+    );
+    await c.reload();
+
+    c.start();
+    clock.current = clock.current.add(const Duration(seconds: 61));
+    await c.tick();
+    expect(player.stopCount, 0);
+
+    expect(c.skipNext(), isTrue);
+    expect(player.stopCount, 1);
+  });
+
+  // Reset while looping cuts the alert too (the run is abandoned).
+  test('reset_cuts_looping_alert', () async {
+    final c = makeController(soundListing: () => ['x.mp3']);
+    addTearDown(c.dispose);
+    await c.init();
+    await store.saveTree(
+      c.timer.id,
+      IntervalTree([
+        DefNode(IntervalDef(
+          id: 'd1',
+          timerId: c.timer.id,
+          color: '#0055ff',
+          durationSeconds: 60,
+          autoFinish: false,
+          endAlertSoundFile: 'x.mp3',
+        )),
+      ]),
+      eventKind: 'tree.edit',
+    );
+    await c.reload();
+
+    c.start();
+    clock.current = clock.current.add(const Duration(seconds: 61));
+    await c.tick();
+    expect(player.stopCount, 0);
+
+    c.reset();
+    expect(player.stopCount, 1);
+  });
+
   // The 'Continue' action button appears ONLY on a manually-complete
   // instance's alert (it holds at zero — advancing is meaningful); the
   // auto-finish chain has already moved on, so its alert stays a plain

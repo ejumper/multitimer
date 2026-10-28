@@ -271,22 +271,6 @@ class _BackCircle extends StatelessWidget {
   }
 }
 
-/// Preview stop hook. The app-side port (SoundPlayer in adapters/ports.dart)
-/// declares ONLY `play`; the concrete desktop player also provides `stop()`
-/// to cut a preview short, and the test fakes mirror it. The port is frozen,
-/// so the call is reached dynamically — a play-only implementation (nothing
-/// to stop) is a no-op instead of a crash.
-extension _PreviewStop on SoundPlayer {
-  Future<void> stop() async {
-    final dynamic impl = this;
-    try {
-      await impl.stop();
-    } on NoSuchMethodError {
-      // Play-only implementation — nothing to stop.
-    }
-  }
-}
-
 /// Dark card background used by the row containers.
 const BoxDecoration _cardDecoration = BoxDecoration(
   color: AppColors.card,

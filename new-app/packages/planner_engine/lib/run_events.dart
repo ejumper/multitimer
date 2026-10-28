@@ -24,6 +24,7 @@ class PlayAlert {
     required this.intervalName,
     required this.ordinal,
     required this.autoFinish,
+    required this.nextInstanceDurationSeconds,
   });
 
   /// RESOLVED file name; null = no sound but still notify.
@@ -44,6 +45,11 @@ class PlayAlert {
   /// meaningful for the app side).
   final bool autoFinish;
 
+  /// Duration of the NEXT instance in the run (seconds); null when this
+  /// instance is the last. The sound layer uses it to cut a one-shot alert
+  /// at 75% of the next interval so consecutive alerts can never overlap.
+  final int? nextInstanceDurationSeconds;
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -52,17 +58,24 @@ class PlayAlert {
           other.timerName == timerName &&
           other.intervalName == intervalName &&
           other.ordinal == ordinal &&
-          other.autoFinish == autoFinish;
+          other.autoFinish == autoFinish &&
+          other.nextInstanceDurationSeconds == nextInstanceDurationSeconds;
 
   @override
-  int get hashCode =>
-      Object.hash(soundFile, timerName, intervalName, ordinal, autoFinish);
+  int get hashCode => Object.hash(
+    soundFile,
+    timerName,
+    intervalName,
+    ordinal,
+    autoFinish,
+    nextInstanceDurationSeconds,
+  );
 
   @override
   String toString() =>
       'PlayAlert(sound=$soundFile, timer=$timerName, '
       'interval=${intervalName ?? '<unnamed>'}, #$ordinal, '
-      'autoFinish=$autoFinish)';
+      'autoFinish=$autoFinish, next=$nextInstanceDurationSeconds)';
 }
 
 /// Pure sound resolution: exact match in [availableFiles] wins (Linux file
@@ -127,6 +140,9 @@ class RunEventProcessor implements EventSink<InstanceEnded> {
         intervalName: instance.name,
         ordinal: event.ordinal,
         autoFinish: instance.autoFinish,
+        nextInstanceDurationSeconds: event.ordinal + 1 < instances.length
+            ? instances[event.ordinal + 1].durationSeconds
+            : null,
       ),
     );
   }

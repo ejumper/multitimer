@@ -37,12 +37,27 @@ class RecordingNotifier implements Notifier {
   }
 }
 
-/// Captures every [SoundPlayer.play] call, in order.
+/// Captures every [SoundPlayer] call: [played] in order, the options of
+/// the LAST play, and the [stop] count.
 class RecordingPlayer implements SoundPlayer {
   final List<String> played = [];
+  bool? lastLoop;
+  Duration? lastMaxDuration;
+  int stopCount = 0;
 
   @override
-  Future<void> play(String filePath) async {
+  Future<void> play(
+    String filePath, {
+    bool loop = false,
+    Duration? maxDuration,
+  }) async {
     played.add(filePath);
+    lastLoop = loop;
+    lastMaxDuration = maxDuration;
+  }
+
+  @override
+  Future<void> stop() async {
+    stopCount++;
   }
 }

@@ -98,6 +98,7 @@ void main() {
         intervalName: null,
         ordinal: 0,
         autoFinish: true,
+        nextInstanceDurationSeconds: null, // only instance
       ),
     ]);
   });
@@ -161,8 +162,31 @@ void main() {
         intervalName: 'stretch',
         ordinal: 0,
         autoFinish: true,
+        nextInstanceDurationSeconds: null, // only instance
       ),
     );
+  });
+
+  // The alert carries the NEXT instance's duration (null when last) — the
+  // sound layer cuts one-shot alerts at 75% of it so consecutive alerts can
+  // never overlap.
+  test('alert_carries_next_instance_duration', () {
+    final w = wired([
+      inst(0, seconds: 60, alert: 'a.mp3'),
+      inst(1, seconds: 45),
+      inst(2, seconds: 30, alert: 'c.mp3'),
+    ]);
+    w.session.start();
+    warpBy(secs(61));
+    w.session.settle(clock.current);
+    expect(alerts.events.single.nextInstanceDurationSeconds, 45);
+
+    warpBy(secs(45)); // through instance 2 (no alert) and into 3
+    w.session.settle(clock.current);
+    warpBy(secs(30));
+    w.session.settle(clock.current);
+    expect(alerts.events, hasLength(2));
+    expect(alerts.events.last.nextInstanceDurationSeconds, isNull);
   });
 
   // Advancing a held-at-zero manual instance must not re-alert: the alert

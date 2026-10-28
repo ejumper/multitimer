@@ -10,12 +10,28 @@ import 'adapters/ports.dart';
 /// resolved sound file it is notify-only. The sound is fire-and-forget
 /// (`.catchError`): a broken player or notification daemon must never throw
 /// back into engine logic ([EventSink] contract).
+///
+/// Sound policy:
+///  - AUTO-FINISH instance: play ONCE, hard-cut at 75% of the NEXT instance's
+///    duration (null next = no cut) — consecutive alerts can never overlap;
+///  - MANUALLY complete instance (holds at zero): LOOP the sound until the
+///    interval is completed, with a hard 10-minute cap (if the user let it
+///    go that long they are not hearing it).
+///    [stopAlerts] cuts both immediately — called when the held interval
+///    gets completed (tap-to-continue / Continue / skip / jump) or the run
+///    resets.
 class AlertHandler implements EventSink<PlayAlert> {
   AlertHandler({
     required this.player,
     required this.notifier,
     required this.soundsDir,
   });
+
+  /// Hard cap on a looping (manually complete) alert sound.
+  static const Duration loopCap = Duration(minutes: 10);
+
+  /// Fraction of the NEXT instance's duration a one-shot alert may occupy.
+  static const int cutPercentOfNext = 75;
 
   final SoundPlayer player;
   final Notifier notifier;
@@ -40,7 +56,27 @@ class AlertHandler implements EventSink<PlayAlert> {
     );
     final soundFile = alert.soundFile;
     if (soundFile != null) {
-      unawaited(player.play('$soundsDir/$soundFile').catchError((Object _) {}));
+      final nextSeconds = alert.nextInstanceDurationSeconds;
+      unawaited(
+        player
+            .play(
+              '$soundsDir/$soundFile',
+              loop: manualHold,
+              maxDuration: manualHold
+                  ? loopCap
+                  : (nextSeconds != null
+                        ? Duration(
+                            milliseconds: nextSeconds * cutPercentOfNext * 10,
+                          )
+                        : null),
+            )
+            .catchError((Object _) {}),
+      );
     }
+  }
+
+  /// Cuts any alert sound immediately (see the class doc).
+  void stopAlerts() {
+    unawaited(player.stop().catchError((Object _) {}));
   }
 }
