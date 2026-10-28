@@ -49,6 +49,10 @@ abstract final class AppColors {
 class CrossFadePageTransitionsBuilder extends PageTransitionsBuilder {
   const CrossFadePageTransitionsBuilder();
 
+  /// Exit curve: completes in the first half of the transition — a screen
+  /// going AWAY fades out twice as fast as one coming in.
+  static const Curve _fastOut = Interval(0.0, 0.5, curve: Curves.easeOut);
+
   @override
   Widget buildTransitions<T>(
     PageRoute<T> route,
@@ -58,7 +62,12 @@ class CrossFadePageTransitionsBuilder extends PageTransitionsBuilder {
     Widget child,
   ) {
     return FadeTransition(
-      opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
+      // reverseCurve = the route POPPING (its own exit).
+      opacity: CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOut,
+        reverseCurve: _fastOut,
+      ),
       child: FadeTransition(
         opacity: coverFade(secondaryAnimation),
         child: child,
@@ -72,10 +81,16 @@ class CrossFadePageTransitionsBuilder extends PageTransitionsBuilder {
       (context, animation, secondaryAnimation, allowSnapshotting, child) =>
           FadeTransition(opacity: coverFade(secondaryAnimation), child: child);
 
-  /// The covered route fades OUT as the route above comes in and back IN
-  /// when it pops — the mirror of the incoming fade.
+  /// The covered route fades OUT (double speed) as the route above comes in
+  /// and back IN (normal speed) when it pops — [ReverseAnimation] flips the
+  /// status, so the covered exit lands on `reverseCurve` and the uncover on
+  /// `curve`.
   static Animation<double> coverFade(Animation<double> secondary) =>
-      CurvedAnimation(parent: ReverseAnimation(secondary), curve: Curves.easeOut);
+      CurvedAnimation(
+        parent: ReverseAnimation(secondary),
+        curve: Curves.easeOut,
+        reverseCurve: _fastOut,
+      );
 }
 
 /// App theme: transparent scaffold over the compositor's blur, dark content.
