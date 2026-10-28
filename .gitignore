@@ -10,5 +10,17 @@ multitimer-spec/REFERENCE/
 # --- local tooling ---
 multitimer-spec/WORK/tools/
 
+# --- planner v1 (new-app) build artifacts ---
+**/.dart_tool/
+**/build/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.plugin_symlinks/
+# engine is a package: lockfile not committed (app's lockfile is)
+new-app/packages/*/pubspec.lock
+# licensed fonts + user sounds: local-only assets, never commit
+new-app/apps/planner/assets/fonts/
+new-app/apps/planner/assets/sounds/
+
 # --- scratch ---
 *.log
