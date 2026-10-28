@@ -25,9 +25,14 @@ abstract final class AppColors {
   static const Color lime = Color(0xFFB8FF00);
 
   /// Semi-transparent dark "card" background — legible over compositor blur.
-  /// (black @ ~22%; halved from 0x73 per acceptance — "too high, cut it in
-  /// half". Tunable for legibility.)
-  static const Color card = Color(0x39000000);
+  /// (black @ ~11%; halved twice per acceptance — "still too prominent,
+  /// half again". Tunable for legibility.)
+  static const Color card = Color(0x1D000000);
+
+  /// Border around the card-colored surfaces: the same black, 25% more
+  /// opaque than [card] (acceptance) — a hairline slightly stronger than
+  /// the fill.
+  static const Color cardBorder = Color(0x24000000);
 
   /// Dimmed/disabled content.
   static const Color dimmed = Color(0x66F2F2F2);

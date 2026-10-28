@@ -67,9 +67,11 @@ class EditorScreen extends StatefulWidget {
     '#b8ff00',
   ];
 
-  /// Dark card background used by the row/toolbar containers.
+  /// Dark card background used by the row/toolbar containers — with the
+  /// 25%-more-opaque hairline border (acceptance).
   static const BoxDecoration _cardDecoration = BoxDecoration(
     color: AppColors.card,
+    border: Border.fromBorderSide(BorderSide(color: AppColors.cardBorder)),
     borderRadius: BorderRadius.all(Radius.circular(14)),
   );
 
@@ -211,6 +213,7 @@ class _EditorScreenState extends State<EditorScreen> {
           style: TextButton.styleFrom(
             backgroundColor: AppColors.card,
             foregroundColor: AppColors.text,
+            side: const BorderSide(color: AppColors.cardBorder),
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
             shape: const RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(20)),
@@ -785,7 +788,7 @@ class _EditorScreenState extends State<EditorScreen> {
         border: Border.all(color: _hexColor(def.color), width: 1.4),
         // Interval-color tinted background @ the shared semi-transparent
         // alpha (acceptance: "Color intervals background in the editor").
-        color: _hexColor(def.color).withValues(alpha: 0x39 / 255),
+        color: _hexColor(def.color).withValues(alpha: AppColors.card.a),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1028,8 +1031,8 @@ class _GroupBarPainter extends CustomPainter {
   const _GroupBarPainter();
 
   /// Outline color @ the shared semi-transparent alpha (theme card,
-  /// halved per acceptance).
-  static const Color _fill = Color(0x39F2F2F2);
+  /// halved again per acceptance).
+  static final Color _fill = AppColors.outline.withValues(alpha: AppColors.card.a);
 
   @override
   void paint(Canvas canvas, Size size) {

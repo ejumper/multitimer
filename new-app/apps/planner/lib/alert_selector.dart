@@ -280,9 +280,11 @@ class _BackCircle extends StatelessWidget {
   }
 }
 
-/// Dark card background used by the row containers.
+/// Dark card background used by the row containers — with the
+/// 25%-more-opaque hairline border (acceptance).
 const BoxDecoration _cardDecoration = BoxDecoration(
   color: AppColors.card,
+  border: Border.fromBorderSide(BorderSide(color: AppColors.cardBorder)),
   borderRadius: BorderRadius.all(Radius.circular(14)),
 );
 

@@ -36,6 +36,7 @@ class _RepeatModalState extends State<_RepeatModal> {
       constraints: const BoxConstraints(minWidth: 220),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.all(Radius.circular(16)),
+        side: BorderSide(color: AppColors.cardBorder),
       ),
       child: SizedBox(
         width: 220,

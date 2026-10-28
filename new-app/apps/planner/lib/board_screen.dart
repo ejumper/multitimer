@@ -122,11 +122,16 @@ class BoardScreen extends StatelessWidget {
                 ),
               ),
             ),
-            // Scale the readout down to fit inside the ring at any window
-            // size.
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              child: _readout(snapshot, timerColor),
+            // Scale the readout down to fit INSIDE the tick ring — the old
+            // unconstrained FittedBox let the idle readout overlap the
+            // ticks (acceptance: "time is still too large").
+            SizedBox(
+              width: 236,
+              height: 236,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: _readout(snapshot, timerColor),
+              ),
             ),
           ],
         ),
@@ -242,51 +247,27 @@ class BoardScreen extends StatelessWidget {
       key: const Key('control-row'),
       mainAxisSize: MainAxisSize.min,
       children: [
-        _control(
-          key: const Key('btn-list'),
+        _HoverIconButton(
+          buttonKey: const Key('btn-list'),
           icon: Icons.menu,
-          tooltip: 'Intervals',
           onPressed: () => _showListOverlay(context),
         ),
         const SizedBox(width: 8),
-        _control(
-          key: const Key('btn-reset'),
+        _HoverIconButton(
+          buttonKey: const Key('btn-reset'),
           icon: Icons.close_outlined,
-          tooltip: 'Reset',
           color: AppColors.danger, // destructive (greyscale-UI rule)
           onPressed: () => _showResetDialog(context),
         ),
         const SizedBox(width: 8),
-        _control(
-          key: const Key('btn-skip'),
+        _HoverIconButton(
+          buttonKey: const Key('btn-skip'),
           icon: Icons.chevron_right,
-          tooltip: 'Skip',
           onPressed: canSkip ? () => controller.skipNext() : null,
         ),
       ],
     );
   }
-
-  /// One rounded-card [IconButton] of the control row.
-  Widget _control({
-    required Key key,
-    required IconData icon,
-    required String tooltip,
-    required VoidCallback? onPressed,
-    Color color = AppColors.text,
-  }) => Container(
-    padding: const EdgeInsets.all(6),
-    decoration: const BoxDecoration(
-      color: AppColors.card,
-      borderRadius: BorderRadius.all(Radius.circular(12)),
-    ),
-    child: IconButton(
-      key: key,
-      icon: Icon(icon, size: 26, color: color),
-      tooltip: tooltip,
-      onPressed: onPressed,
-    ),
-  );
 
   /// The interval-list overlay: every instance in order, the current one
   /// highlighted, a tap jumps the cursor there AND closes the overlay.
@@ -301,6 +282,7 @@ class BoardScreen extends StatelessWidget {
           backgroundColor: AppColors.card,
           shape: const RoundedRectangleBorder(
             borderRadius: BorderRadius.all(Radius.circular(16)),
+            side: BorderSide(color: AppColors.cardBorder),
           ),
         child: SizedBox(
           height: 420,
@@ -396,6 +378,10 @@ class BoardScreen extends StatelessWidget {
       builder: (dialogContext) => blurredBackdrop(
         AlertDialog(
           backgroundColor: AppColors.card,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(16)),
+            side: BorderSide(color: AppColors.cardBorder),
+          ),
           title: const Text('Reset timer?'),
           content: const Text(
             'The current run will end and the timer returns to not started.',
@@ -511,8 +497,8 @@ class _DialPainter extends CustomPainter {
   final Color timerColor;
 
   /// Alpha shared with the app's semi-transparent backgrounds (AppColors
-  /// card is 0x39 — halved with it per acceptance).
-  static const double _dimAlpha = 0x39 / 255;
+  /// card's alpha — follows it when halved.
+  static final double _dimAlpha = AppColors.card.a;
 
   /// Elapsed-tick brightness relative to the interval color.
   static const double _dimBrightness = 0.66;
@@ -721,6 +707,53 @@ class _PulseState extends State<_Pulse> with SingleTickerProviderStateMixin {
     opacity: _controller.drive(Tween<double>(begin: 0.35, end: 1.0)),
     child: widget.child,
   );
+}
+
+/// Control-row icon button: NO resting background — a circular HOVER
+/// highlight appears on hover and is "just a touch bigger" than the icon
+/// (acceptance). The hover circle shows even when the action is disabled
+/// (the "next" button was the complaint), and there is no tooltip text.
+class _HoverIconButton extends StatefulWidget {
+  const _HoverIconButton({
+    required this.buttonKey,
+    required this.icon,
+    required this.onPressed,
+    this.color = AppColors.text,
+  });
+
+  /// Lives on the INNER IconButton (tests address the button by key).
+  final Key buttonKey;
+  final IconData icon;
+  final VoidCallback? onPressed;
+  final Color color;
+
+  @override
+  State<_HoverIconButton> createState() => _HoverIconButtonState();
+}
+
+class _HoverIconButtonState extends State<_HoverIconButton> {
+  bool _hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: Container(
+        width: 46,
+        height: 46,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: _hovering ? Colors.white.withValues(alpha: 0.08) : null,
+        ),
+        child: IconButton(
+          key: widget.buttonKey,
+          icon: Icon(widget.icon, size: 26, color: widget.color),
+          onPressed: widget.onPressed,
+        ),
+      ),
+    );
+  }
 }
 
 /// Grey vertical-bar + letters state chip appended to the big line.

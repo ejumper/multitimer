@@ -545,9 +545,11 @@ const List<String> _swatches = [
   '#b8ff00',
 ];
 
-/// Dark card background used by the row/toolbar containers.
+/// Dark card background used by the row/toolbar containers — with the
+/// 25%-more-opaque hairline border (acceptance).
 const BoxDecoration _cardDecoration = BoxDecoration(
   color: AppColors.card,
+  border: Border.fromBorderSide(BorderSide(color: AppColors.cardBorder)),
   borderRadius: BorderRadius.all(Radius.circular(14)),
 );
 
