@@ -9,7 +9,7 @@ import 'adapters/mp3_player.dart';
 import 'adapters/planner_store.dart';
 import 'adapters/system_clock.dart';
 import 'app_controller.dart';
-import 'debug_screen.dart';
+import 'board_screen.dart';
 import 'theme.dart';
 
 Future<void> main() async {
@@ -92,7 +92,7 @@ class PlannerApp extends StatelessWidget {
       title: 'Planner',
       debugShowCheckedModeBanner: false,
       theme: buildPlannerTheme(),
-      home: DebugScreen(controller),
+      home: BoardScreen(controller),
     );
   }
 }

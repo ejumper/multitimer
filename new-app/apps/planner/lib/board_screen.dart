@@ -1,0 +1,395 @@
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:planner_engine/planner_engine.dart';
+
+import 'app_controller.dart';
+import 'editor_placeholder.dart';
+import 'format.dart';
+import 'theme.dart';
+
+/// The main board screen: header, state-driven dial with the readout in its
+/// center, and the next-interval caption below.
+///
+/// Interaction is a single context action dispatched by snapshot state —
+/// start / pause / resume / skip — reachable both by tapping the dial and
+/// by pressing Space. Right-clicking the dial opens the (P4.1) editor.
+///
+/// No menu/gear buttons in the header: multi-board switching and settings
+/// are out of v1 scope.
+class BoardScreen extends StatelessWidget {
+  const BoardScreen(this.controller, {super.key});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: Focus(
+        // Space performs the same context action as a dial tap.
+        autofocus: true,
+        onKeyEvent: _onKeyEvent,
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+              child: ListenableBuilder(
+                listenable: controller,
+                builder: (context, _) => _buildBoard(context),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBoard(BuildContext context) {
+    final snapshot = controller.snapshot;
+    final timerColor = _hexColor(controller.timer.color);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          controller.board.name,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontFamily: AppFonts.ui,
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+            color: AppColors.lightBlue,
+          ),
+        ),
+        const SizedBox(height: 16),
+        _dial(context, snapshot, timerColor),
+        const SizedBox(height: 20),
+        _caption(snapshot),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  /// The dial: tick ring painted around the state-driven readout.
+  Widget _dial(BuildContext context, TimerSnapshot snapshot, Color timerColor) {
+    return GestureDetector(
+      key: const Key('dial'),
+      onTapDown: (_) => dispatchContextAction(),
+      onSecondaryTapDown: (_) => Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => const EditorPlaceholderScreen(),
+        ),
+      ),
+      child: SizedBox(
+        width: 340,
+        height: 340,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Positioned.fill(
+              child: CustomPaint(
+                painter: _DialPainter(
+                  elapsed: _elapsedFraction(snapshot),
+                  timerColor: timerColor,
+                ),
+              ),
+            ),
+            // Scale the readout down to fit inside the ring at any window
+            // size.
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: _readout(snapshot, timerColor),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Fraction (0..1) of the current instance already elapsed — drives the
+  /// tick ring. Zero at notStarted; a held-at-zero awaitingAdvance instance
+  /// is fully elapsed.
+  double _elapsedFraction(TimerSnapshot snapshot) {
+    if (snapshot.state == SessionState.notStarted ||
+        snapshot.ordinal == null ||
+        snapshot.remaining == null) {
+      return 0;
+    }
+    final totalMs =
+        controller.instances[snapshot.ordinal!].durationSeconds * 1000;
+    if (totalMs <= 0) return 0;
+    final elapsed = 1 - snapshot.remaining!.inMilliseconds / totalMs;
+    return elapsed.clamp(0.0, 1.0).toDouble();
+  }
+
+  /// Center readout: the planned `03H : 00M / 00` layout before a run, the
+  /// running countdown (with PAUSED/WAIT state chip) during one.
+  Widget _readout(TimerSnapshot snapshot, Color timerColor) {
+    switch (snapshot.state) {
+      case SessionState.notStarted:
+        final (hours, minutes, seconds) = formatPlannedParts(
+          snapshot.totalPlanned,
+        );
+        return _PlannedReadout(
+          hours: hours,
+          minutes: minutes,
+          seconds: seconds,
+          color: timerColor,
+        );
+      case SessionState.running:
+      case SessionState.paused:
+      case SessionState.awaitingAdvance:
+        return _RunReadout(snapshot: snapshot);
+    }
+  }
+
+  /// `≫ next interval` caption — shown iff an instance follows the cursor
+  /// (at notStarted the first instance is "next").
+  Widget _caption(TimerSnapshot snapshot) {
+    final nextIndex = (snapshot.ordinal ?? -1) + 1;
+    if (nextIndex >= controller.instances.length) {
+      return const SizedBox.shrink();
+    }
+    final next = controller.instances[nextIndex];
+    return Row(
+      key: const Key('caption'),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.double_arrow, size: 18, color: AppColors.lightBlue),
+        const SizedBox(width: 4),
+        Text(
+          '${formatInstanceLabel(next.ordinal, next.name)} - '
+          '${formatDuration(Duration(seconds: next.durationSeconds))}',
+          style: const TextStyle(
+            fontFamily: AppFonts.ui,
+            fontSize: 17,
+            color: AppColors.lightBlue,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// The one context action, dispatched by snapshot state — the dial tap
+  /// and Space both land here.
+  void dispatchContextAction() {
+    switch (controller.snapshot.state) {
+      case SessionState.notStarted:
+        controller.start();
+      case SessionState.running:
+        controller.pause();
+      case SessionState.paused:
+        controller.resume();
+      case SessionState.awaitingAdvance:
+        controller.skipNext();
+    }
+  }
+
+  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
+    // Space down = the context action; key-ups and key-repeat events (which
+    // arrive as [KeyRepeatEvent], not [KeyDownEvent]) are ignored so a held
+    // Space doesn't flap pause/resume.
+    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.space) {
+      dispatchContextAction();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+}
+
+/// `#rrggbb` hex (v1 preset swatches) → opaque [Color].
+Color _hexColor(String hex) =>
+    Color(int.parse(hex.substring(1), radix: 16) | 0xFF000000);
+
+/// Tick ring painter (cribbed from the P0.2 mock's `_DialPainter`): thin
+/// outer ring in the timer color plus 60 round-cap ticks — the elapsed arc
+/// dimmed, the remaining arc in the timer color.
+class _DialPainter extends CustomPainter {
+  const _DialPainter({required this.elapsed, required this.timerColor});
+
+  /// Elapsed fraction (0..1) of the current instance.
+  final double elapsed;
+
+  final Color timerColor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final radius = size.shortestSide / 2;
+
+    // Outer ring.
+    canvas.drawCircle(
+      center,
+      radius - 4,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 5
+        ..color = timerColor,
+    );
+
+    // Tick ring.
+    final tickInner = radius - 26;
+    final tickOuter = radius - 11;
+    final tickPaint = Paint()
+      ..strokeWidth = 3.2
+      ..strokeCap = StrokeCap.round;
+    for (var i = 0; i < 60; i++) {
+      final angle = i * 2 * math.pi / 60 - math.pi / 2;
+      final dir = Offset(math.cos(angle), math.sin(angle));
+      tickPaint.color = (i / 60) < elapsed ? AppColors.dimmed : timerColor;
+      canvas.drawLine(
+        center + dir * tickInner,
+        center + dir * tickOuter,
+        tickPaint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DialPainter oldDelegate) =>
+      oldDelegate.elapsed != elapsed ||
+      oldDelegate.timerColor != timerColor;
+}
+
+/// Not-started readout: `03H : 00M` big with a small seconds subscript —
+/// the mock's `_DialReadout` layout, in the timer color.
+class _PlannedReadout extends StatelessWidget {
+  const _PlannedReadout({
+    required this.hours,
+    required this.minutes,
+    required this.seconds,
+    required this.color,
+  });
+
+  final String hours;
+  final String minutes;
+  final String seconds;
+  final Color color;
+
+  TextStyle _big(double size) => TextStyle(
+    fontFamily: AppFonts.digits,
+    fontWeight: FontWeight.w500,
+    fontSize: size,
+    height: 1.0,
+    color: color,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Text(hours, style: _big(72)),
+        const SizedBox(width: 3),
+        Text('H', style: _big(24)),
+        const SizedBox(width: 8),
+        Text(':', style: _big(72)),
+        const SizedBox(width: 8),
+        Text(minutes, style: _big(72)),
+        const SizedBox(width: 3),
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('M', style: _big(24)),
+            const SizedBox(height: 2),
+            Text(seconds, style: _big(20)),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Run readout: dimmed `hm` total on top, big `mm:ss` with an optional
+/// PAUSED/WAIT chip, a hairline divider, and the current instance label.
+class _RunReadout extends StatelessWidget {
+  const _RunReadout({required this.snapshot});
+
+  final TimerSnapshot snapshot;
+
+  @override
+  Widget build(BuildContext context) {
+    final chip = switch (snapshot.state) {
+      SessionState.paused => const _StateChip('PAUSED'),
+      SessionState.awaitingAdvance => const _StateChip('WAIT'),
+      _ => null,
+    };
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          formatHm(snapshot.totalRemaining),
+          style: const TextStyle(
+            fontFamily: AppFonts.digits,
+            fontWeight: FontWeight.w500,
+            fontSize: 20,
+            height: 1.0,
+            color: AppColors.dimmed,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Text(
+              formatMmSs(snapshot.remaining ?? Duration.zero),
+              style: const TextStyle(
+                fontFamily: AppFonts.digits,
+                fontWeight: FontWeight.w500,
+                fontSize: 60,
+                height: 1.0,
+                color: AppColors.text,
+              ),
+            ),
+            if (chip != null) ...[const SizedBox(width: 12), chip],
+          ],
+        ),
+        const SizedBox(height: 8),
+        const SizedBox(
+          width: 120,
+          child: Divider(thickness: 1, height: 1, color: AppColors.outline),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          formatInstanceLabel(snapshot.ordinal ?? 0, snapshot.currentLabel),
+          style: const TextStyle(
+            fontFamily: AppFonts.ui,
+            fontSize: 17,
+            color: AppColors.dimmed,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Blue vertical-bar + letters state chip appended to the big line.
+class _StateChip extends StatelessWidget {
+  const _StateChip(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(width: 2, height: 34, color: AppColors.blue),
+        const SizedBox(width: 8),
+        Text(
+          label,
+          style: const TextStyle(
+            fontFamily: AppFonts.ui,
+            fontSize: 16,
+            color: AppColors.blue,
+            letterSpacing: 2,
+          ),
+        ),
+      ],
+    );
+  }
+}
