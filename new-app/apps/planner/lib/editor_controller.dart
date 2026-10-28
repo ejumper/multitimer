@@ -109,8 +109,9 @@ class EditorController extends ChangeNotifier {
   /// Appends a new [DefNode] at the END of the roots (fresh UUIDv4, this
   /// timer). Exists for the empty-state add affordance and tests — the "+"
   /// toolbar button routes to the interval editor (P4.3) instead.
+  /// [name] is nullable: a blank label is stored as an unnamed interval.
   void addInterval({
-    required String name,
+    required String? name,
     required String color,
     required int durationSeconds,
     required bool autoFinish,
@@ -129,6 +130,32 @@ class EditorController extends ChangeNotifier {
       ),
     );
     tree = IntervalTree([...tree.roots, node]);
+    notifyListeners();
+  }
+
+  /// Replaces one def's contents (undo step); used by the interval editor's
+  /// back-commit. Throws StateError if [defId] is not a DefNode in the tree
+  /// — absent ids surface [IntervalTree.nodeById]'s [TreeOpException] as
+  /// StateError too — and if [newDef] does not keep that def's id/timerId
+  /// (identity is not editable). Validation runs BEFORE the undo push.
+  void replaceDef(String defId, IntervalDef newDef) {
+    final IntervalNode node;
+    try {
+      node = tree.nodeById(defId);
+    } on TreeOpException {
+      throw StateError('replaceDef: no node with id $defId in the tree');
+    }
+    if (node is! DefNode) {
+      throw StateError('replaceDef: node $defId is not a DefNode');
+    }
+    if (newDef.id != defId || newDef.timerId != node.def.timerId) {
+      throw StateError(
+        'replaceDef: newDef must keep id $defId and timerId '
+        '${node.def.timerId}',
+      );
+    }
+    _pushUndo();
+    tree = IntervalTree(_replaceDefIn(tree.roots, defId, newDef));
     notifyListeners();
   }
 
@@ -313,6 +340,23 @@ class EditorController extends ChangeNotifier {
       [for (final child in children) _nodeWithRepeat(child, groupId, repeatCount)],
     ),
   };
+
+  /// Pure recursive rebuild: a copy of [nodes] where the [DefNode] with
+  /// [defId] carries [newDef]; every other node keeps its contents — groups
+  /// rebuild so their children are visited too (one matching def swaps in
+  /// place, nothing else moves).
+  List<IntervalNode> _replaceDefIn(
+    List<IntervalNode> nodes,
+    String defId,
+    IntervalDef newDef,
+  ) => [
+    for (final node in nodes)
+      switch (node) {
+        DefNode(:final def) => def.id == defId ? DefNode(newDef) : node,
+        GroupNode(:final group, :final children) =>
+          GroupNode(group, _replaceDefIn(children, defId, newDef)),
+      },
+  ];
 
   /// Pops the newest snapshot and restores name/color/tree/selection.
   /// No-op when the stack is empty; never pushes.

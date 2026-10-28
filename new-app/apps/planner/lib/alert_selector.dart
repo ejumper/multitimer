@@ -1,0 +1,300 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+
+import 'adapters/ports.dart';
+import 'theme.dart';
+
+/// The end-alert sound picker (P4.3, UI-REFERENCE item 11): a full-screen
+/// list of the `.mp3` files in the sounds directory — "No alert" first,
+/// then the files alphabetically (compared WITHOUT the extension), each
+/// with a ▶ preview and a checkmark on the current selection.
+///
+/// The listing is captured ONCE at open (rescan happens in
+/// [soundListing]); an empty directory shows an explanatory state pointing
+/// at [soundsDir]. Selection: `stop()` first (a running preview is cut on
+/// every selection change), then the pick is reported via [onSelected] —
+/// selecting does NOT auto-play, only ▶ does; the preview also auto-stops
+/// when the screen is disposed. NOTE: rows do not pop the screen — the
+/// pusher keeps its own copy up to date through [onSelected].
+class AlertSelectorScreen extends StatefulWidget {
+  const AlertSelectorScreen({
+    super.key,
+    required this.soundsDir,
+    required this.soundListing,
+    required this.player,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  /// Sounds directory — previews play `'$soundsDir/$filename'`.
+  final String soundsDir;
+
+  /// Rescan-on-demand file-name listing of [soundsDir].
+  final List<String> Function() soundListing;
+
+  /// Preview player (play + stop hooks).
+  final SoundPlayer player;
+
+  /// Currently selected file name, or null = "No alert".
+  final String? selected;
+
+  /// Fired on every selection change with the new value (null = no alert).
+  final void Function(String?) onSelected;
+
+  @override
+  State<AlertSelectorScreen> createState() => _AlertSelectorScreenState();
+}
+
+class _AlertSelectorScreenState extends State<AlertSelectorScreen> {
+  /// Files captured ONCE at open: `.mp3` only (case-insensitive), sorted
+  /// alphabetically by the name WITHOUT its extension.
+  late final List<String> _files;
+
+  /// Live selection, seeded from [AlertSelectorScreen.selected]: kept
+  /// locally because the pushing screen does not rebuild this route.
+  String? _selected;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = widget.selected;
+    final files = [
+      for (final name in widget.soundListing())
+        if (name.toLowerCase().endsWith('.mp3')) name,
+    ];
+    files.sort((a, b) => _baseName(a).compareTo(_baseName(b)));
+    _files = List<String>.unmodifiable(files);
+  }
+
+  @override
+  void dispose() {
+    // Preview auto-stops on exit.
+    unawaited(widget.player.stop());
+    super.dispose();
+  }
+
+  /// One selection: stop any running preview FIRST (auto-stop on selection
+  /// change), commit locally, report the pick. Selection never auto-plays.
+  void _select(String? file) {
+    unawaited(widget.player.stop());
+    setState(() => _selected = file);
+    widget.onSelected(file);
+  }
+
+  /// ▶ on a row: preview that file (the only way a preview starts).
+  void _preview(String file) {
+    unawaited(widget.player.play('${widget.soundsDir}/$file'));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _header(context),
+                const SizedBox(height: 10),
+                if (_files.isEmpty)
+                  Expanded(child: Center(child: _emptyState()))
+                else
+                  Expanded(child: _list()),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Outlined back circle | centered "End Alert" title.
+  Widget _header(BuildContext context) {
+    return Row(
+      children: [
+        _BackCircle(
+          key: const Key('as-back'),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        const Expanded(
+          child: Text(
+            'End Alert',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: AppFonts.ui,
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              color: AppColors.text,
+            ),
+          ),
+        ),
+        const SizedBox(width: 48), // balances the back circle for centering
+      ],
+    );
+  }
+
+  /// "No alert" first, then one card row per file.
+  Widget _list() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      children: [
+        _noneRow(),
+        const SizedBox(height: 8),
+        for (final file in _files) ...[
+          _fileRow(file),
+          const SizedBox(height: 8),
+        ],
+      ],
+    );
+  }
+
+  /// The null option: tap → onSelected(null); shows the check when nothing
+  /// is selected.
+  Widget _noneRow() {
+    return GestureDetector(
+      key: const Key('as-none'),
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _select(null),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: _cardDecoration,
+        child: Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'No alert',
+                style: TextStyle(
+                  fontFamily: AppFonts.ui,
+                  fontSize: 15,
+                  color: AppColors.text,
+                ),
+              ),
+            ),
+            if (_selected == null)
+              const Icon(Icons.check, size: 20, color: AppColors.lightBlue),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// One file: label (minus extension) | check when selected | ▶ preview.
+  /// Tapping the ROW selects; tapping ▶ only previews — the inner button
+  /// wins the gesture arena over the row's tap.
+  Widget _fileRow(String file) {
+    return GestureDetector(
+      key: Key('as-row-$file'),
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _select(file),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        decoration: _cardDecoration,
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                _baseName(file),
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontFamily: AppFonts.ui,
+                  fontSize: 15,
+                  color: AppColors.text,
+                ),
+              ),
+            ),
+            if (_selected == file)
+              const Icon(Icons.check, size: 20, color: AppColors.lightBlue),
+            IconButton(
+              key: Key('as-play-$file'),
+              icon: const Icon(Icons.play_arrow_outlined),
+              tooltip: 'Preview',
+              onPressed: () => _preview(file),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Empty sounds directory: the explanatory state pointing at the path.
+  Widget _emptyState() {
+    return Column(
+      key: const Key('as-empty'),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Text(
+          'No sounds found',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontFamily: AppFonts.ui,
+            fontSize: 15,
+            color: AppColors.dimmed,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Drop .mp3 files into ${widget.soundsDir} and reopen.',
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontFamily: AppFonts.ui,
+            fontSize: 13,
+            color: AppColors.dimmed,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Circular outlined button — the mock board's `_RoundOutlineButton` style,
+/// used here for the header's back affordance.
+class _BackCircle extends StatelessWidget {
+  const _BackCircle({super.key, required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton(
+      style: OutlinedButton.styleFrom(
+        shape: const CircleBorder(),
+        side: const BorderSide(color: AppColors.outline, width: 1.5),
+        padding: const EdgeInsets.all(12),
+      ),
+      onPressed: onPressed,
+      child: const Icon(Icons.arrow_back, size: 22, color: AppColors.lightBlue),
+    );
+  }
+}
+
+/// Preview stop hook. The app-side port (SoundPlayer in adapters/ports.dart)
+/// declares ONLY `play`; the concrete desktop player also provides `stop()`
+/// to cut a preview short, and the test fakes mirror it. The port is frozen,
+/// so the call is reached dynamically — a play-only implementation (nothing
+/// to stop) is a no-op instead of a crash.
+extension _PreviewStop on SoundPlayer {
+  Future<void> stop() async {
+    final dynamic impl = this;
+    try {
+      await impl.stop();
+    } on NoSuchMethodError {
+      // Play-only implementation — nothing to stop.
+    }
+  }
+}
+
+/// Dark card background used by the row containers.
+const BoxDecoration _cardDecoration = BoxDecoration(
+  color: AppColors.card,
+  borderRadius: BorderRadius.all(Radius.circular(14)),
+);
+
+/// `chime.mp3` → `chime`: the row label / check display drops the extension.
+String _baseName(String file) {
+  final dot = file.lastIndexOf('.');
+  return dot > 0 ? file.substring(0, dot) : file;
+}

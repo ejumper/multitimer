@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:planner_engine/planner_engine.dart';
 
+import 'adapters/ports.dart';
 import 'editor_controller.dart';
 import 'format.dart';
-import 'interval_editor_placeholder.dart';
+import 'interval_editor.dart';
 import 'repeat_modal.dart';
 import 'theme.dart';
 
@@ -25,9 +26,22 @@ import 'theme.dart';
 ///  - self-drops are ignored; the engine's [TreeOpException] (e.g. a group
 ///    dropped into its own subtree) aborts the move silently.
 class EditorScreen extends StatelessWidget {
-  const EditorScreen({super.key, required this.controller, this.onDone});
+  const EditorScreen({
+    super.key,
+    required this.controller,
+    required this.soundsDir,
+    required this.soundListing,
+    required this.player,
+    this.onDone,
+  });
 
   final EditorController controller;
+
+  /// Alert-sounds directory, rescan-on-demand listing, and preview player —
+  /// handed straight to the interval editor's alert selector (P4.3).
+  final String soundsDir;
+  final List<String> Function() soundListing;
+  final SoundPlayer player;
 
   /// Invoked after a successful commit, just before the route pops.
   final VoidCallback? onDone;
@@ -256,10 +270,19 @@ class EditorScreen extends StatelessWidget {
     );
   }
 
-  void _openIntervalEditor(BuildContext context) {
+  /// Opens the interval editor (P4.3): CREATE when [defId] is null (the
+  /// "+" toolbar button and the empty-state affordance), EDIT for the
+  /// tapped chip's def.
+  void _openIntervalEditor(BuildContext context, {String? defId}) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => const IntervalEditorPlaceholderScreen(),
+        builder: (_) => IntervalEditorScreen(
+          controller: controller,
+          defId: defId,
+          soundsDir: soundsDir,
+          soundListing: soundListing,
+          player: player,
+        ),
       ),
     );
   }
@@ -371,7 +394,9 @@ class EditorScreen extends StatelessWidget {
   }
 
   /// One interval: selection circle | chip card (bordered, label left,
-  /// duration right, alert subtitle below).
+  /// duration right, alert subtitle below). The CARD body is tappable →
+  /// edit this def; the selection circle stays independent (it sits
+  /// outside the card, so both gestures never overlap).
   Widget _chipRow(IntervalDef def) {
     return Row(
       key: Key('chip-${def.id}'),
@@ -379,7 +404,18 @@ class EditorScreen extends StatelessWidget {
       children: [
         _selectionCircle(def.id),
         const SizedBox(width: 10),
-        Expanded(child: _chipCard(def)),
+        // Builder: the tap needs a context and _chipRow has none of its
+        // own (same trick as the bracket tap below).
+        Expanded(
+          child: Builder(
+            builder: (context) => GestureDetector(
+              key: Key('chip-tap-${def.id}'),
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _openIntervalEditor(context, defId: def.id),
+              child: _chipCard(def),
+            ),
+          ),
+        ),
       ],
     );
   }

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:planner/editor_controller.dart';
 import 'package:planner/editor_screen.dart';
-import 'package:planner/interval_editor_placeholder.dart';
+import 'package:planner/interval_editor.dart';
 import 'package:planner_engine/planner_engine.dart';
 
 import 'fakes.dart';
@@ -95,7 +95,15 @@ void main() {
 
   Future<void> pumpEditor(WidgetTester tester) async {
     await tester.pumpWidget(
-      MaterialApp(home: EditorScreen(controller: controller, onDone: doneSpy)),
+      MaterialApp(
+        home: EditorScreen(
+          controller: controller,
+          soundsDir: '/sounds',
+          soundListing: () => const ['a.mp3'],
+          player: RecordingPlayer(),
+          onDone: doneSpy,
+        ),
+      ),
     );
   }
 
@@ -276,7 +284,7 @@ void main() {
   });
 
   // 9. Empty tree: the hint shows and the add affordance pushes the
-  //    interval editor stub (P4.3 replaces it).
+  //    real interval editor (P4.3).
   testWidgets('empty_state_hint_and_add_affordance', (tester) async {
     controller.dispose();
     controller = await buildEditor(const IntervalTree([]));
@@ -288,8 +296,8 @@ void main() {
 
     await tester.tap(find.byKey(const Key('empty-add')));
     await tester.pumpAndSettle();
-    expect(find.byType(IntervalEditorPlaceholderScreen), findsOneWidget);
-    expect(find.byKey(const Key('interval-editor-placeholder')), findsOneWidget);
+    expect(find.byType(IntervalEditorScreen), findsOneWidget);
+    expect(find.byKey(const Key('ie-back')), findsOneWidget);
   });
 
   // 10. Group enablement mirrors canGroup: a contiguous sibling run
