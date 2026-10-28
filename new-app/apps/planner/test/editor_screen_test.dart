@@ -55,6 +55,18 @@ void main() {
     ),
   ]);
 
+  /// Compact def builder for the group/ungroup fixtures.
+  DefNode def(String id, {String? name, int seconds = 60}) => DefNode(
+    IntervalDef(
+      id: id,
+      timerId: timer.id,
+      name: name,
+      color: '#0055ff',
+      durationSeconds: seconds,
+      autoFinish: false,
+    ),
+  );
+
   /// Saves [tree] as the timer's definition and builds the editor
   /// controller over it (store and working copy start out identical).
   Future<EditorController> buildEditor(IntervalTree tree) async {
@@ -278,5 +290,204 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(IntervalEditorPlaceholderScreen), findsOneWidget);
     expect(find.byKey(const Key('interval-editor-placeholder')), findsOneWidget);
+  });
+
+  // 10. Group enablement mirrors canGroup: a contiguous sibling run
+  //     ([a, b]) enables the button, a scattered one ([a, c] over
+  //     [a, b, c]) leaves it disabled.
+  testWidgets(
+    'group_button_enabled_for_contiguous_and_disabled_otherwise',
+    (tester) async {
+      controller.dispose();
+      controller = await buildEditor(
+        IntervalTree([def('a'), def('b'), def('c')]),
+      );
+      await pumpEditor(tester);
+
+      IconButton groupButton() =>
+          tester.widget<IconButton>(find.byKey(const Key('tool-group')));
+
+      expect(groupButton().onPressed, isNull); // nothing selected
+
+      await tester.tap(find.byKey(const Key('select-a')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('select-b')));
+      await tester.pump();
+      expect(controller.selection, {'a', 'b'});
+      expect(groupButton().onPressed, isNotNull); // contiguous siblings
+
+      await tester.tap(find.byKey(const Key('select-a'))); // deselect a
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('select-b'))); // deselect b
+      await tester.pump();
+      expect(controller.selection, isEmpty);
+      expect(groupButton().onPressed, isNull);
+
+      await tester.tap(find.byKey(const Key('select-a')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('select-c')));
+      await tester.pump();
+      expect(controller.selection, {'a', 'c'});
+      expect(groupButton().onPressed, isNull); // b sits between them
+    },
+  );
+
+  // 11. Toolbar Group on a single chip: the stepper auto-opens at 1, three
+  //     + taps take it to 4, OK lands the count on the fresh group's badge
+  //     and dismisses the modal (chip a is now wrapped).
+  testWidgets('single_interval_group_repeat_modal_auto_opens', (tester) async {
+    await pumpEditor(tester);
+
+    await tester.tap(find.byKey(const Key('select-a')));
+    await tester.pump();
+    expect(controller.canGroup, isTrue);
+
+    await tester.tap(find.byKey(const Key('tool-group')));
+    await tester.pumpAndSettle();
+
+    final modal = find.byKey(const Key('repeat-modal'));
+    expect(modal, findsOneWidget);
+    expect(
+      find.descendant(of: modal, matching: find.text('1')),
+      findsOneWidget,
+      reason: 'stepper should open at the default count 1',
+    );
+
+    for (var i = 0; i < 3; i++) {
+      await tester.tap(find.byKey(const Key('repeat-plus')));
+      await tester.pump();
+    }
+    expect(
+      find.descendant(of: modal, matching: find.text('4')),
+      findsOneWidget,
+    );
+    expect(
+      tester.widget<Text>(find.byKey(const Key('repeat-value'))).data,
+      '4',
+    );
+
+    await tester.tap(find.byKey(const Key('repeat-ok')));
+    await tester.pumpAndSettle();
+
+    expect(modal, findsNothing);
+    final group = controller.tree.roots
+        .whereType<GroupNode>()
+        .firstWhere((n) => n.children.any((c) => c.id == 'a'));
+    expect(group.group.repeatCount, 4);
+    expect(
+      find.descendant(
+        of: find.byKey(Key('repeat-${group.id}')),
+        matching: find.text('4'),
+      ),
+      findsOneWidget,
+      reason: 'new group badge should carry the confirmed count',
+    );
+    expect(find.byKey(const Key('chip-a')), findsOneWidget);
+  });
+
+  // 12. Tapping a root-level group's bracket reopens the stepper seeded
+  //     with its current count (3); − takes it to 2 and OK updates the
+  //     badge in place.
+  testWidgets('bracket_bar_reopens_repeat_modal', (tester) async {
+    await pumpEditor(tester); // fixture: root group g1, repeat 3
+
+    await tester.tap(find.byKey(const Key('bracket-g1')));
+    await tester.pumpAndSettle();
+
+    final modal = find.byKey(const Key('repeat-modal'));
+    expect(modal, findsOneWidget);
+    expect(controller.selection, {'g1'}); // selectOnly, no undo step
+    expect(
+      find.descendant(of: modal, matching: find.text('3')),
+      findsOneWidget,
+      reason: 'stepper should open at the current count 3',
+    );
+
+    await tester.tap(find.byKey(const Key('repeat-minus')));
+    await tester.pump();
+    expect(
+      find.descendant(of: modal, matching: find.text('2')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const Key('repeat-ok')));
+    await tester.pumpAndSettle();
+
+    expect(modal, findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('repeat-g1')),
+        matching: find.text('2'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      (controller.tree.nodeById('g1') as GroupNode).group.repeatCount,
+      2,
+    );
+  });
+
+  // 13. Inner groups stay unreachable: over [G1{G2{def}}], tapping G2's
+  //     bracket does NOTHING — no modal opens and the selection is
+  //     untouched (only outermost groups respond; MultiTimer mirroring).
+  testWidgets('inner_bracket_tap_ignored', (tester) async {
+    controller.dispose();
+    controller = await buildEditor(
+      IntervalTree([
+        GroupNode(GroupDef(id: 'g1', timerId: timer.id, repeatCount: 1), [
+          GroupNode(GroupDef(id: 'g2', timerId: timer.id, repeatCount: 2), [
+            def('x', name: 'lap'),
+          ]),
+        ]),
+      ]),
+    );
+    await pumpEditor(tester);
+
+    await tester.tap(find.byKey(const Key('bracket-g2')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('repeat-modal')), findsNothing);
+    expect(controller.selection, isEmpty);
+    expect(controller.canUndo, isFalse);
+  });
+
+  // 14. Ungroup toolbar flow: select the root group → button enables →
+  //     one tap dissolves exactly that group — chips promoted to the roots,
+  //     bracket and badge gone, button disabled again (selection cleared).
+  testWidgets('ungroup_toolbar_flow', (tester) async {
+    await pumpEditor(tester); // fixture: a + root group g1{b}
+
+    expect(
+      tester
+          .widget<IconButton>(find.byKey(const Key('tool-ungroup')))
+          .onPressed,
+      isNull,
+    );
+
+    await tester.tap(find.byKey(const Key('select-g1')));
+    await tester.pump();
+    expect(controller.selection, {'g1'});
+    expect(
+      tester
+          .widget<IconButton>(find.byKey(const Key('tool-ungroup')))
+          .onPressed,
+      isNotNull,
+    );
+
+    await tester.tap(find.byKey(const Key('tool-ungroup')));
+    await tester.pump();
+
+    expect(controller.tree.toDebugString(), 'def:a | def:b');
+    expect(find.byKey(const Key('chip-a')), findsOneWidget);
+    expect(find.byKey(const Key('chip-b')), findsOneWidget); // promoted
+    expect(find.byKey(const Key('bracket-g1')), findsNothing);
+    expect(find.byKey(const Key('repeat-g1')), findsNothing); // gone
+    expect(controller.selection, isEmpty);
+    expect(
+      tester
+          .widget<IconButton>(find.byKey(const Key('tool-ungroup')))
+          .onPressed,
+      isNull,
+    );
   });
 }

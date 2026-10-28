@@ -83,6 +83,15 @@ class EditorController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Sets the selection to EXACTLY [nodeId], collapsing any multi-select.
+  /// Like [toggleSelect], selection is view state → no undo step.
+  void selectOnly(String nodeId) {
+    selection
+      ..clear()
+      ..add(nodeId);
+    notifyListeners();
+  }
+
   /// Working-copy rename (undo-pushing).
   void rename(String newName) {
     _pushUndo();
@@ -155,6 +164,155 @@ class EditorController extends ChangeNotifier {
     );
     notifyListeners();
   }
+
+  // ── group / ungroup ───────────────────────────────────────────────────
+  //
+  // Grouping acts on the TOPMOST layer of the selection (selected ids not
+  // nested inside another selected id) and requires that layer to be a run
+  // of CONTIGUOUS siblings — stricter than the engine's
+  // [IntervalTree.grouped], which tolerates non-adjacent siblings by
+  // pulling them together (a UI choice: the toolbar only offers grouping
+  // for adjacent runs). Ungrouping targets ROOT-LEVEL groups only, exactly
+  // one per action: inner groups are unreachable by design until the group
+  // holding them is dissolved (mirrors MultiTimer).
+
+  /// Whether the topmost selection is a non-empty run of contiguous
+  /// siblings — exactly the precondition of [groupSelection].
+  bool get canGroup {
+    final topmost = _topmostSelected();
+    return topmost.isNotEmpty && _areContiguousSiblings(topmost);
+  }
+
+  /// Wraps the topmost selected siblings in a fresh group (repeat 1),
+  /// selects that group, and RETURNS its id so callers can open the repeat
+  /// modal for it. One undo step. Throws [StateError] when ![canGroup].
+  String groupSelection() {
+    final topmost = _topmostSelected();
+    if (topmost.isEmpty || !_areContiguousSiblings(topmost)) {
+      throw StateError(
+        'groupSelection: selection is not a run of contiguous siblings',
+      );
+    }
+    _pushUndo();
+    final newGroupId = newUuidV4();
+    tree = tree.grouped(topmost, newGroupId: newGroupId, repeatCount: 1);
+    selection
+      ..clear()
+      ..add(newGroupId);
+    notifyListeners();
+    return newGroupId;
+  }
+
+  /// Whether a selected id is a root-level [GroupNode] (inner groups are
+  /// unreachable by design — see the group section note above).
+  bool get canUngroup => _selectedRootGroupId() != null;
+
+  /// Dissolves the FIRST selected root-level group (in root order — exactly
+  /// ONE group per action) and clears the selection. One undo step. Throws
+  /// [StateError] when ![canUngroup].
+  void ungroupSelection() {
+    final groupId = _selectedRootGroupId();
+    if (groupId == null) {
+      throw StateError('ungroupSelection: no root-level group selected');
+    }
+    _pushUndo();
+    tree = tree.ungrouped(groupId);
+    selection.clear();
+    notifyListeners();
+  }
+
+  /// Replaces [groupId]'s def with one carrying [repeat] total passes
+  /// (>= 1), keeping its children. One undo step; [repeat] < 1 throws
+  /// [ArgumentError] BEFORE anything is pushed.
+  void setGroupRepeat(String groupId, int repeat) {
+    if (repeat < 1) {
+      throw ArgumentError.value(repeat, 'repeat', 'must be >= 1');
+    }
+    _pushUndo();
+    tree = _treeWithRepeat(tree, groupId, repeat);
+    notifyListeners();
+  }
+
+  /// The selected ids NOT nested inside another selected id — the
+  /// outermost layer of the selection, by walking parents via parentOf.
+  List<String> _topmostSelected() {
+    final topmost = <String>[];
+    for (final id in selection) {
+      var ancestor = tree.parentOf(id);
+      var nested = false;
+      while (ancestor != null) {
+        if (selection.contains(ancestor)) {
+          nested = true;
+          break;
+        }
+        ancestor = tree.parentOf(ancestor);
+      }
+      if (!nested) topmost.add(id);
+    }
+    return topmost;
+  }
+
+  /// Whether [ids] all share one parent AND occupy consecutive positions
+  /// in that parent's child order.
+  bool _areContiguousSiblings(List<String> ids) {
+    if (ids.isEmpty) return false;
+    final parentId = tree.parentOf(ids.first);
+    final indices = <int>[];
+    for (final id in ids) {
+      if (tree.parentOf(id) != parentId) return false; // not siblings
+      indices.add(_siblingIndex(id, parentId));
+    }
+    indices.sort();
+    for (var i = 1; i < indices.length; i++) {
+      if (indices[i] != indices[i - 1] + 1) return false; // not adjacent
+    }
+    return true;
+  }
+
+  /// Position of [id] within [parentId]'s children (null parent = roots).
+  int _siblingIndex(String id, String? parentId) {
+    final siblings = parentId == null
+        ? tree.roots
+        : (tree.nodeById(parentId) as GroupNode).children;
+    return siblings.indexWhere((node) => node.id == id);
+  }
+
+  /// First selected id (in root order) that is a root-level [GroupNode].
+  String? _selectedRootGroupId() {
+    for (final node in tree.roots) {
+      if (node is GroupNode && selection.contains(node.id)) return node.id;
+    }
+    return null;
+  }
+
+  /// Pure recursive rebuild: a copy of [current] where [groupId]'s def
+  /// carries [repeatCount]; every other node (and all children) untouched.
+  IntervalTree _treeWithRepeat(
+    IntervalTree current,
+    String groupId,
+    int repeatCount,
+  ) => IntervalTree([
+    for (final node in current.roots)
+      _nodeWithRepeat(node, groupId, repeatCount),
+  ]);
+
+  IntervalNode _nodeWithRepeat(
+    IntervalNode node,
+    String groupId,
+    int repeatCount,
+  ) => switch (node) {
+    DefNode() => node,
+    GroupNode(:final group, :final children) => GroupNode(
+      group.id == groupId
+          ? GroupDef(
+              id: group.id,
+              timerId: group.timerId,
+              repeatCount: repeatCount,
+            )
+          : group,
+      [for (final child in children) _nodeWithRepeat(child, groupId, repeatCount)],
+    ),
+  };
 
   /// Pops the newest snapshot and restores name/color/tree/selection.
   /// No-op when the stack is empty; never pushes.

@@ -254,4 +254,149 @@ void main() {
     expect(controller.selection, {'b'});
     expect(controller.canUndo, isFalse);
   });
+
+  // 9. Grouping a contiguous run — three sub-scenarios, each over a fresh
+  //    controller: a single node, a middle pair, and a re-group of [c, d]
+  //    after an earlier grouping reshaped the root positions.
+  test('group_one_two_three_consecutive', () async {
+    // (1) [a] → G{a} at the head of the roots; selection follows the new
+    // group so the repeat modal can open for it.
+    controller.dispose();
+    controller = await buildEditor(
+      IntervalTree([def('a'), def('b'), def('c'), def('d')]),
+    );
+    controller.toggleSelect('a');
+    expect(controller.canGroup, isTrue);
+    final g1 = controller.groupSelection();
+    expect(
+      controller.tree.toDebugString(),
+      'group:$g1[1]{def:a} | def:b | def:c | def:d',
+    );
+    expect(controller.selection, {g1});
+
+    // (2) [b, c] → G{b, c} between a and d.
+    controller.dispose();
+    controller = await buildEditor(
+      IntervalTree([def('a'), def('b'), def('c'), def('d')]),
+    );
+    controller.toggleSelect('b');
+    controller.toggleSelect('c');
+    expect(controller.canGroup, isTrue);
+    final g2 = controller.groupSelection();
+    expect(
+      controller.tree.toDebugString(),
+      'def:a | group:$g2[1]{def:b | def:c} | def:d',
+    );
+    expect(controller.selection, {g2});
+
+    // (3) Grouping [a, b] first reshapes the root positions; the shifted
+    // [c, d] run is still contiguous and groups as a third group.
+    controller.dispose();
+    controller = await buildEditor(
+      IntervalTree([def('a'), def('b'), def('c'), def('d')]),
+    );
+    controller.toggleSelect('a');
+    controller.toggleSelect('b');
+    final g3 = controller.groupSelection();
+    controller.selectOnly('c');
+    controller.toggleSelect('d');
+    expect(controller.canGroup, isTrue);
+    final g4 = controller.groupSelection();
+    expect(
+      controller.tree.toDebugString(),
+      'group:$g3[1]{def:a | def:b} | group:$g4[1]{def:c | def:d}',
+    );
+    expect(controller.selection, {g4});
+  });
+
+  // 10. Scattered selections are NOT groupable: [a, c] over [a, b, c]
+  //     fails canGroup, and groupSelection throws before pushing undo.
+  test('group_rejects_non_contiguous', () async {
+    controller.dispose();
+    controller = await buildEditor(
+      IntervalTree([def('a'), def('b'), def('c')]),
+    );
+
+    controller.toggleSelect('a');
+    controller.toggleSelect('c'); // b sits between them
+    expect(controller.canGroup, isFalse);
+    expect(() => controller.groupSelection(), throwsStateError);
+    expect(controller.canUndo, isFalse); // rejected before any push
+    expect(controller.tree.toDebugString(), 'def:a | def:b | def:c');
+  });
+
+  // 11. Ungroup targets the OUTERMOST selected group only: an inner group
+  //     is unreachable while its parent holds it; once the outer group is
+  //     dissolved the inner one is root-level and can be ungrouped too.
+  test('ungroup_outermost_only', () async {
+    controller.dispose();
+    controller = await buildEditor(
+      IntervalTree([
+        groupOf('g1', [def('a'), groupOf('g2', [def('b')])]),
+      ]),
+    );
+
+    controller.selectOnly('g2'); // inner group — unreachable by design
+    expect(controller.canUngroup, isFalse);
+    expect(() => controller.ungroupSelection(), throwsStateError);
+    expect(controller.canUndo, isFalse); // rejected before any push
+
+    controller.selectOnly('g1');
+    expect(controller.canUngroup, isTrue);
+    controller.ungroupSelection();
+    expect(controller.tree.toDebugString(), 'def:a | group:g2[1]{def:b}');
+    expect(controller.tree.parentOf('g2'), isNull); // g2 promoted to root
+    expect(controller.selection, isEmpty);
+
+    controller.selectOnly('g2'); // now root-level
+    expect(controller.canUngroup, isTrue);
+    controller.ungroupSelection();
+    expect(controller.tree.toDebugString(), 'def:a | def:b');
+  });
+
+  // 12. setGroupRepeat rebuilds the group def in place (children kept),
+  //     rejects repeat < 1 before pushing, and undoes back to the
+  //     original count in one step.
+  test('set_group_repeat_is_undoable', () async {
+    controller.dispose();
+    controller = await buildEditor(
+      IntervalTree([groupOf('g', [def('a'), def('b')])]),
+    );
+
+    expect(() => controller.setGroupRepeat('g', 0), throwsArgumentError);
+    expect(controller.canUndo, isFalse); // validation throws before push
+
+    controller.setGroupRepeat('g', 4);
+    final group = controller.tree.nodeById('g') as GroupNode;
+    expect(group.group.repeatCount, 4);
+    expect(group.children.map((n) => n.id), ['a', 'b']); // children kept
+    expect(controller.canUndo, isTrue);
+
+    controller.undo();
+    final restored = controller.tree.nodeById('g') as GroupNode;
+    expect(restored.group.repeatCount, 1); // back to the original
+    expect(controller.canUndo, isFalse);
+  });
+
+  // 13. Mixed selection {G1, b} with b INSIDE G1: only the topmost id is
+  //     grouped — the fresh group wraps G1 itself (nested brackets).
+  test('group_mixed_topmost_wins', () async {
+    controller.dispose();
+    controller = await buildEditor(
+      IntervalTree([groupOf('g1', [def('a'), def('b')])]),
+    );
+
+    controller.toggleSelect('g1');
+    controller.toggleSelect('b'); // b sits inside g1
+    expect(controller.canGroup, isTrue);
+
+    final outer = controller.groupSelection();
+    expect(outer, isNot('g1'));
+    expect(
+      controller.tree.toDebugString(),
+      'group:$outer[1]{group:g1[1]{def:a | def:b}}',
+    );
+    expect(controller.selection, {outer});
+    expect(controller.tree.parentOf('g1'), outer);
+  });
 }

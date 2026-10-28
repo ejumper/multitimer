@@ -4,6 +4,7 @@ import 'package:planner_engine/planner_engine.dart';
 import 'editor_controller.dart';
 import 'format.dart';
 import 'interval_editor_placeholder.dart';
+import 'repeat_modal.dart';
 import 'theme.dart';
 
 /// The interval-timer editor screen (P4.1) — UI-REFERENCE items 5/9/10:
@@ -191,9 +192,11 @@ class EditorScreen extends StatelessWidget {
     );
   }
 
-  /// Toolbar: add (→ interval editor, P4.3) · duplicate · delete · undo.
-  /// Duplicate/delete need a selection; undo needs history — all mirrored
-  /// live because the whole screen rebuilds on every notify.
+  /// Toolbar: add (→ interval editor, P4.3) · duplicate · delete · undo ·
+  /// group · ungroup. Duplicate/delete need a selection; undo needs
+  /// history; group needs a contiguous sibling run; ungroup a selected
+  /// root-level group — all mirrored live because the whole screen
+  /// rebuilds on every notify.
   Widget _toolbar(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -229,6 +232,25 @@ class EditorScreen extends StatelessWidget {
             tooltip: 'Undo',
             onPressed: controller.canUndo ? controller.undo : null,
           ),
+          IconButton(
+            key: const Key('tool-group'),
+            icon: const Icon(Icons.layers_outlined),
+            tooltip: 'Group',
+            // Grouping needs a run of CONTIGUOUS siblings — stricter than
+            // the engine's grouped op, which tolerates non-adjacent
+            // siblings by pulling them together (UI choice).
+            onPressed: controller.canGroup
+                ? () => _groupTapped(context)
+                : null,
+          ),
+          IconButton(
+            key: const Key('tool-ungroup'),
+            icon: const Icon(Icons.layers_clear),
+            tooltip: 'Ungroup',
+            onPressed: controller.canUngroup
+                ? controller.ungroupSelection
+                : null,
+          ),
         ],
       ),
     );
@@ -240,6 +262,32 @@ class EditorScreen extends StatelessWidget {
         builder: (_) => const IntervalEditorPlaceholderScreen(),
       ),
     );
+  }
+
+  /// Toolbar "Group": wrap the topmost selection in a fresh group (repeat
+  /// 1), then open the repeat stepper for it (UI-REFERENCE item 8) and
+  /// apply the confirmed pass count.
+  Future<void> _groupTapped(BuildContext context) async {
+    final groupId = controller.groupSelection();
+    if (!context.mounted) return;
+    final repeat = await showRepeatModal(context, initial: 1);
+    if (repeat != null && context.mounted) {
+      controller.setGroupRepeat(groupId, repeat);
+    }
+  }
+
+  /// Bracket-bar tap → reopen the stepper for that group, seeded with its
+  /// current count. Documented MultiTimer-mirroring decision: ONLY
+  /// root-level groups respond — an inner group's bracket does NOTHING
+  /// (parent != null); inner groups become reachable only after the group
+  /// holding them is ungrouped.
+  Future<void> _bracketTapped(BuildContext context, GroupDef group) async {
+    if (controller.tree.parentOf(group.id) != null) return; // inner: no-op
+    controller.selectOnly(group.id);
+    final repeat = await showRepeatModal(context, initial: group.repeatCount);
+    if (repeat != null && context.mounted) {
+      controller.setGroupRepeat(group.id, repeat);
+    }
   }
 
   /// The interval list: recursive over the working tree's roots.
@@ -399,8 +447,9 @@ class EditorScreen extends StatelessWidget {
   }
 
   /// One group: selection circle | 26px bracket column (repeat-count badge
-  /// on top) | the children stacked inside, recursively — so nested groups
-  /// stack their bracket columns further right (UI-REFERENCE items 9–10).
+  /// on top, tappable bar → repeat stepper, see [_bracketTapped]) | the
+  /// children stacked inside, recursively — so nested groups stack their
+  /// bracket columns further right (UI-REFERENCE items 9–10).
   Widget _groupRow(GroupDef group, List<IntervalNode> children) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -416,47 +465,57 @@ class EditorScreen extends StatelessWidget {
               children: [
                 SizedBox(
                   width: 26,
-                  child: Stack(
-                    children: [
-                      // Rounded-left bracket glyph, below the count badge.
-                      Positioned.fill(
-                        child: Padding(
-                          padding: const EdgeInsets.only(top: 20),
-                          child: CustomPaint(painter: _BracketPainter()),
-                        ),
+                  // Builder: the bracket tap needs a context and _groupRow
+                  // has none of its own; opaque so the bare glyph area is
+                  // hittable where no child covers the tap point.
+                  child: Builder(
+                    builder: (context) => GestureDetector(
+                      key: Key('bracket-${group.id}'),
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => _bracketTapped(context, group),
+                      child: Stack(
+                        children: [
+                          // Rounded-left bracket glyph, below the count badge.
+                          Positioned.fill(
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 20),
+                              child: CustomPaint(painter: _BracketPainter()),
+                            ),
+                          ),
+                          // Repeat-count badge at the bracket's top-left.
+                          Positioned(
+                            left: 0,
+                            top: 0,
+                            child: Container(
+                              key: Key('repeat-${group.id}'),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                borderRadius: const BorderRadius.all(
+                                  Radius.circular(5),
+                                ),
+                                border: Border.all(
+                                  color: AppColors.outline,
+                                  width: 1.2,
+                                ),
+                                color: AppColors.card,
+                              ),
+                              child: Text(
+                                '${group.repeatCount}',
+                                style: const TextStyle(
+                                  fontFamily: AppFonts.digits,
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: 13,
+                                  color: AppColors.text,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      // Repeat-count badge at the bracket's top-left.
-                      Positioned(
-                        left: 0,
-                        top: 0,
-                        child: Container(
-                          key: Key('repeat-${group.id}'),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            borderRadius: const BorderRadius.all(
-                              Radius.circular(5),
-                            ),
-                            border: Border.all(
-                              color: AppColors.outline,
-                              width: 1.2,
-                            ),
-                            color: AppColors.card,
-                          ),
-                          child: Text(
-                            '${group.repeatCount}',
-                            style: const TextStyle(
-                              fontFamily: AppFonts.digits,
-                              fontWeight: FontWeight.w500,
-                              fontSize: 13,
-                              color: AppColors.text,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
