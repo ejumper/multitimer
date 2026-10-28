@@ -37,7 +37,9 @@ class AppController extends ChangeNotifier {
   final List<String> Function() soundListing;
 
   late final Board board;
-  late final IntervalTimer timer;
+  // Not final: [reload] re-fetches the entity so name/color edits apply
+  // without an app restart.
+  late IntervalTimer timer;
   late List<IntervalInstance> instances;
   late RunEventProcessor processor;
   late TimerSession session;
@@ -82,8 +84,13 @@ class AppController extends ChangeNotifier {
 
   /// Re-reads the timer's definitions from the store and rebuilds the
   /// session (steps 3–5 of [init]) — keeps defs fresh after edits; the run
-  /// state resets to [SessionState.notStarted].
+  /// state resets to [SessionState.notStarted]. The timer ENTITY is
+  /// re-fetched too: the editor's commit updates name and color in the
+  /// store, and the board reads both straight off [timer] — without this
+  /// the dial color would stay stale until an app restart.
   Future<void> reload() async {
+    final timers = await store.timersInBoard(board.id);
+    timer = timers.firstWhere((t) => t.id == timer.id, orElse: () => timer);
     await _buildSession();
     notifyListeners();
   }

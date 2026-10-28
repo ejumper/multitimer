@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:planner_engine/planner_engine.dart';
@@ -114,7 +115,8 @@ class BoardScreen extends StatelessWidget {
             Positioned.fill(
               child: CustomPaint(
                 painter: _DialPainter(
-                  elapsed: _elapsedFraction(snapshot),
+                  elapsed: _overallProgress(snapshot),
+                  segments: _timelineSegments(),
                   timerColor: timerColor,
                 ),
               ),
@@ -131,20 +133,50 @@ class BoardScreen extends StatelessWidget {
     );
   }
 
-  /// Fraction (0..1) of the current instance already elapsed — drives the
-  /// tick ring. Zero at notStarted; a held-at-zero awaitingAdvance instance
-  /// is fully elapsed.
-  double _elapsedFraction(TimerSnapshot snapshot) {
+  /// The whole-timer timeline as color segments: fractional spans (0..1 of
+  /// the total duration), one per flattened instance in its interval color
+  /// (repeats expand to repeated segments). Empty timer → empty list (the
+  /// painter falls back to the timer color).
+  List<({double start, double end, Color color})> _timelineSegments() {
+    final instances = controller.instances;
+    final total = instances.fold<int>(0, (s, i) => s + i.durationSeconds);
+    if (total <= 0) return const [];
+    final segments = <({double start, double end, Color color})>[];
+    var acc = 0;
+    for (final inst in instances) {
+      final start = acc / total;
+      acc += inst.durationSeconds;
+      segments.add((
+        start: start,
+        end: acc / total,
+        color: _hexColor(inst.color),
+      ));
+    }
+    return segments;
+  }
+
+  /// Fraction (0..1) of the WHOLE timer already elapsed — drives the tick
+  /// ring's dim/bright boundary: completed instances plus the current
+  /// instance's elapsed part. Zero at notStarted / after a reset; a
+  /// held-at-zero awaitingAdvance instance counts as fully elapsed.
+  double _overallProgress(TimerSnapshot snapshot) {
     if (snapshot.state == SessionState.notStarted ||
         snapshot.ordinal == null ||
-        snapshot.remaining == null) {
+        controller.instances.isEmpty) {
       return 0;
     }
+    final instances = controller.instances;
     final totalMs =
-        controller.instances[snapshot.ordinal!].durationSeconds * 1000;
+        instances.fold<int>(0, (s, i) => s + i.durationSeconds) * 1000;
     if (totalMs <= 0) return 0;
-    final elapsed = 1 - snapshot.remaining!.inMilliseconds / totalMs;
-    return elapsed.clamp(0.0, 1.0).toDouble();
+    var doneMs = 0;
+    for (var i = 0; i < snapshot.ordinal!; i++) {
+      doneMs += instances[i].durationSeconds * 1000;
+    }
+    final curMs = instances[snapshot.ordinal!].durationSeconds * 1000;
+    final remainingMs = snapshot.remaining?.inMilliseconds ?? curMs;
+    doneMs += (curMs - remainingMs).clamp(0, curMs);
+    return (doneMs / totalMs).clamp(0.0, 1.0).toDouble();
   }
 
   /// Center readout: the planned `03H : 00M / 00` layout before a run, the
@@ -439,16 +471,37 @@ class BoardScreen extends StatelessWidget {
 Color _hexColor(String hex) =>
     Color(int.parse(hex.substring(1), radix: 16) | 0xFF000000);
 
-/// Tick ring painter (cribbed from the P0.2 mock's `_DialPainter`): thin
-/// outer ring in the timer color plus 60 round-cap ticks — the elapsed arc
-/// dimmed, the remaining arc in the timer color.
+/// Tick ring painter: thin outer ring in the TIMER color plus 60
+/// round-cap ticks spanning the WHOLE timer — each tick takes the color of
+/// the timeline segment (interval instance) it falls into, so the ring is
+/// a color map of the entire run (short intervals in long timers may land
+/// on zero ticks — accepted trade-off of the fixed 60-tick resolution).
+/// Ticks at or before the progress boundary are elapsed: drawn at the
+/// universal semi-transparent alpha (theme card) and 66% brightness —
+/// dimmed but still in their interval color, so the dim/bright edge marks
+/// "now" and the colors map the whole run.
 class _DialPainter extends CustomPainter {
-  const _DialPainter({required this.elapsed, required this.timerColor});
+  const _DialPainter({
+    required this.elapsed,
+    required this.segments,
+    required this.timerColor,
+  });
 
-  /// Elapsed fraction (0..1) of the current instance.
+  /// Elapsed fraction (0..1) of the whole timer.
   final double elapsed;
 
+  /// Timeline segments: fractional spans of the total + interval color.
+  final List<({double start, double end, Color color})> segments;
+
+  /// Ring color — also the tick fallback when there are no segments.
   final Color timerColor;
+
+  /// Alpha shared with the app's semi-transparent backgrounds (AppColors
+  /// card is 0x73).
+  static const double _dimAlpha = 0x73 / 255;
+
+  /// Elapsed-tick brightness relative to the interval color.
+  static const double _dimBrightness = 0.66;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -465,16 +518,18 @@ class _DialPainter extends CustomPainter {
         ..color = timerColor,
     );
 
-    // Tick ring.
+    // Tick ring: whole-timer color map; elapsed ticks dimmed.
     final tickInner = radius - 26;
     final tickOuter = radius - 11;
     final tickPaint = Paint()
       ..strokeWidth = 3.2
       ..strokeCap = StrokeCap.round;
     for (var i = 0; i < 60; i++) {
+      final frac = (i + 0.5) / 60;
       final angle = i * 2 * math.pi / 60 - math.pi / 2;
       final dir = Offset(math.cos(angle), math.sin(angle));
-      tickPaint.color = (i / 60) < elapsed ? AppColors.dimmed : timerColor;
+      final color = _colorAt(frac);
+      tickPaint.color = frac < elapsed ? _dim(color) : color;
       canvas.drawLine(
         center + dir * tickInner,
         center + dir * tickOuter,
@@ -483,10 +538,30 @@ class _DialPainter extends CustomPainter {
     }
   }
 
+  /// The interval color at timeline fraction [frac] — tick midpoint lookup,
+  /// no half-ticks at segment boundaries.
+  Color _colorAt(double frac) {
+    for (final s in segments) {
+      if (frac >= s.start && frac < s.end) return s.color;
+    }
+    return segments.isEmpty ? timerColor : segments.last.color;
+  }
+
+  /// Elapsed-tick color: 66% brightness + the shared semi-transparent
+  /// alpha (over the transparent window this blends with the desktop).
+  Color _dim(Color color) {
+    final hsl = HSLColor.fromColor(color);
+    return hsl
+        .withLightness((hsl.lightness * _dimBrightness).clamp(0.0, 1.0))
+        .toColor()
+        .withValues(alpha: _dimAlpha);
+  }
+
   @override
   bool shouldRepaint(covariant _DialPainter oldDelegate) =>
       oldDelegate.elapsed != elapsed ||
-      oldDelegate.timerColor != timerColor;
+      oldDelegate.timerColor != timerColor ||
+      !listEquals(oldDelegate.segments, segments);
 }
 
 /// Not-started readout: `03H : 00M` big with a small seconds subscript —

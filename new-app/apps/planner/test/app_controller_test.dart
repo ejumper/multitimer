@@ -361,4 +361,15 @@ void main() {
     c.dispose();
     await store.close();
   });
+
+  /// The timer ENTITY is re-fetched on reload — without it the board's
+  /// dial color (and name) stayed stale until an app restart.
+  test('reload_picks_up_timer_color_change', () async {
+    await controller.init();
+    await store.updateTimer(controller.timer.id, color: '#ff00b1');
+
+    await controller.reload();
+
+    expect(controller.timer.color, '#ff00b1');
+  });
 }

@@ -456,4 +456,81 @@ void main() {
     controller.dispose();
     await store.close();
   });
+
+  /// The dial painter's inputs: the tick ring maps the WHOLE timer as
+  /// per-interval color segments (fractions of total duration).
+  testWidgets('dial_ticks_map_whole_timer_by_interval_color', (tester) async {
+    await buildFixture();
+    await store.saveTree(
+      controller.timer.id,
+      IntervalTree([
+        DefNode(
+          IntervalDef(
+            id: 'x',
+            timerId: controller.timer.id,
+            name: 'warmup',
+            color: '#ff00b1',
+            durationSeconds: 60,
+            autoFinish: true,
+          ),
+        ),
+        DefNode(
+          IntervalDef(
+            id: 'y',
+            timerId: controller.timer.id,
+            name: 'run',
+            color: '#4800ff',
+            durationSeconds: 60,
+            autoFinish: true,
+          ),
+        ),
+      ]),
+      eventKind: 'tree.save',
+    );
+    await controller.reload();
+    await pumpBoard(tester);
+
+    final painter = tester
+        .widget<CustomPaint>(
+          find.descendant(
+            of: find.byKey(const Key('dial')),
+            matching: find.byType(CustomPaint),
+          ),
+        )
+        .painter as dynamic;
+    expect(painter.segments.length, 2);
+    expect(painter.segments[0].start, 0.0);
+    expect(painter.segments[0].end, 0.5);
+    expect(painter.segments[1].start, 0.5);
+    expect(painter.segments[1].end, 1.0);
+    expect((painter.segments[0].color as Color).toARGB32(), 0xFFFF00B1);
+    expect((painter.segments[1].color as Color).toARGB32(), 0xFF4800FF);
+    expect(painter.elapsed, 0.0); // notStarted: nothing dimmed yet
+
+    controller.dispose();
+    await store.close();
+  });
+
+  /// Progress spans the WHOLE timer: 30s into the 90s fixture = 1/3, not
+  /// the old per-interval fraction.
+  testWidgets('dial_progress_spans_whole_timer', (tester) async {
+    await pumpBoard(tester);
+    expect(controller.start(), isTrue);
+    clock.current = clock.current.add(const Duration(seconds: 30));
+    await controller.tick();
+    await tester.pump();
+
+    final painter = tester
+        .widget<CustomPaint>(
+          find.descendant(
+            of: find.byKey(const Key('dial')),
+            matching: find.byType(CustomPaint),
+          ),
+        )
+        .painter as dynamic;
+    expect(painter.elapsed, moreOrLessEquals(30 / 90, epsilon: 0.001));
+
+    controller.dispose();
+    await store.close();
+  });
 }
