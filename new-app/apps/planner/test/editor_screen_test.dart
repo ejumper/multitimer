@@ -363,6 +363,76 @@ void main() {
     expect(controller.selection, isEmpty);
   });
 
+  testWidgets('two_simultaneous_drags_are_safe', (tester) async {
+    await pumpEditor(tester);
+    final a = tester.getCenter(find.byKey(const Key('chip-a')));
+    final b = tester.getCenter(find.byKey(const Key('chip-b')));
+
+    // Two pointers at once (trackpad palm + finger): the second drag takes
+    // over — the first drag's floating overlay entry must be cleaned up,
+    // not leaked (a leaked entry rebuilds with no active drag and throws
+    // "Null check operator" every frame — the "went haywire" bug).
+    final g1 = await tester.startGesture(a);
+    await tester.pump();
+    await g1.moveTo(a + const Offset(0, 20));
+    await tester.pump();
+    final g2 = await tester.startGesture(b);
+    await tester.pump();
+    await g2.moveTo(b + const Offset(0, 20)); // takes over the drag
+    await tester.pump();
+    expect(find.byKey(const Key('drag-slot')), findsOneWidget);
+
+    await g2.up(); // the takeover drag commits…
+    await tester.pump();
+    await g1.up(); // …the stale end must be a harmless no-op
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('drag-slot')), findsNothing);
+    expect(
+      controller.tree.toDebugString(),
+      'def:a | def:b',
+      reason: 'exactly ONE move (b out of g1; emptied group dissolves)',
+    );
+
+    // A fresh drag forces the overlay to rebuild every entry — with a
+    // leaked entry from the two-pointer episode this is where the
+    // "Null check operator" crash surfaces.
+    await dragRowTo(tester, 'chip-a', a + const Offset(0, 30));
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const Key('drag-slot')), findsNothing);
+  });
+
+  testWidgets('stale_recognizer_end_does_not_commit_active_drag',
+      (tester) async {
+    await pumpEditor(tester);
+    final a = tester.getCenter(find.byKey(const Key('chip-a')));
+    final b = tester.getCenter(find.byKey(const Key('chip-b')));
+
+    final g1 = await tester.startGesture(a);
+    await tester.pump();
+    await g1.moveTo(a + const Offset(0, 20));
+    await tester.pump();
+    final g2 = await tester.startGesture(b);
+    await tester.pump();
+    await g2.moveTo(b + const Offset(0, 20)); // takes over
+    await tester.pump();
+
+    await g1.up(); // the STALE recognizer's end must neither commit nor clear
+    await tester.pump();
+    expect(
+      find.byKey(const Key('drag-slot')),
+      findsOneWidget,
+      reason: 'the active drag survives the stale recognizer ending',
+    );
+    await g2.up();
+    await tester.pumpAndSettle();
+    expect(
+      controller.tree.toDebugString(),
+      'def:a | def:b',
+      reason: 'exactly ONE move — the stale end did not double-commit',
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   // 7. Done: commits the working copy, fires onDone, and the store has
   //    the new name + an editor.commit event.
   testWidgets('done_commits_and_calls_ondone', (tester) async {

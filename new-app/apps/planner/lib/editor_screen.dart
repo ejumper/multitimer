@@ -461,9 +461,9 @@ class _EditorScreenState extends State<EditorScreen> {
       key: Key('row-${node.id}'),
       onVerticalDragDown: (d) => _pendingGrab = d.globalPosition,
       onVerticalDragStart: (d) => _dragStart(node, d.globalPosition),
-      onVerticalDragUpdate: (d) => _dragUpdate(d.globalPosition),
-      onVerticalDragEnd: (_) => _dragEnd(),
-      onVerticalDragCancel: _dragAbort,
+      onVerticalDragUpdate: (d) => _dragUpdate(node.id, d.globalPosition),
+      onVerticalDragEnd: (_) => _dragEnd(node.id),
+      onVerticalDragCancel: () => _dragAbort(node.id),
       child: keyed ? KeyedSubtree(key: _keyFor(node.id), child: row) : row,
     );
   }
@@ -486,6 +486,14 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   void _dragStart(IntervalNode node, Offset global) {
+    if (_drag != null) {
+      // A second pointer (trackpad palm + finger) or a nested recognizer
+      // started a drag while one is live: the new drag takes over — but the
+      // previous one MUST be cleaned up first, or its floating overlay
+      // entry leaks and keeps rebuilding with no active drag (the
+      // "Null check operator" haywire crash).
+      _cleanupDrag();
+    }
     final rect = _rectOf(node.id);
     if (rect == null) return;
     final grabDy = (_pendingGrab ?? global).dy - rect.top;
@@ -498,8 +506,10 @@ class _EditorScreenState extends State<EditorScreen> {
     Overlay.of(context).insert(_float!);
   }
 
-  void _dragUpdate(Offset global) {
-    if (_drag == null) return;
+  void _dragUpdate(String nodeId, Offset global) {
+    // Ownership guard: recognizers that lost the arena (or belong to a
+    // replaced drag) still deliver events — only the live drag may act.
+    if (_drag?.node.id != nodeId) return;
     setState(() {
       _pointer = global;
       _target = _slotAt(global);
@@ -508,12 +518,14 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   /// Drop: apply the slot as one move + clear the selection. A null slot or
-  /// a rejected move snaps back with no change.
-  void _dragEnd() {
-    final drag = _drag;
+  /// a rejected move snaps back with no change. Foreign/stale recognizers
+  /// (see [_dragUpdate]) may not commit the live drag.
+  void _dragEnd(String nodeId) {
+    if (_drag?.node.id != nodeId) return;
+    final drag = _drag!;
     final slot = _target;
     _cleanupDrag();
-    if (drag == null || slot == null) return;
+    if (slot == null) return;
     try {
       var index = slot.index;
       if (controller.tree.parentOf(drag.node.id) == slot.parentId &&
@@ -531,8 +543,13 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
-  /// Cancel (e.g. the recognizer lost the arena mid-gesture): no change.
-  void _dragAbort() => _cleanupDrag();
+  /// Cancel (recognizer lost the arena, pointer cancelled): no change.
+  /// Ownership-guarded like [_dragEnd] — a losing nested row's cancel must
+  /// not abort the live drag.
+  void _dragAbort(String nodeId) {
+    if (_drag?.node.id != nodeId) return;
+    _cleanupDrag();
+  }
 
   void _cleanupDrag() {
     _float?.remove();
@@ -546,8 +563,11 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   /// The lifted row floating under the pointer (X locked to its column).
+  /// Null-safe: an overlay entry removed during a frame can still build
+  /// once in that frame — it must never crash on a late build.
   Widget _buildFloat(BuildContext context) {
-    final drag = _drag!;
+    final drag = _drag;
+    if (drag == null) return const SizedBox.shrink();
     final row = switch (drag.node) {
       DefNode(:final def) => _chipRow(def),
       GroupNode(:final group, :final children) =>
