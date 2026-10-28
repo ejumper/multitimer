@@ -5,7 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:planner_engine/planner_engine.dart';
 
 import 'app_controller.dart';
-import 'editor_placeholder.dart';
+import 'editor_controller.dart';
+import 'editor_screen.dart';
 import 'format.dart';
 import 'theme.dart';
 
@@ -83,11 +84,24 @@ class BoardScreen extends StatelessWidget {
     return GestureDetector(
       key: const Key('dial'),
       onTapDown: (_) => dispatchContextAction(),
-      onSecondaryTapDown: (_) => Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => const EditorPlaceholderScreen(),
-        ),
-      ),
+      onSecondaryTapDown: (_) async {
+        // Right-click opens the editor over a freshly loaded tree; Done in
+        // the editor commits and reloads the board's session (onDone).
+        final tree = await controller.store.loadTree(controller.timer.id);
+        if (!context.mounted) return;
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => EditorScreen(
+              controller: EditorController(
+                store: controller.store,
+                timer: controller.timer,
+                initialTree: tree,
+              ),
+              onDone: () => controller.reload(),
+            ),
+          ),
+        );
+      },
       child: SizedBox(
         width: 340,
         height: 340,

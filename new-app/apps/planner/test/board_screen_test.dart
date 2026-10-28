@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:planner/app_controller.dart';
 import 'package:planner/board_screen.dart';
-import 'package:planner/editor_placeholder.dart';
+import 'package:planner/editor_screen.dart';
 import 'package:planner/theme.dart';
 import 'package:planner_engine/planner_engine.dart';
 
@@ -217,18 +217,19 @@ void main() {
     await store.close();
   });
 
-  // 8. Right-click on the dial opens the P4.1 editor placeholder.
-  testWidgets('right_click_opens_editor_placeholder', (tester) async {
+  // 8. Right-click on the dial opens the interval editor (P4.1).
+  testWidgets('right_click_opens_editor_screen', (tester) async {
     await pumpBoard(tester);
 
     await tester.tap(
       find.byKey(const Key('dial')),
       buttons: kSecondaryMouseButton,
     );
-    await tester.pumpAndSettle(); // settle the route transition
+    // The handler is async (loads the tree before pushing) — settle the
+    // microtask and the route transition.
+    await tester.pumpAndSettle();
 
-    expect(find.byType(EditorPlaceholderScreen), findsOneWidget);
-    expect(find.byKey(const Key('editor-placeholder')), findsOneWidget);
+    expect(find.byType(EditorScreen), findsOneWidget);
 
     controller.dispose();
     await store.close();

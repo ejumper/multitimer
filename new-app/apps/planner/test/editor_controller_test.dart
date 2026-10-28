@@ -1,0 +1,257 @@
+import 'package:drift/native.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:planner/editor_controller.dart';
+import 'package:planner_engine/planner_engine.dart';
+
+import 'fakes.dart';
+
+/// EditorController unit tests (P4.1 working-copy semantics): discard vs
+/// commit, duplicate/delete/move through the pure tree ops, snapshot undo
+/// (one action = one step), and selection toggling — over a real in-memory
+/// drift store on a fixed clock, no widgets.
+void main() {
+  final t0 = DateTime.utc(2026, 3, 1, 8);
+
+  late FixedClock clock;
+  late PlannerDb db;
+  late DriftStore store;
+  late Board board;
+  late IntervalTimer timer;
+  late EditorController controller;
+
+  DefNode def(String id, {String? name, int seconds = 60}) => DefNode(
+    IntervalDef(
+      id: id,
+      timerId: timer.id,
+      name: name,
+      color: '#0055ff',
+      durationSeconds: seconds,
+      autoFinish: false,
+    ),
+  );
+
+  GroupNode groupOf(
+    String id,
+    List<IntervalNode> children, {
+    int repeat = 1,
+  }) => GroupNode(
+    GroupDef(id: id, timerId: timer.id, repeatCount: repeat),
+    children,
+  );
+
+  /// Saves [tree] as the timer's definition and builds an editor controller
+  /// over it — the store and the working copy start out identical.
+  Future<EditorController> buildEditor(IntervalTree tree) async {
+    await store.saveTree(timer.id, tree, eventKind: 'tree.save');
+    return EditorController(store: store, timer: timer, initialTree: tree);
+  }
+
+  setUp(() async {
+    clock = FixedClock(t0);
+    db = PlannerDb(NativeDatabase.memory());
+    store = DriftStore(db, clock);
+    board = await store.createBoard('My Board');
+    timer = await store.createTimer(
+      boardId: board.id,
+      name: 'Interval timer',
+      color: '#0055ff',
+    );
+    controller = await buildEditor(
+      IntervalTree([def('a', name: 'break'), def('b', name: 'Cards')]),
+    );
+  });
+
+  tearDown(() async {
+    controller.dispose();
+    await store.close();
+  });
+
+  // 1. ✕ (revert) persists nothing: the store still holds the original
+  //    tree and timer fields — the working copy is simply dropped.
+  test('close_reverts_all_edits', () async {
+    final originalTree = (await store.loadTree(timer.id)).toDebugString();
+
+    controller.rename('Focus');
+    controller.setColor('#ff00b1');
+    controller.addInterval(
+      name: 'Stretch',
+      color: '#00ad6b',
+      durationSeconds: 45,
+      autoFinish: true,
+    );
+    expect(controller.canUndo, isTrue);
+
+    controller.revert();
+    expect(controller.canUndo, isFalse);
+
+    expect((await store.loadTree(timer.id)).toDebugString(), originalTree);
+    expect(originalTree, 'def:a | def:b');
+    final storedTimer = (await store.timersInBoard(board.id)).single;
+    expect(storedTimer.name, 'Interval timer');
+    expect(storedTimer.color, '#0055ff');
+  });
+
+  // 2. Done persists the working copy: tree matches the store, the timer
+  //    name is updated, and the change log carries an editor.commit event.
+  test('done_persists_edits', () async {
+    controller.toggleSelect('b');
+    controller.rename('Focus');
+    controller.addInterval(
+      name: 'Stretch',
+      color: '#00ad6b',
+      durationSeconds: 45,
+      autoFinish: true,
+    );
+    controller.deleteSelection(); // b selected → removed
+    expect(controller.tree.roots.length, 2); // a + the added interval
+
+    await controller.commit();
+
+    final storedTree = await store.loadTree(timer.id);
+    expect(storedTree.toDebugString(), controller.tree.toDebugString());
+    expect(storedTree.roots.length, 2); // a + the added interval
+    final storedTimer = (await store.timersInBoard(board.id)).single;
+    expect(storedTimer.name, 'Focus');
+    final events = await store.events();
+    expect(events.map((e) => e.kind), contains('editor.commit'));
+  });
+
+  // 3. Sequential selection: copies land below b, in order, fresh ids —
+  //    4 nodes total.
+  test('duplicate_sequential_selection_via_ui', () {
+    controller.toggleSelect('a');
+    controller.toggleSelect('b');
+    controller.duplicateSelection();
+
+    final roots = controller.tree.roots;
+    expect(roots.length, 4);
+    expect([for (final n in roots) n.id].sublist(0, 2), ['a', 'b']);
+    final copies = roots.sublist(2).cast<DefNode>();
+    expect(copies[0].def.name, 'break'); // a' below b…
+    expect(copies[1].def.name, 'Cards'); // …then b'
+    expect(copies[0].id, isNot('a'));
+    expect(copies[1].id, isNot('b'));
+    expect(controller.tree.allIds.toSet().length, 4);
+  });
+
+  // 4. Non-sequential selection [c,a]: P1.1 — copies in relative order,
+  //    inserted below the LAST selected node → [a, b, c, a', c'].
+  test('duplicate_non_sequential_selection_via_ui', () async {
+    controller.dispose();
+    controller = await buildEditor(
+      IntervalTree([
+        def('a', name: 'A'),
+        def('b', name: 'B'),
+        def('c', name: 'C'),
+      ]),
+    );
+
+    controller.toggleSelect('c');
+    controller.toggleSelect('a');
+    controller.duplicateSelection();
+
+    final roots = controller.tree.roots;
+    expect(roots.length, 5);
+    expect([for (final n in roots) n.id].sublist(0, 3), ['a', 'b', 'c']);
+    expect((roots[3] as DefNode).def.name, 'A'); // a' keeps relative order
+    expect((roots[4] as DefNode).def.name, 'C'); // below the last selected
+    expect(controller.tree.allIds.toSet().length, 5);
+  });
+
+  // 5. Deleting a def AND a group (with children): both gone; the emptied
+  //    parent of the deleted def cascades away too; selection clears.
+  test('delete_chip_and_group_via_ui', () async {
+    controller.dispose();
+    controller = await buildEditor(
+      IntervalTree([
+        groupOf('g1', [def('x', name: 'X')]),
+        def('y', name: 'Y'),
+        groupOf('g2', [def('z', name: 'Z')]),
+      ]),
+    );
+
+    controller.toggleSelect('x'); // inside g1 → g1 empties → cascades
+    controller.toggleSelect('g2');
+    controller.deleteSelection();
+
+    expect(controller.tree.toDebugString(), 'def:y');
+    expect(controller.tree.allIds, ['y']);
+    expect(controller.selection, isEmpty);
+    expect(controller.hasSelection, isFalse);
+  });
+
+  // 6. Reorder across group boundaries: a into the group, then b out to
+  //    root at index 0.
+  test('reorder_across_group_boundaries', () async {
+    controller.dispose();
+    controller = await buildEditor(
+      IntervalTree([def('a'), groupOf('g1', [def('b')])]),
+    );
+
+    controller.moveNode('a', newParentGroupId: 'g1', newIndex: 0);
+    expect(controller.tree.toDebugString(), 'group:g1[1]{def:a | def:b}');
+
+    controller.moveNode('b', newParentGroupId: null, newIndex: 0);
+    expect(controller.tree.toDebugString(), 'def:b | group:g1[1]{def:a}');
+  });
+
+  // 7. Snapshot undo: three mutations walk back step-by-step with exact
+  //    intermediate states (one action = one step), then the stack is dry.
+  test('undo_walks_back_mutations', () {
+    controller.toggleSelect('b'); // selection is not an undo step
+    expect(controller.canUndo, isFalse);
+
+    controller.rename('Focus');
+    controller.addInterval(
+      name: 'Stretch',
+      color: '#00ad6b',
+      durationSeconds: 45,
+      autoFinish: true,
+    );
+    expect(controller.tree.roots.length, 3); // a, b, Stretch
+    controller.deleteSelection(); // b selected → gone, selection cleared
+    expect(controller.tree.roots.length, 2); // a, Stretch
+    expect(controller.selection, isEmpty);
+
+    // Undo the delete: name unchanged (rename is still two steps back),
+    // b and its selection come back.
+    controller.undo();
+    expect(controller.name, 'Focus');
+    expect(controller.tree.roots.length, 3);
+    expect(controller.selection, {'b'});
+
+    // Undo the add: back to the original two defs, name still 'Focus'.
+    controller.undo();
+    expect(controller.name, 'Focus');
+    expect(controller.tree.toDebugString(), 'def:a | def:b');
+
+    // Undo the rename: original name restored — and the stack is empty.
+    controller.undo();
+    expect(controller.name, 'Interval timer');
+    expect(controller.tree.toDebugString(), 'def:a | def:b');
+    expect(controller.canUndo, isFalse);
+
+    // Further undo is a no-op.
+    controller.undo();
+    expect(controller.name, 'Interval timer');
+    expect(controller.canUndo, isFalse);
+  });
+
+  // 8. Selection circles toggle membership (multi-select) and never touch
+  //    the undo stack.
+  test('selection_circles_multi_select', () {
+    expect(controller.hasSelection, isFalse);
+
+    controller.toggleSelect('a');
+    expect(controller.selection, {'a'});
+    expect(controller.canUndo, isFalse);
+
+    controller.toggleSelect('b'); // multi-select accumulates
+    expect(controller.selection, unorderedEquals(['a', 'b']));
+    expect(controller.hasSelection, isTrue);
+
+    controller.toggleSelect('a'); // toggling again removes
+    expect(controller.selection, {'b'});
+    expect(controller.canUndo, isFalse);
+  });
+}
