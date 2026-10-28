@@ -78,7 +78,7 @@ class IntervalDef {
 
   @override
   String toString() =>
-      'IntervalDef($id, ${name ?? '<unnamed>'}, ${color}S, '
+      'IntervalDef($id, ${name ?? '<unnamed>'}, color=$color, '
       '${durationSeconds}s, autoFinish=$autoFinish, '
       'alert=${endAlertSoundFile ?? 'none'})';
 }

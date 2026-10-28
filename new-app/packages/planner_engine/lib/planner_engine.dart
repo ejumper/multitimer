@@ -9,6 +9,7 @@ library;
 
 export 'clock.dart';
 export 'events.dart';
+export 'flatten.dart';
 export 'model/entities.dart';
 export 'model/event_log.dart';
 export 'model/group_def.dart';
