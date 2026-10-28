@@ -103,6 +103,8 @@ Date-triggered interval details:
 - Design goal: no account / no cloud dependency required. *(Confirm as hard requirement.)*
 
 ## 8. Parked / deferred (not forgotten)
+
+- Notification **action buttons** (e.g. "Continue" on an end-of-interval notification to advance a manually-complete interval without opening the app). Deferred from v1 on 2026-10-27: KDE supports notification actions, but Flutter's Linux library support is unverified — attempt only as a stretch item at the end of the v1 build (plan P6.1); the v1 path is: notification click focuses app → advance in-app.
 - UI & visual design; calendar navigation.
 - Recurring date-triggered intervals; day-routines beyond default template.
 - Chains crossing midnight; late-night trigger times.

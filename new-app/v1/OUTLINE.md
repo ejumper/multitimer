@@ -1,7 +1,7 @@
 # v1 — Stack & Scope Decisions
 
-> **Companion to:** `../OUTLINE.md` (north-star feature outline — *what the app does*). This file records *how we build v1*: locked technical decisions and v1 scope boundaries.
-> **Status:** locked 2026-10-27 unless marked open. Feature scope for v1 comes from the user's v1 outline (pending, next discussion).
+> **Companion to:** `../FINAL-APP-OUTLINE.md` (north-star feature outline — *what the app does*). This file records *how we build v1*: locked technical decisions and v1 scope boundaries.
+> **Status:** locked 2026-10-27 (rev 2: D9 confirmed, D10–D13 added). v1 build plan: `PLAN/`.
 
 ## Scope statement
 
@@ -32,9 +32,17 @@
 
 - **D8 — Icons: Material Symbols (bundled with Flutter).** Nothing to acquire; 2,000+ icons, swappable later. Interval labels in v1 are text + color; per-interval icon sets (MultiTimer-style) deferred.
 
-- **D9 — Fonts: bundle the user's own fonts as local-only assets.** UI text = **ProLisa** (user's GTK theme font); timer/number readouts = **MonoLisa Medium** (monospace → digits don't jitter while counting). Flutter doesn't inherit system fonts, so TTFs ship as app assets; font files stay **gitignored** (public repo, licensed fonts — local-only, like `REFERENCE/`). *(Pending user confirmation.)*
+- **D9 — Fonts: bundle the user's own fonts as local-only assets.** UI text = **ProLisa** (user's GTK theme font); timer/number readouts = **MonoLisa Medium** (monospace → digits don't jitter while counting). Flutter doesn't inherit system fonts, so TTFs ship as app assets; font files stay **gitignored** (public repo, licensed fonts — local-only, like `REFERENCE/`). *(Confirmed 2026-10-27.)*
+
+- **D10 — Identity:** working title **"Planner"** (real name + package ID decided at Android time). DB/sounds under `~/.local/share/planner/`.
+
+- **D11 — Window & theme:** standard **KDE window decoration** (no custom chrome in v1; borderless possible later as polish). Window background **completely transparent** (compositor supplies blur); "card" panels semi-transparent dark for legibility. Text/foreground `#f2f2f2`. Preset color swatches (timer/interval): `#ff00b1 #4800ff #0055ff #00a8ff #00ad6b #b8ff00`. No custom color picker in v1.
+
+- **D12 — v1 interval shape:** every interval has a duration (no Duration toggle; setter always enabled) and exactly one property toggle: **auto-finish** (off = manually complete, holds at zero). **Single-interval groups are allowed** and replace MultiTimer's per-interval Repeat row. Alerts fire even when app is focused.
+
+- **D13 — Notifications:** KDE/freedesktop notifications always accompany interval-end alerts (even in focus); clicking a notification focuses the app. **Notification action buttons (e.g. unpause-from-notification) are deferred** — parked in `../FINAL-APP-OUTLINE.md` §Parked; stretch-only in the v1 plan's final part.
 
 ## Process
 
-- Development is agent-written; docs and decisions live in this repo (`new-app/`), north star in `../OUTLINE.md`, MultiTimer reference SPEC in `../../multitimer-spec/SPEC/`.
+- Development is agent-written; docs and decisions live in this repo (`new-app/`), north star in `../FINAL-APP-OUTLINE.md`, MultiTimer reference SPEC in `../../multitimer-spec/SPEC/`.
 - Engine design should consult the MultiTimer SPEC for timer-engine subtleties (wall-clock anchoring, zero-crossing, boot re-arm) — describe, don't port.
