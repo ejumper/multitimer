@@ -81,8 +81,12 @@ class DriftStore implements Store {
       final timers = await (_db.select(
         _db.timers,
       )..where((t) => t.boardId.equals(id))).get();
+      // Cascade is logged per object (same event + payload shape as
+      // deleteTimer), so the change log stays complete for a future sync
+      // consumer; board.delete comes last.
       for (final t in timers) {
         await _deleteTimerRows(t.id);
+        await _appendEvent('timer.delete', {'timerId': t.id});
       }
       await (_db.delete(_db.timers)..where((t) => t.boardId.equals(id))).go();
       await (_db.delete(_db.boards)..where((t) => t.id.equals(id))).go();

@@ -1597,6 +1597,7 @@ class $EventLogTable extends EventLog
     false,
     type: DriftSqlType.int,
     requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
   );
   static const VerificationMeta _timestampMsMeta = const VerificationMeta(
     'timestampMs',

@@ -222,6 +222,54 @@ void main() {
       expect(groupEvent.payloadJson, contains('"nodeIds"'));
       expect(groupEvent.payloadJson, contains('"timerId"'));
     });
+
+    test('deleteBoard cascade logs one timer.delete per timer, then board.delete',
+        () async {
+      final b = await store.createBoard('b');
+      await store.createTimer(boardId: b.id, name: 't1', color: '#0055ff');
+      await store.createTimer(boardId: b.id, name: 't2', color: '#ff00b1');
+
+      await store.deleteBoard(b.id);
+
+      final events = await store.events();
+      expect(
+        events.map((e) => e.kind),
+        [
+          'board.create',
+          'timer.create',
+          'timer.create',
+          'timer.delete', // per-timer cascade events, in creation order
+          'timer.delete',
+          'board.delete', // last
+        ],
+      );
+      // Cascade events carry the same payload shape as a plain deleteTimer.
+      expect(events[3].payloadJson, contains('"timerId"'));
+      expect(events[5].payloadJson, contains('"boardId"'));
+    });
+
+    test('event seq is unique at the DB level', () async {
+      await store.createBoard('x'); // consumes seq 1
+
+      // A duplicate seq must violate a DB constraint — ordering is enforced
+      // by the schema, not by convention.
+      Object? caught;
+      try {
+        await db.into(db.eventLog).insert(
+              EventLogCompanion.insert(
+                id: 'dup',
+                seq: 1,
+                timestampMs: 0,
+                kind: 'x',
+                payloadJson: '{}',
+              ),
+            );
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught, isNotNull,
+          reason: 'duplicate seq must violate the unique constraint');
+    });
   });
 }
 

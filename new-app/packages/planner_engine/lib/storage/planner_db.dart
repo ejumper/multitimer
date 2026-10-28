@@ -73,7 +73,9 @@ class GroupDefs extends Table {
 @DataClassName('EventLogRow')
 class EventLog extends Table {
   TextColumn get id => text()();
-  IntColumn get seq => integer()();
+  // UNIQUE: event order is enforced by the schema, not by convention — a
+  // duplicate seq must be impossible even if two writers ever race.
+  IntColumn get seq => integer().unique()();
   IntColumn get timestampMs => integer()();
   TextColumn get kind => text()();
   TextColumn get payloadJson => text()();
