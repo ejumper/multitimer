@@ -825,17 +825,18 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
-  /// One group: selection circle | 26px bracket column (repeat-count badge
-  /// on top, tappable bar → repeat stepper, see [_bracketTapped]) | the
-  /// children stacked inside, recursively — so nested groups stack their
-  /// bracket columns further right (UI-REFERENCE items 9–10).
+  /// One group: selection circle (vertically centered — MultiTimer
+  /// layout) | the group BAR: a filled capsule down the group's left edge
+  /// with the repeat count centered over its middle | the children stacked
+  /// outside it to the right, recursively — so nested groups stack their
+  /// bars further right (UI-REFERENCE items 9–10, IMG_6229/6230 layout).
   Widget _groupRow(
     GroupDef group,
     List<IntervalNode> children, {
     bool keyed = true,
   }) {
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         _selectionCircle(group.id),
         const SizedBox(width: 10),
@@ -847,9 +848,9 @@ class _EditorScreenState extends State<EditorScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 SizedBox(
-                  width: 26,
-                  // Builder: the bracket tap needs a context and _groupRow
-                  // has none of its own; opaque so the bare glyph area is
+                  width: 34,
+                  // Builder: the bar tap needs a context and _groupRow
+                  // has none of its own; opaque so the bare capsule area is
                   // hittable where no child covers the tap point.
                   child: Builder(
                     builder: (context) => GestureDetector(
@@ -858,33 +859,15 @@ class _EditorScreenState extends State<EditorScreen> {
                       onTap: () => _bracketTapped(context, group),
                       child: Stack(
                         children: [
-                          // Rounded-left bracket glyph, below the count badge.
+                          // The group bar: filled capsule (repeat stepper
+                          // target — see _bracketTapped).
                           Positioned.fill(
-                            child: Padding(
-                              padding: const EdgeInsets.only(top: 20),
-                              child: CustomPaint(painter: _BracketPainter()),
-                            ),
+                            child: CustomPaint(painter: _GroupBarPainter()),
                           ),
-                          // Repeat-count badge at the bracket's top-left.
-                          Positioned(
-                            left: 0,
-                            top: 0,
-                            child: Container(
+                          // Repeat count: centered BOTH ways, plain text.
+                          Positioned.fill(
+                            child: Center(
                               key: Key('repeat-${group.id}'),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                borderRadius: const BorderRadius.all(
-                                  Radius.circular(5),
-                                ),
-                                border: Border.all(
-                                  color: AppColors.outline,
-                                  width: 1.2,
-                                ),
-                                color: AppColors.card,
-                              ),
                               child: Text(
                                 '${group.repeatCount}',
                                 style: const TextStyle(
@@ -1018,35 +1001,34 @@ class _LabelFieldState extends State<_LabelField> {
   }
 }
 
-/// Rounded `[` bracket glyph down the group's left edge (P0.2's
-/// `_BracketPainter` style): outline stroke, ~7px corners.
-class _BracketPainter extends CustomPainter {
-  const _BracketPainter();
+/// The group bar (MultiTimer-style, IMG_6229/6230): a filled CAPSULE down
+/// the group's left edge — closed rounded rectangle (it HAS a left side),
+/// filled with the outline's color at the app's semi-transparent opacity,
+/// stroked with the outline color.
+class _GroupBarPainter extends CustomPainter {
+  const _GroupBarPainter();
+
+  /// Outline color @ the shared semi-transparent alpha (theme card).
+  static const Color _fill = Color(0x73F2F2F2);
 
   @override
   void paint(Canvas canvas, Size size) {
-    const r = 7.0;
-    final x = size.width - 2;
-    final path = Path()
-      ..moveTo(2, r)
-      ..lineTo(x - r, 2)
-      ..quadraticBezierTo(x, 2, x, 2 + r)
-      ..lineTo(x, size.height - 2 - r)
-      ..quadraticBezierTo(x, size.height - 2, x - r, size.height - 2)
-      ..lineTo(2, size.height - 2);
-
-    canvas.drawPath(
-      path,
+    final bar = RRect.fromRectAndRadius(
+      Offset.zero & size,
+      Radius.circular(size.width / 2), // capsule ends
+    );
+    canvas.drawRRect(bar, Paint()..color = _fill);
+    canvas.drawRRect(
+      bar,
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2
-        ..strokeCap = StrokeCap.round
         ..color = AppColors.outline,
     );
   }
 
   @override
-  bool shouldRepaint(covariant _BracketPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _GroupBarPainter oldDelegate) => false;
 }
 
 /// `#rrggbb` hex (v1 preset swatches) → opaque [Color].
