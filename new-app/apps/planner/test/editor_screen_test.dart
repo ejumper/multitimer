@@ -225,6 +225,26 @@ void main() {
 
   // 6. Drop rules: dropping chip a onto chip b moves a into b's parent
   //    (g1) at b's index → G{a, b}; the screen rebuilds accordingly.
+  /// Gesture drag with a LAZILY measured aim point: the list reflows while
+  /// dragging (the lifted row collapses, the slot gap opens), so the aim
+  /// must be measured on the live layout after the drag has started.
+  Future<void> dragRowToAiming(
+    WidgetTester tester,
+    String rowKey,
+    Offset Function() aim,
+  ) async {
+    final start = tester.getCenter(find.byKey(Key(rowKey)));
+    final gesture = await tester.startGesture(start);
+    await tester.pump();
+    await gesture.moveTo(start + const Offset(0, 20)); // past touch slop
+    await tester.pump(); // drag started; layout settled
+    final a = aim();
+    await gesture.moveTo(a);
+    await tester.pump();
+    await gesture.up();
+    await tester.pump();
+  }
+
   /// Gesture drag: press [rowKey]'s center, move past touch slop (starts
   /// the drag), then move to [to] (updates the slot) and release.
   Future<void> dragRowTo(WidgetTester tester, String rowKey, Offset to) async {
@@ -431,6 +451,122 @@ void main() {
       reason: 'exactly ONE move — the stale end did not double-commit',
     );
     expect(tester.takeException(), isNull);
+  });
+
+  /// These fixtures run past the default 600px test window — without a
+  /// taller surface the deep rows are off-screen and gestures miss them.
+  void useTallSurface(WidgetTester tester) {
+    tester.view.physicalSize = const Size(800, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+  }
+
+  /// [m, g1{ g2{b, c}, d }, x] — the legal shape with a coincident top
+  /// edge (g1's first child is the group g2, so g1's top edge IS g2's top
+  /// edge). Used to pin the X-depth disambiguation of edge slots.
+  IntervalTree nestedEdgeTree() => IntervalTree([
+    def('m'),
+    GroupNode(
+      GroupDef(id: 'g1', timerId: timer.id, repeatCount: 1),
+      [
+        GroupNode(
+          GroupDef(id: 'g2', timerId: timer.id, repeatCount: 1),
+          [def('b'), def('c')],
+        ),
+        def('d'),
+      ],
+    ),
+    def('x'),
+  ]);
+
+  /// Aim: just above g2's top-left corner (the coincident edge), with the
+  /// pointer's X in the given zone: content column (inner), g2's bracket
+  /// column (outer), left of the block (outside all).
+  Offset Function() edgeAim(WidgetTester tester, double Function(Rect g2) x) {
+    return () {
+      final g2 = tester.getRect(find.byKey(const Key('row-g2')));
+      return Offset(x(g2), g2.top - 2);
+    };
+  }
+
+  // Edge-slot level follows the pointer's X: content column = the inner
+  // group, bracket column = the outer group, left of that = outside all.
+  testWidgets('edge_slot_content_column_targets_inner_group', (tester) async {
+    useTallSurface(tester);
+    controller = await buildEditor(nestedEdgeTree());
+    await pumpEditor(tester);
+    await dragRowToAiming(
+      tester,
+      'chip-x',
+      edgeAim(tester, (g2) => g2.left + 64 + 8), // content column of g2
+    );
+    expect(
+      controller.tree.toDebugString(),
+      'def:m | group:g1[1]{group:g2[1]{def:x | def:b | def:c} | def:d}',
+    );
+  });
+
+  testWidgets('edge_slot_bracket_column_targets_outer_group', (tester) async {
+    useTallSurface(tester);
+    controller = await buildEditor(nestedEdgeTree());
+    await pumpEditor(tester);
+    await dragRowToAiming(
+      tester,
+      'chip-x',
+      edgeAim(tester, (g2) => g2.left + 8), // g2's bracket column
+    );
+    expect(
+      controller.tree.toDebugString(),
+      'def:m | group:g1[1]{def:x | group:g2[1]{def:b | def:c} | def:d}',
+    );
+  });
+
+  testWidgets('edge_slot_left_column_targets_root', (tester) async {
+    useTallSurface(tester);
+    controller = await buildEditor(nestedEdgeTree());
+    await pumpEditor(tester);
+    await dragRowToAiming(
+      tester,
+      'chip-x',
+      edgeAim(tester, (g2) => g2.left - 8), // left of the whole block
+    );
+    expect(
+      controller.tree.toDebugString(),
+      'def:m | def:x | group:g1[1]{group:g2[1]{def:b | def:c} | def:d}',
+    );
+  });
+
+  testWidgets('drag_leaving_group_chain_collapses_with_product',
+      (tester) async {
+    useTallSurface(tester);
+    // g1(3){ g2(2){b, c}, d } — moving d out leaves a single-group chain:
+    // it collapses to one group with the product repeat (3×2=6), keeping
+    // the outer group's id and the inner's children.
+    controller = await buildEditor(
+      IntervalTree([
+        def('m'),
+        GroupNode(
+          GroupDef(id: 'g1', timerId: timer.id, repeatCount: 3),
+          [
+            GroupNode(
+              GroupDef(id: 'g2', timerId: timer.id, repeatCount: 2),
+              [def('b'), def('c')],
+            ),
+            def('d'),
+          ],
+        ),
+      ]),
+    );
+    await pumpEditor(tester);
+
+    final mTop = tester.getTopLeft(find.byKey(const Key('chip-m'))).dy;
+    final dX = tester.getCenter(find.byKey(const Key('chip-d'))).dx;
+    await dragRowTo(tester, 'chip-d', Offset(dX, mTop - 2));
+
+    expect(
+      controller.tree.toDebugString(),
+      'def:d | def:m | group:g1[6]{def:b | def:c}',
+    );
   });
 
   // 7. Done: commits the working copy, fires onDone, and the store has

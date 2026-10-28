@@ -379,7 +379,8 @@ void main() {
   });
 
   // 13. Mixed selection {G1, b} with b INSIDE G1: only the topmost id is
-  //     grouped — the fresh group wraps G1 itself (nested brackets).
+  //     grouped — the fresh group wraps G1 itself, and since g1 is its only
+  //     child the chain collapses into one group (repeat product, outer id).
   test('group_mixed_topmost_wins', () async {
     controller.dispose();
     controller = await buildEditor(
@@ -394,10 +395,14 @@ void main() {
     expect(outer, isNot('g1'));
     expect(
       controller.tree.toDebugString(),
-      'group:$outer[1]{group:g1[1]{def:a | def:b}}',
+      'group:$outer[1]{def:a | def:b}',
     );
     expect(controller.selection, {outer});
-    expect(controller.tree.parentOf('g1'), outer);
+    expect(
+      controller.tree.allIds,
+      isNot(contains('g1')),
+      reason: 'the collapsed chain absorbs g1 — its id no longer exists',
+    );
   });
 
   // 14. Undo cap: 55 renames push 55 PRE-states ('start','n0',..,'n53');

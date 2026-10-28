@@ -59,10 +59,9 @@ void main() {
         groupOf('g1', [def('b'), def('c')], repeat: 2),
       ]);
       final r = t.grouped(['b', 'c'], newGroupId: 'g2');
-      expect(
-        r.toDebugString(),
-        'def:a | group:g1[2]{group:g2[1]{def:b | def:c}}',
-      );
+      // g1 is left wrapping a single group → the chain collapses into one
+      // group (repeat = product, outer id kept) per the canonical invariant.
+      expect(r.toDebugString(), 'def:a | group:g1[2]{def:b | def:c}');
     });
 
     test('rejects: empty selection, non-siblings, repeatCount < 1, dupes', () {
@@ -265,6 +264,53 @@ void main() {
         () => t.moved('g1', newParentGroupId: 'g2', newIndex: 0),
         throwsA(isA<TreeOpException>()),
       );
+    });
+  });
+
+  group('canonicalize (group chains)', () {
+    test('move leaving a single-group child collapses with product', () {
+      final t = tree([
+        groupOf('go', [
+          groupOf('gi', [def('b'), def('c')], repeat: 2),
+          def('d'),
+        ], repeat: 3),
+      ]);
+      final r = t.moved('d', newParentGroupId: null, newIndex: 0);
+      expect(r.toDebugString(), 'def:d | group:go[6]{def:b | def:c}');
+    });
+
+    test('grouping a single group collapses with product', () {
+      final t = tree([def('a'), groupOf('g2', [def('b')], repeat: 2)]);
+      final r = t.grouped(['g2'], newGroupId: 'g1', repeatCount: 3);
+      expect(r.toDebugString(), 'def:a | group:g1[6]{def:b}');
+    });
+
+    test('delete leaving a single-group child collapses with product', () {
+      final t = tree([
+        groupOf('go', [
+          groupOf('gi', [def('b'), def('c')], repeat: 2),
+          def('d'),
+        ], repeat: 3),
+      ]);
+      final r = t.withoutNodes(['d']);
+      expect(r.toDebugString(), 'group:go[6]{def:b | def:c}');
+    });
+
+    test('multi-level chain product is exact', () {
+      final r = tree([def('a')])
+          .grouped(['a'], newGroupId: 'g3', repeatCount: 2)
+          .grouped(['g3'], newGroupId: 'g2', repeatCount: 3)
+          .grouped(['g2'], newGroupId: 'g1', repeatCount: 4);
+      expect(r.toDebugString(), 'group:g1[24]{def:a}');
+    });
+
+    test('single-interval groups never collapse', () {
+      final t = tree([
+        groupOf('g1', [def('a')], repeat: 5),
+        def('m'),
+      ]);
+      final r = t.moved('m', newParentGroupId: null, newIndex: 0);
+      expect(r.toDebugString(), 'def:m | group:g1[5]{def:a}');
     });
   });
 

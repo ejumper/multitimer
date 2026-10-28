@@ -119,11 +119,13 @@ class IntervalTree {
     final insertAt = ordered.first.index;
 
     return IntervalTree(
-      _editChildren(roots, parentId, (siblings) {
-        final kept = siblings.where((n) => !nodeIds.contains(n.id)).toList();
-        kept.insert(insertAt.clamp(0, kept.length), groupNode);
-        return kept;
-      }),
+      _canonicalize(
+        _editChildren(roots, parentId, (siblings) {
+          final kept = siblings.where((n) => !nodeIds.contains(n.id)).toList();
+          kept.insert(insertAt.clamp(0, kept.length), groupNode);
+          return kept;
+        }),
+      ),
     );
   }
 
@@ -135,14 +137,16 @@ class IntervalTree {
       throw const TreeOpException('ungroup: target is not a group');
     }
     return IntervalTree(
-      _editChildren(roots, loc.parentId, (siblings) {
-        final at = siblings.indexWhere((n) => n.id == groupId);
-        return [
-          ...siblings.sublist(0, at),
-          ...group.children,
-          ...siblings.sublist(at + 1),
-        ];
-      }),
+      _canonicalize(
+        _editChildren(roots, loc.parentId, (siblings) {
+          final at = siblings.indexWhere((n) => n.id == groupId);
+          return [
+            ...siblings.sublist(0, at),
+            ...group.children,
+            ...siblings.sublist(at + 1),
+          ];
+        }),
+      ),
     );
   }
 
@@ -189,13 +193,14 @@ class IntervalTree {
       return rebuilt;
     }
 
-    return IntervalTree(prune(roots));
+    return IntervalTree(_canonicalize(prune(roots)));
   }
 
   /// Moves a subtree under [newParentGroupId] (null = root) at [newIndex].
-  /// The index applies after removal and is clamped into range. Moving the
-  /// last child out of a group DISSOLVES that group ("groups are never
-  /// empty" invariant — same cascade as [withoutNodes]).
+  /// The index applies after removal and is clamped into range. Structural
+  /// invariants are restored afterwards (see [_canonicalize]): moving the
+  /// last child out of a group dissolves it, and a group left wrapping a
+  /// single group collapses into it (repeat = product).
   IntervalTree moved(
     String nodeId, {
     required String? newParentGroupId,
@@ -231,20 +236,38 @@ class IntervalTree {
       siblings.insert(newIndex.clamp(0, siblings.length), loc.node);
       return siblings;
     });
-    return IntervalTree(_pruneEmpty(inserted));
+    return IntervalTree(_canonicalize(inserted));
   }
 
-  /// Drops any groups left childless (defensive invariant: groups are
-  /// never empty). Applied after structural mutations that can empty one.
-  static List<IntervalNode> _pruneEmpty(List<IntervalNode> nodes) {
+  /// Restores the tree's structural invariants after a mutation:
+  ///  - groups are never empty (emptied groups dissolve);
+  ///  - a group never wraps exactly one child that is a group — such a
+  ///    chain collapses into ONE group keeping the OUTER group's id and the
+  ///    inner's children, with repeatCount = the PRODUCT of the chain.
+  ///    Flatten-exact: outer(3){inner(2){a,b}} runs exactly as {a,b}×6 —
+  ///    the layers add no flattened meaning, only redundant structure.
+  /// Single-INTERVAL groups are legal (that is how "interval ×N" is
+  /// expressed) and are never collapsed.
+  static List<IntervalNode> _canonicalize(List<IntervalNode> nodes) {
     final rebuilt = <IntervalNode>[];
     for (final n in nodes) {
-      if (n is GroupNode) {
-        final kids = _pruneEmpty(n.children);
-        if (kids.isNotEmpty) rebuilt.add(GroupNode(n.group, kids));
-      } else {
+      if (n is! GroupNode) {
         rebuilt.add(n);
+        continue;
       }
+      var kids = _canonicalize(n.children);
+      if (kids.isEmpty) continue; // emptied group dissolves
+      var def = n.group;
+      while (kids.length == 1 && kids.single is GroupNode) {
+        final inner = kids.single as GroupNode;
+        def = GroupDef(
+          id: def.id,
+          timerId: def.timerId,
+          repeatCount: def.repeatCount * inner.group.repeatCount,
+        );
+        kids = inner.children;
+      }
+      rebuilt.add(GroupNode(def, kids));
     }
     return rebuilt;
   }

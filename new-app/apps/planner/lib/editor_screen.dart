@@ -27,10 +27,12 @@ import 'theme.dart';
 ///    position — between chips, inside a group (nested rows included), or at
 ///    either end of the list;
 ///  - slot mapping: a gap between two siblings inserts between them. A gap
-///    at a group's top/bottom edge is shared between the group and its
-///    parent; the pointer's Y against the group's rect picks INSIDE the
-///    group (within the rect) vs OUTSIDE (above/below the group), so both
-///    "slot into the group" and "above/below the group" are reachable;
+///    at a group's edge is shared between the group, its parent levels and
+///    the outside: the pointer's Y against the group rect picks the edge,
+///    and the pointer's X picks the LEVEL — over a group's bracket column
+///    = that group's level ("before/after the block"), over its content
+///    column = one level deeper ("into the group"). The slot marker draws
+///    at the chosen indent, so the target is always visible.
 ///  - one drag = one undo step; a completed drag clears the selection;
 ///  - invalid targets (a group into its own subtree) never become a slot
 ///    and the engine rejects anything else (TreeOpException → snap back).
@@ -418,6 +420,13 @@ class _EditorScreenState extends State<EditorScreen> {
         // IntrinsicHeight measurement to zero).
         entries.add(
           Offstage(
+            // The KEY lives on the Offstage (the Column's direct child):
+            // when the slot gap inserts into this same column, unkeyed
+            // children match positionally and the dragged row's detector
+            // would be recreated — disposing the tracking recognizer
+            // mid-gesture (end/cancel never fire). Keyed children survive
+            // the churn with their elements intact.
+            key: Key('row-${node.id}'),
             offstage: _drag?.node.id == node.id,
             child: _wrapNode(
               node,
@@ -458,7 +467,6 @@ class _EditorScreenState extends State<EditorScreen> {
         _groupRow(group, children, keyed: keyed),
     };
     return GestureDetector(
-      key: Key('row-${node.id}'),
       onVerticalDragDown: (d) => _pendingGrab = d.globalPosition,
       onVerticalDragStart: (d) => _dragStart(node, d.globalPosition),
       onVerticalDragUpdate: (d) => _dragUpdate(node.id, d.globalPosition),
@@ -611,25 +619,34 @@ class _EditorScreenState extends State<EditorScreen> {
     }
 
     // Bottom chain: the row above the gap may end one or more nested
-    // groups; while the pointer stays inside such a group's rect the slot
-    // is "end of that group" (innermost first).
+    // groups; the slot is "end of that group" while the pointer stays
+    // inside the group's rect AND over its content column (innermost
+    // first — the X gate separates levels whose edges coincide).
     if (k > 0 &&
         (k == leaves.length || leaves[k - 1].parentId != leaves[k].parentId)) {
       String? anc = leaves[k - 1].parentId;
       while (anc != null && _lastLeafId(anc) == leaves[k - 1].id) {
         final g = _rectOf(anc);
-        if (g != null && p.dy < g.bottom) return _Slot(anc, _childCount(anc));
+        if (g != null && p.dy < g.bottom) {
+          final contentLeft = _childrenLeft(anc);
+          if (contentLeft == null || p.dx >= contentLeft) {
+            return _Slot(anc, _childCount(anc));
+          }
+        }
         anc = controller.tree.parentOf(anc);
       }
     }
 
     // Top chain: "before the first child of G" shares its gap with "before
-    // G"; while the pointer is above the group's rect the slot lifts to the
-    // group's own position in its parent (recursively for nested groups).
+    // G"; lift to the group's own position while the pointer is above the
+    // group's rect AND over the group's bracket column (not its content —
+    // the X gate separates levels whose edges coincide).
     while (slot.parentId != null && slot.index == 0) {
       final parentId = slot.parentId!;
       final g = _rectOf(parentId);
       if (g == null || p.dy >= g.top) break;
+      final contentLeft = _childrenLeft(parentId);
+      if (contentLeft != null && p.dx >= contentLeft) break;
       slot = _Slot(controller.tree.parentOf(parentId), _indexOf(parentId));
     }
 
@@ -665,6 +682,16 @@ class _EditorScreenState extends State<EditorScreen> {
     final box = ctx.findRenderObject() as RenderBox?;
     if (box == null || !box.attached || !box.hasSize) return null;
     return box.localToGlobal(Offset.zero) & box.size;
+  }
+
+  /// Global X where a group's children column starts (its first child's
+  /// row left). At a shared edge gap the pointer's X against this line
+  /// picks the nesting level: over the bracket column = this group's
+  /// level, over the content column = one level deeper.
+  double? _childrenLeft(String groupId) {
+    final node = controller.tree.nodeById(groupId);
+    if (node is! GroupNode || node.children.isEmpty) return null;
+    return _rectOf(node.children.first.id)?.left;
   }
 
   /// The last leaf (chip) in a node's subtree, in visual order.
