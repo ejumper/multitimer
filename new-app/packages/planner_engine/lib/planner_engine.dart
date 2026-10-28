@@ -15,6 +15,7 @@ export 'model/event_log.dart';
 export 'model/group_def.dart';
 export 'model/interval_def.dart';
 export 'model/tree.dart';
+export 'run_events.dart';
 export 'storage/drift_store.dart';
 export 'storage/impl/db_opener.dart';
 export 'storage/store.dart';

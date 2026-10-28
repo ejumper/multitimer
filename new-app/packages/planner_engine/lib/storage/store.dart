@@ -71,5 +71,14 @@ abstract interface class Store {
   /// All events, oldest first (insertion order).
   Future<List<EventLogEntry>> events();
 
+  /// Appends one change-log event with a CALLER-supplied timestamp (used for
+  /// run-log entries whose time is the instance's computed end moment, which
+  /// may differ from wall-clock at write time).
+  Future<void> appendEvent({
+    required String kind,
+    required int timestampMs,
+    Map<String, Object?> payload = const {},
+  });
+
   Future<void> close();
 }

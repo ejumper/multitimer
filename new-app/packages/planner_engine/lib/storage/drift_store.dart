@@ -427,7 +427,11 @@ class DriftStore implements Store {
     ];
   }
 
-  Future<void> _appendEvent(String kind, Map<String, Object?> payload) async {
+  Future<void> _appendEvent(
+    String kind,
+    Map<String, Object?> payload, {
+    int? timestampMs,
+  }) async {
     // Monotonic seq under concurrency is fine: all mutations run through the
     // same serialized transaction queue in practice (single app process).
     final maxExpr = _db.eventLog.seq.max();
@@ -442,12 +446,19 @@ class DriftStore implements Store {
           EventLogCompanion.insert(
             id: newId(),
             seq: nextSeq,
-            timestampMs: _nowMs(),
+            timestampMs: timestampMs ?? _nowMs(),
             kind: kind,
             payloadJson: jsonEncode(payload),
           ),
         );
   }
+
+  @override
+  Future<void> appendEvent({
+    required String kind,
+    required int timestampMs,
+    Map<String, Object?> payload = const {},
+  }) => _appendEvent(kind, payload, timestampMs: timestampMs);
 
   @override
   Future<void> close() => _db.close();
