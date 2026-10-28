@@ -18,4 +18,5 @@ export 'model/tree.dart';
 export 'storage/drift_store.dart';
 export 'storage/impl/db_opener.dart';
 export 'storage/store.dart';
+export 'timer_session.dart';
 export 'uuid.dart';
