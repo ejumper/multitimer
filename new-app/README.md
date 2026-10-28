@@ -46,12 +46,24 @@ build/linux/x64/release/bundle/planner   # run the built app
 cd apps/planner && flutter run -d linux  # dev run with hot reload
 ```
 
-## Desktop prototype notes (P0.2)
+## Smoke checks
+
+```sh
+PLANNER_SMOKE=1    ./apps/planner/build/linux/x64/release/bundle/planner  # one KDE notification
+PLANNER_SMOKE=alert ./apps/planner/build/linux/x64/release/bundle/planner  # full alert pipeline
+```
+Both print `SMOKE_OK` and exit; the alert smoke drives a real 1-second session
+through the engine into the real notifier + sound player (in-memory DB — the
+real change log stays clean).
+
+## Desktop notes
 
 - The window background is **fully transparent** — your compositor (KWin)
   supplies the blur. Recipe lives in
   `apps/planner/linux/runner/my_application.cc` (RGBA visual + app-paintable +
-  transparent `FlView` background; see flutter/flutter#152154).
+  transparent `FlView` background; see flutter/flutter#152154). Server-side KDE
+  decorations come from NOT setting a GTK header bar (xdg-decoration). Second
+  launches focus the existing window (GApplication single-instance).
 - Fonts (`assets/fonts/`) and the tray icon (`assets/tray/`) are **local-only,
   gitignored**. Regenerate the tray icon with
   `python3 scripts/gen_tray_icon.py`; copy fonts from `/usr/local/share/fonts/`
@@ -59,6 +71,8 @@ cd apps/planner && flutter run -d linux  # dev run with hot reload
   `m/MonoLisa_Black.ttf`) — a fresh clone needs both before `flutter run`.
 - Close button hides to tray; restore via the tray menu's **Show Planner**
   (on KDE, clicking the tray icon opens its menu); **Quit** exits.
+- v1 plan + reports + acceptance script live in `v1/` (`v1/ACCEPTANCE.md`,
+  `v1/BUILD-NOTES.md`).
 
 There is no top-level pubspec/workspace on purpose: each package resolves on
 its own and the scripts above are the single entry point.

@@ -10,6 +10,9 @@
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  // The single main window (NULL until first activate) — a second launch
+  // presents this instead of creating another one.
+  GtkWidget* window;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
@@ -22,8 +25,18 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
+
+  // Single instance: a second launch's activate is routed here over D-Bus
+  // (GApplication, see my_application_new) — FOCUS the existing window
+  // instead of creating another one.
+  if (self->window != NULL) {
+    gtk_window_present(GTK_WINDOW(self->window));
+    return;
+  }
+
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
+  self->window = GTK_WIDGET(window);
 
   // Standard KDE window decoration everywhere (D11). The Flutter template's
   // default — a GTK header bar on Wayland — draws CSD that ignores the user's
@@ -141,7 +154,9 @@ static void my_application_class_init(MyApplicationClass* klass) {
   G_OBJECT_CLASS(klass)->dispose = my_application_dispose;
 }
 
-static void my_application_init(MyApplication* self) {}
+static void my_application_init(MyApplication* self) {
+  self->window = NULL;
+}
 
 MyApplication* my_application_new() {
   // Set the program name to the application ID, which helps various systems
@@ -150,7 +165,13 @@ MyApplication* my_application_new() {
   // the application to be recognized beyond its binary name.
   g_set_prgname(APPLICATION_ID);
 
-  return MY_APPLICATION(g_object_new(my_application_get_type(),
-                                     "application-id", APPLICATION_ID, "flags",
-                                     G_APPLICATION_NON_UNIQUE, nullptr));
+  // NB: deliberately NOT G_APPLICATION_NON_UNIQUE (the Flutter template
+  // default). Uniqueness is the point: a second launch registers as remote
+  // and its activate is routed over D-Bus to this primary, which presents
+  // the existing window (my_application_activate) while the second process
+  // exits 0. NON_UNIQUE makes every launch its own primary ("everything
+  // occurs in the local process"), spawning one window per process.
+  return MY_APPLICATION(
+      g_object_new(my_application_get_type(), "application-id", APPLICATION_ID,
+                   nullptr));
 }

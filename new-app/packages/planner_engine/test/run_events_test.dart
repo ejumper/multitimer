@@ -97,6 +97,7 @@ void main() {
         timerName: 'Day chain',
         intervalName: null,
         ordinal: 0,
+        autoFinish: true,
       ),
     ]);
   });
@@ -159,6 +160,7 @@ void main() {
         timerName: 'Morning chain',
         intervalName: 'stretch',
         ordinal: 0,
+        autoFinish: true,
       ),
     );
   });
@@ -177,6 +179,27 @@ void main() {
     expect(w.session.skipNext(), isTrue); // advances to ord1 running
     w.session.settle(clock.current);
     expect(alerts.events.map((a) => a.ordinal), [0]); // nothing extra
+  });
+
+  // The alert carries the instance's FINISH METHOD: a manual instance's
+  // alert reports autoFinish=false (it holds at zero — an "advance" action
+  // is still meaningful), an auto-finish one true (the chain moved on).
+  test('play_alert_carries_finish_method', () {
+    final w = wired([
+      inst(0, seconds: 60, autoFinish: false, alert: 'a.mp3'),
+      inst(1, seconds: 60, alert: 'b.mp3'), // autoFinish: true by default
+    ]);
+    w.session.start();
+    warpBy(secs(60)); // ord0 zeroed → manual hold, alert fired
+    w.session.settle(clock.current);
+    expect(w.session.skipNext(), isTrue); // → ord1 running
+    warpBy(secs(60)); // ord1 zeroed at +120 → auto-finish end
+    w.session.settle(clock.current);
+
+    expect(alerts.events.map((a) => (a.ordinal, a.autoFinish)), [
+      (0, false),
+      (1, true),
+    ]);
   });
 
   // Mid-run reset ends the current instance skipped → no alert at all.

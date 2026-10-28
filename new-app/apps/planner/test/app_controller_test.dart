@@ -183,8 +183,19 @@ void main() {
     clock.current = clock.current.add(const Duration(seconds: 2));
     await c.tick();
 
-    // P5.1 copy: title = timer name; body = 'N. label'.
-    expect(notifier.shows, [(title: 'Interval timer', body: '1. Interval')]);
+    // P5.1 copy: title = timer name; body = 'N. label'. Auto-finish alert
+    // → no Continue action (the chain already moved on).
+    expect(
+      notifier.shows,
+      [
+        (
+          title: 'Interval timer',
+          body: '1. Interval',
+          actionKey: null,
+          actionLabel: null,
+        ),
+      ],
+    );
     expect(player.played, ['/sounds/x.mp3']);
   });
 
@@ -250,6 +261,75 @@ void main() {
     expect(c.snapshot.remaining, Duration.zero);
     c.dispose();
     await store.close();
+  });
+
+  // The 'Continue' action button appears ONLY on a manually-complete
+  // instance's alert (it holds at zero — advancing is meaningful); the
+  // auto-finish chain has already moved on, so its alert stays a plain
+  // body-click notification.
+  test('continue_action_only_for_manually_complete', () async {
+    final c = makeController(soundListing: () => ['x.mp3']);
+    addTearDown(c.dispose);
+    await c.init();
+    await store.saveTree(
+      c.timer.id,
+      IntervalTree([
+        DefNode(IntervalDef(
+          id: 'd1',
+          timerId: c.timer.id,
+          color: '#0055ff',
+          durationSeconds: 1,
+          autoFinish: false, // manually complete: holds at zero
+          endAlertSoundFile: 'x.mp3',
+        )),
+      ]),
+      eventKind: 'tree.edit',
+    );
+    await c.reload();
+
+    expect(c.start(), isTrue);
+    clock.current = clock.current.add(const Duration(seconds: 2));
+    await c.tick();
+
+    expect(notifier.shows, [
+      (
+        title: 'Interval timer',
+        body: '1. Interval',
+        actionKey: 'continue',
+        actionLabel: 'Continue',
+      ),
+    ]);
+
+    // The same alert from an auto-finish instance carries no action.
+    notifier.shows.clear();
+    await store.saveTree(
+      c.timer.id,
+      IntervalTree([
+        DefNode(IntervalDef(
+          id: 'd1',
+          timerId: c.timer.id,
+          color: '#0055ff',
+          durationSeconds: 1,
+          autoFinish: true,
+          endAlertSoundFile: 'x.mp3',
+        )),
+      ]),
+      eventKind: 'tree.edit',
+    );
+    await c.reload();
+
+    expect(c.start(), isTrue);
+    clock.current = clock.current.add(const Duration(seconds: 2));
+    await c.tick();
+
+    expect(notifier.shows, [
+      (
+        title: 'Interval timer',
+        body: '1. Interval',
+        actionKey: null,
+        actionLabel: null,
+      ),
+    ]);
   });
 
   test('notify_only_when_no_sound_resolves', () async {

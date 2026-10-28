@@ -15,13 +15,25 @@ class FixedClock implements Clock {
   DateTime now() => current;
 }
 
-/// Captures every [Notifier.show] call, in order.
+/// Captures every [Notifier.show] call, in order — including the optional
+/// action-button pair (null = plain body-click notification).
 class RecordingNotifier implements Notifier {
-  final List<({String title, String body})> shows = [];
+  final List<({String title, String body, String? actionKey, String? actionLabel})>
+  shows = [];
 
   @override
-  Future<void> show({required String title, required String body}) async {
-    shows.add((title: title, body: body));
+  Future<void> show({
+    required String title,
+    required String body,
+    String? actionKey,
+    String? actionLabel,
+  }) async {
+    shows.add((
+      title: title,
+      body: body,
+      actionKey: actionKey,
+      actionLabel: actionLabel,
+    ));
   }
 }
 

@@ -7,14 +7,19 @@ import 'ports.dart';
 /// DBus implementation.
 ///
 /// A notification-body click fires the `default` action, whose handler runs
-/// [onNotificationClick] — wired in `main.dart` to show/focus the window, so
-/// this adapter stays decoupled from window management. Notification ids
-/// increment per [show] call.
+/// [onNotificationClick] — wired in `main.dart` to show/focus the window.
+/// An explicit action-button click carries its key in `actionId` and routes
+/// to [onAction] instead (body click keeps its focus behavior — only the
+/// action key diverts). Notification ids increment per [show] call.
 class KdeNotifier implements Notifier {
-  KdeNotifier({required this.onNotificationClick});
+  KdeNotifier({required this.onNotificationClick, this.onAction});
 
-  /// Invoked when the user clicks a notification (default action).
+  /// Invoked when the user clicks the notification body (default action).
   final VoidCallback onNotificationClick;
+
+  /// Invoked with the action key when the user taps a notification ACTION
+  /// BUTTON (e.g. 'continue'); null for body clicks.
+  final void Function(String actionKey)? onAction;
 
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
@@ -30,20 +35,40 @@ class KdeNotifier implements Notifier {
     );
     await _plugin.initialize(
       settings,
-      onDidReceiveNotificationResponse: (response) => onNotificationClick(),
+      onDidReceiveNotificationResponse: (response) {
+        // Body/default click → actionId == null → focus; the 'continue'
+        // action button → advance the held-at-zero instance.
+        if (response.actionId == 'continue') {
+          onAction?.call('continue');
+        } else {
+          onNotificationClick();
+        }
+      },
     );
     _initialized = true;
   }
 
   @override
-  Future<void> show({required String title, required String body}) async {
-    // Body clicks fire the `default` action (see init) → onNotificationClick.
-    // No explicit action buttons (out of v1 scope).
-    await _plugin.show(
-      _nextId++,
-      title,
-      body,
-      const NotificationDetails(linux: LinuxNotificationDetails()),
-    );
+  Future<void> show({
+    required String title,
+    required String body,
+    String? actionKey,
+    String? actionLabel,
+  }) async {
+    // Body clicks fire the `default` action (see init) → onNotificationClick;
+    // a non-null actionKey adds one labeled action button routed to onAction.
+    final details = actionKey == null
+        ? const NotificationDetails(linux: LinuxNotificationDetails())
+        : NotificationDetails(
+            linux: LinuxNotificationDetails(
+              actions: [
+                LinuxNotificationAction(
+                  key: actionKey,
+                  label: actionLabel ?? actionKey,
+                ),
+              ],
+            ),
+          );
+    await _plugin.show(_nextId++, title, body, details);
   }
 }

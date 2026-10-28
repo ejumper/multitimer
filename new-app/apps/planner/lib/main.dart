@@ -54,9 +54,18 @@ Future<void> main() async {
   // data dir, wall-clock time, KDE notifications, GStreamer sound.
   await ensurePlannerDirs();
   final store = await openPlannerStore();
-  final notifier = KdeNotifier(onNotificationClick: _showWindow);
+  // The notifier is built before the controller (the construction order
+  // predates the action), so the 'continue' action routes through a
+  // nullable holder assigned right after the controller exists.
+  AppController? controller;
+  final notifier = KdeNotifier(
+    onNotificationClick: _showWindow,
+    onAction: (key) {
+      if (key == 'continue') controller?.skipNext();
+    },
+  );
   await notifier.init();
-  final controller = AppController(
+  final appController = AppController(
     store: store,
     clock: SystemClock(),
     notifier: notifier,
@@ -64,9 +73,10 @@ Future<void> main() async {
     soundsDir: plannerSoundsDir(),
     soundListing: listSoundFiles,
   );
-  await controller.init();
+  controller = appController;
+  await appController.init();
 
-  runApp(PlannerApp(controller: controller));
+  runApp(PlannerApp(controller: appController));
 }
 
 /// Unattended smoke path (`PLANNER_SMOKE=1`): opens the real store and fires

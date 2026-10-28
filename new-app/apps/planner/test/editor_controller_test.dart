@@ -399,4 +399,29 @@ void main() {
     expect(controller.selection, {outer});
     expect(controller.tree.parentOf('g1'), outer);
   });
+
+  // 14. Undo cap: 55 renames push 55 PRE-states ('start','n0',..,'n53');
+  //     the cap keeps only the 50 most recent, dropping the five oldest
+  //     ('start','n0'..'n3'). 50 undos walk back exactly to 'n4' (the state
+  //     before rename('n5')), then the stack is dry — the 51st undo is a
+  //     no-op.
+  test('undo_cap_50_drops_oldest', () {
+    controller.name = 'start'; // seed state; a direct write is not an op
+    for (var i = 0; i < 55; i++) {
+      controller.rename('n$i');
+    }
+    expect(controller.name, 'n54');
+    expect(controller.canUndo, isTrue);
+
+    for (var i = 0; i < 50; i++) {
+      controller.undo();
+    }
+    expect(controller.name, 'n4');
+    expect(controller.canUndo, isFalse);
+
+    // 51st undo: no-op (name unchanged, stack still dry).
+    controller.undo();
+    expect(controller.name, 'n4');
+    expect(controller.canUndo, isFalse);
+  });
 }

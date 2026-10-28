@@ -7,7 +7,17 @@ library;
 /// Desktop notification delivery.
 abstract interface class Notifier {
   /// Shows a notification with the given [title] and [body].
-  Future<void> show({required String title, required String body});
+  ///
+  /// When [actionKey] is non-null, the notification carries an action
+  /// button labeled [actionLabel] (falling back to [actionKey]); tapping it
+  /// routes back to the adapter's action handler instead of focusing the
+  /// window. Both null = plain body-click-only notification.
+  Future<void> show({
+    required String title,
+    required String body,
+    String? actionKey,
+    String? actionLabel,
+  });
 }
 
 /// Alert-sound playback.

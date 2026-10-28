@@ -23,6 +23,7 @@ class PlayAlert {
     required this.timerName,
     required this.intervalName,
     required this.ordinal,
+    required this.autoFinish,
   });
 
   /// RESOLVED file name; null = no sound but still notify.
@@ -37,6 +38,12 @@ class PlayAlert {
   /// Ordinal of the instance that reached zero.
   final int ordinal;
 
+  /// The instance's finish method, snapshotted at emit time: true =
+  /// auto-finish (the chain has already moved on), false = manually
+  /// complete (the instance holds AT ZERO — an "advance" action is still
+  /// meaningful for the app side).
+  final bool autoFinish;
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -44,15 +51,18 @@ class PlayAlert {
           other.soundFile == soundFile &&
           other.timerName == timerName &&
           other.intervalName == intervalName &&
-          other.ordinal == ordinal;
+          other.ordinal == ordinal &&
+          other.autoFinish == autoFinish;
 
   @override
-  int get hashCode => Object.hash(soundFile, timerName, intervalName, ordinal);
+  int get hashCode =>
+      Object.hash(soundFile, timerName, intervalName, ordinal, autoFinish);
 
   @override
   String toString() =>
       'PlayAlert(sound=$soundFile, timer=$timerName, '
-      'interval=${intervalName ?? '<unnamed>'}, #$ordinal)';
+      'interval=${intervalName ?? '<unnamed>'}, #$ordinal, '
+      'autoFinish=$autoFinish)';
 }
 
 /// Pure sound resolution: exact match in [availableFiles] wins (Linux file
@@ -116,6 +126,7 @@ class RunEventProcessor implements EventSink<InstanceEnded> {
         timerName: timerName,
         intervalName: instance.name,
         ordinal: event.ordinal,
+        autoFinish: instance.autoFinish,
       ),
     );
   }

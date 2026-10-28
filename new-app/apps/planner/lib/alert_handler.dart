@@ -23,12 +23,18 @@ class AlertHandler implements EventSink<PlayAlert> {
 
   @override
   void emit(PlayAlert alert) {
+    // "Continue" is only meaningful for a MANUALLY COMPLETE instance
+    // holding at zero — an auto-finish chain has already moved on, so its
+    // alert stays a plain body-click notification.
+    final manualHold = !alert.autoFinish;
     unawaited(
       notifier
           .show(
             // P5.1 copy: title = the timer; body = the interval's number+label.
             title: alert.timerName,
             body: '${alert.ordinal + 1}. ${alert.intervalName ?? 'Interval'}',
+            actionKey: manualHold ? 'continue' : null,
+            actionLabel: manualHold ? 'Continue' : null,
           )
           .catchError((Object _) {}),
     );

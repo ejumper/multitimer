@@ -2,13 +2,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:planner/format.dart';
 
 void main() {
-  // 1. mm:ss — zero-padded, minutes unbounded, negative clamps to zero.
+  // 1. mm:ss — zero-padded, minutes unbounded, negative clamps to zero;
+  //    sub-second truncates to 00:00.
   test('format_mm_ss_pads_and_overflows', () {
     expect(formatMmSs(const Duration(hours: 3, minutes: 18, seconds: 59)), '198:59');
     expect(formatMmSs(const Duration(seconds: 59)), '00:59');
     expect(formatMmSs(const Duration(seconds: 65)), '01:05');
     expect(formatMmSs(Duration.zero), '00:00');
     expect(formatMmSs(const Duration(seconds: -5)), '00:00');
+    expect(formatMmSs(const Duration(hours: 99)), '5940:00');
+    expect(formatMmSs(const Duration(milliseconds: 500)), '00:00');
   });
 
   // 2. hm — each component iff > 0; zero renders as 0m.
@@ -43,5 +46,12 @@ void main() {
   test('format_instance_label', () {
     expect(formatInstanceLabel(0, 'break'), '1. break');
     expect(formatInstanceLabel(2, null), '3. Interval');
+  });
+
+  // 6. Planned parts never truncate: hours overflow the two-digit pad
+  //    intact (100h → '100'), zero pads to two digits everywhere.
+  test('format_planned_parts_no_truncation', () {
+    expect(formatPlannedParts(const Duration(hours: 100)), ('100', '00', '00'));
+    expect(formatPlannedParts(Duration.zero), ('00', '00', '00'));
   });
 }
