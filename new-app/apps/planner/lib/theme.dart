@@ -33,6 +33,51 @@ abstract final class AppColors {
   static const Color outline = Color(0x40F2F2F2);
 }
 
+/// Symmetric cross-fade route transition (all platforms).
+///
+/// Replaces Flutter's default [ZoomPageTransitionsBuilder] on this app for
+/// two reasons (the acceptance "forward-route transition glitch"):
+///  - the zoom builder fades in a `colorScheme.surface` SCRIM behind the
+///    entering route — on this theme that is the semi-transparent card
+///    color, i.e. a full-window grey wash on a transparent window;
+///  - it animates routes as rasterized snapshots (SnapshotWidget), whose
+///    stale composite froze behind the new route on forward pushes until
+///    the next happenstance frame.
+/// This builder uses neither — just opacity: the route fades in on its own
+/// [animation] and out on its [secondaryAnimation] when covered, so push
+/// and pop are the same clean cross-fade in both directions.
+class CrossFadePageTransitionsBuilder extends PageTransitionsBuilder {
+  const CrossFadePageTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    return FadeTransition(
+      opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
+      child: FadeTransition(
+        opacity: coverFade(secondaryAnimation),
+        child: child,
+      ),
+    );
+  }
+
+  /// Lets routes built by OTHER builders cover this one the same way.
+  @override
+  DelegatedTransitionBuilder? get delegatedTransition =>
+      (context, animation, secondaryAnimation, allowSnapshotting, child) =>
+          FadeTransition(opacity: coverFade(secondaryAnimation), child: child);
+
+  /// The covered route fades OUT as the route above comes in and back IN
+  /// when it pops — the mirror of the incoming fade.
+  static Animation<double> coverFade(Animation<double> secondary) =>
+      CurvedAnimation(parent: ReverseAnimation(secondary), curve: Curves.easeOut);
+}
+
 /// App theme: transparent scaffold over the compositor's blur, dark content.
 ThemeData buildPlannerTheme() {
   final base = ThemeData.dark(useMaterial3: true);
@@ -52,5 +97,18 @@ ThemeData buildPlannerTheme() {
     ),
     iconTheme: const IconThemeData(color: AppColors.lightBlue, size: 26),
     splashFactory: InkSparkle.splashFactory,
+    // Plain cross-fade route transitions (see CrossFadePageTransitionsBuilder
+    // — the default zoom builder paints a surface scrim and rasterizes
+    // routes, which washed and froze the window on forward pushes).
+    pageTransitionsTheme: const PageTransitionsTheme(
+      builders: {
+        TargetPlatform.android: CrossFadePageTransitionsBuilder(),
+        TargetPlatform.fuchsia: CrossFadePageTransitionsBuilder(),
+        TargetPlatform.iOS: CrossFadePageTransitionsBuilder(),
+        TargetPlatform.linux: CrossFadePageTransitionsBuilder(),
+        TargetPlatform.macOS: CrossFadePageTransitionsBuilder(),
+        TargetPlatform.windows: CrossFadePageTransitionsBuilder(),
+      },
+    ),
   );
 }
