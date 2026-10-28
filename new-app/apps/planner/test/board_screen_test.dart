@@ -6,19 +6,24 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:planner/app_controller.dart';
 import 'package:planner/board_screen.dart';
 import 'package:planner/editor_placeholder.dart';
+import 'package:planner/theme.dart';
 import 'package:planner_engine/planner_engine.dart';
 
 import 'fakes.dart';
 
-/// Board screen widget tests (P3.1): the state-driven readout, the tap and
-/// Space dispatch, caption visibility, and the editor route — over a real
-/// AppController on an in-memory drift store with recording adapters.
+/// Board screen widget tests (P3.1/P3.2): the state-driven readout, the tap
+/// and Space dispatch, caption visibility, the editor route, the control
+/// row (interval list, reset, skip), and the end-of-timer affordances —
+/// over a real AppController on an in-memory drift store with recording
+/// adapters.
 ///
-/// Fixture: TWO defs saved BEFORE init — 'break' 60s (manual) and 'Cards'
-/// 30s (manual); totalPlanned = 90s. NOTE: 'break' is deliberately a MANUAL
-/// (autoFinish=false) instance so its zero-crossing parks the session in
-/// awaitingAdvance — test 4 asserts the WAIT chip right after +60s, which
-/// the engine only produces for manually-complete instances.
+/// Default fixture via [buildFixture]: TWO defs saved BEFORE init — 'break'
+/// 60s (manual) and 'Cards' 30s (manual); totalPlanned = 90s. NOTE: 'break'
+/// is deliberately a MANUAL (autoFinish=false) instance so its zero-crossing
+/// parks the session in awaitingAdvance — test 4 asserts the WAIT chip
+/// right after +60s, which the engine only produces for manually-complete
+/// instances. The end-of-timer tests rebuild the fixture with a single def
+/// and a per-def autoFinish.
 void main() {
   final t0 = DateTime.utc(2026, 3, 1, 8);
 
@@ -27,7 +32,16 @@ void main() {
   late DriftStore store;
   late AppController controller;
 
-  setUp(() async {
+  /// Boots a fresh in-memory fixture: board + timer + the given defs saved
+  /// BEFORE init. The default is the two-def fixture described above; the
+  /// end-of-timer tests swap in a single def with the autoFinish they need.
+  Future<void> buildFixture({
+    List<({String id, String name, int seconds, bool autoFinish})> defs =
+        const [
+          (id: 'a', name: 'break', seconds: 60, autoFinish: false),
+          (id: 'b', name: 'Cards', seconds: 30, autoFinish: false),
+        ],
+  }) async {
     clock = FixedClock(t0);
     db = PlannerDb(NativeDatabase.memory());
     store = DriftStore(db, clock);
@@ -41,26 +55,17 @@ void main() {
     await store.saveTree(
       timer.id,
       IntervalTree([
-        DefNode(
-          IntervalDef(
-            id: 'a',
-            timerId: timer.id,
-            name: 'break',
-            color: '#0055ff',
-            durationSeconds: 60,
-            autoFinish: false,
+        for (final d in defs)
+          DefNode(
+            IntervalDef(
+              id: d.id,
+              timerId: timer.id,
+              name: d.name,
+              color: '#0055ff',
+              durationSeconds: d.seconds,
+              autoFinish: d.autoFinish,
+            ),
           ),
-        ),
-        DefNode(
-          IntervalDef(
-            id: 'b',
-            timerId: timer.id,
-            name: 'Cards',
-            color: '#0055ff',
-            durationSeconds: 30,
-            autoFinish: false,
-          ),
-        ),
       ]),
       eventKind: 'tree.save',
     );
@@ -74,7 +79,9 @@ void main() {
       soundListing: () => const [],
     );
     await controller.init();
-  });
+  }
+
+  setUp(() => buildFixture());
 
   Future<void> pumpBoard(WidgetTester tester) async {
     await tester.pumpWidget(MaterialApp(home: BoardScreen(controller)));
@@ -134,7 +141,7 @@ void main() {
   });
 
   // 4. 'break' zeroed (manual): the board holds at 00:00 with the WAIT
-  //    chip; the caption still offers 'Cards'.
+  //    chip; awaitingAdvance swaps the caption for tap-to-continue.
   testWidgets('board_renders_awaiting_advance', (tester) async {
     await pumpBoard(tester);
     controller.start();
@@ -147,7 +154,9 @@ void main() {
     expect(find.text('00:00'), findsOneWidget);
     expect(find.text('WAIT'), findsOneWidget);
     expect(find.text('0m'), findsOneWidget); // remaining total: 30s
-    expect(find.text('2. Cards - 30s'), findsOneWidget);
+    // P3.2: awaitingAdvance REPLACES the caption with tap-to-continue.
+    expect(find.byKey(const Key('tap-to-continue')), findsOneWidget);
+    expect(find.byKey(const Key('caption')), findsNothing);
     expect(find.text('PAUSED'), findsNothing);
 
     controller.dispose();
@@ -220,6 +229,228 @@ void main() {
 
     expect(find.byType(EditorPlaceholderScreen), findsOneWidget);
     expect(find.byKey(const Key('editor-placeholder')), findsOneWidget);
+
+    controller.dispose();
+    await store.close();
+  });
+
+  // 9. btn-list opens the overlay: every instance in order, label+duration.
+  testWidgets('list_overlay_contents_in_order', (tester) async {
+    await pumpBoard(tester);
+    await tester.tap(find.byKey(const Key('btn-list')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('list-overlay')), findsOneWidget);
+    expect(find.text('Intervals'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('list-row-0')),
+        matching: find.text('1. break'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('list-row-0')),
+        matching: find.text('1m'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('list-row-1')),
+        matching: find.text('2. Cards'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('list-row-1')),
+        matching: find.text('30s'),
+      ),
+      findsOneWidget,
+    );
+
+    controller.dispose();
+    await store.close();
+  });
+
+  // 10. The current instance's row is highlighted: lightBlue label and a
+  //     blue-tinted background distinct from the odd-row subtle tint.
+  testWidgets('list_overlay_highlights_current', (tester) async {
+    await pumpBoard(tester);
+    controller.start();
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('btn-list')));
+    await tester.pumpAndSettle();
+
+    final label0 = tester.widget<Text>(
+      find.descendant(
+        of: find.byKey(const Key('list-row-0')),
+        matching: find.text('1. break'),
+      ),
+    );
+    expect(label0.style?.color, AppColors.lightBlue);
+
+    final row0 = tester.widget<Container>(find.byKey(const Key('list-row-0')));
+    final row1 = tester.widget<Container>(find.byKey(const Key('list-row-1')));
+    expect(row0.color, AppColors.blue.withValues(alpha: 0.25));
+    expect(row0.color, isNot(equals(row1.color)));
+
+    controller.dispose();
+    await store.close();
+  });
+
+  // 11. Tapping a row jumps the cursor there AND closes the overlay.
+  testWidgets('list_overlay_jump_dispatches_and_closes', (tester) async {
+    await pumpBoard(tester);
+    controller.start();
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('btn-list')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('list-row-1')));
+    await tester.pumpAndSettle();
+
+    expect(controller.snapshot.ordinal, 1);
+    expect(find.byKey(const Key('list-overlay')), findsNothing);
+
+    controller.dispose();
+    await store.close();
+  });
+
+  // 12. Reset needs confirmation: cancel leaves the run untouched.
+  testWidgets('reset_requires_confirmation', (tester) async {
+    await pumpBoard(tester);
+    controller.start();
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('btn-reset')));
+    await tester.pumpAndSettle();
+    expect(find.text('Reset timer?'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('dialog-cancel')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('dialog-cancel')), findsNothing);
+    expect(controller.snapshot.state, SessionState.running);
+
+    controller.dispose();
+    await store.close();
+  });
+
+  // 13. Confirming the reset dialog returns the session to notStarted.
+  testWidgets('reset_confirms_and_resets', (tester) async {
+    await pumpBoard(tester);
+    controller.start();
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('btn-reset')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('dialog-confirm')));
+    await tester.pumpAndSettle();
+
+    expect(controller.snapshot.state, SessionState.notStarted);
+    expect(controller.snapshot.ordinal, isNull);
+
+    controller.dispose();
+    await store.close();
+  });
+
+  // 14. Skip is disabled at notStarted; it advances from running, from
+  //     paused (past the end → fresh notStarted), and from awaitingAdvance.
+  testWidgets('skip_button_dispatches_per_state', (tester) async {
+    await pumpBoard(tester);
+
+    expect(
+      tester.widget<IconButton>(find.byKey(const Key('btn-skip'))).onPressed,
+      isNull,
+    );
+
+    controller.start();
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('btn-skip')));
+    await tester.pump();
+    expect(controller.snapshot.state, SessionState.running);
+    expect(controller.snapshot.ordinal, 1);
+
+    controller.pause();
+    await tester.pump();
+    expect(controller.snapshot.state, SessionState.paused);
+    await tester.tap(find.byKey(const Key('btn-skip')));
+    await tester.pump();
+    expect(controller.snapshot.state, SessionState.notStarted); // past the end
+
+    controller.start();
+    await tester.pump();
+    clock.current = clock.current.add(const Duration(seconds: 60));
+    await controller.tick();
+    await tester.pump();
+    expect(controller.snapshot.state, SessionState.awaitingAdvance);
+    await tester.tap(find.byKey(const Key('btn-skip')));
+    await tester.pump();
+    expect(controller.snapshot.state, SessionState.running);
+    expect(controller.snapshot.ordinal, 1);
+
+    controller.dispose();
+    await store.close();
+  });
+
+  // 15. Auto-finish last instance crossing → the fresh notStarted planned
+  //     readout renders again immediately; no hold, no tap-to-continue.
+  testWidgets('end_auto_finish_resets_immediately', (tester) async {
+    controller.dispose();
+    await store.close();
+    await buildFixture(
+      defs: [(id: 'x', name: 'lap', seconds: 5, autoFinish: true)],
+    );
+
+    await pumpBoard(tester);
+    controller.start();
+    await tester.pump();
+    clock.current = clock.current.add(const Duration(seconds: 6));
+    await controller.tick();
+    await tester.pump();
+
+    expect(controller.snapshot.state, SessionState.notStarted);
+    // Planned readout of the fresh 5s total: 00 H 00 / 05.
+    expect(find.text('00'), findsNWidgets(2));
+    expect(find.text('H'), findsOneWidget);
+    expect(find.text('M'), findsOneWidget);
+    expect(find.text('05'), findsOneWidget);
+    expect(find.byKey(const Key('tap-to-continue')), findsNothing);
+
+    controller.dispose();
+    await store.close();
+  });
+
+  // 16. Manually-complete LAST instance holds at 00:00 + WAIT +
+  //     tap-to-continue; tapping it advances past the end → notStarted.
+  testWidgets('end_manual_hold_then_tap_resets', (tester) async {
+    controller.dispose();
+    await store.close();
+    await buildFixture(
+      defs: [(id: 'x', name: 'lap', seconds: 5, autoFinish: false)],
+    );
+
+    await pumpBoard(tester);
+    controller.start();
+    await tester.pump();
+    clock.current = clock.current.add(const Duration(seconds: 6));
+    await controller.tick();
+    await tester.pump();
+
+    expect(controller.snapshot.state, SessionState.awaitingAdvance);
+    expect(find.text('WAIT'), findsOneWidget);
+    expect(find.text('00:00'), findsOneWidget);
+    expect(find.byKey(const Key('tap-to-continue')), findsOneWidget);
+    expect(find.byKey(const Key('caption')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('tap-to-continue')));
+    await tester.pump();
+
+    expect(controller.snapshot.state, SessionState.notStarted);
+    expect(find.byKey(const Key('tap-to-continue')), findsNothing);
 
     controller.dispose();
     await store.close();
