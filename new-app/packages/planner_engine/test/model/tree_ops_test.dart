@@ -236,6 +236,24 @@ void main() {
       expect(r.toDebugString(), 'def:b | def:a');
     });
 
+    test('moving last child out dissolves the emptied group', () {
+      final t = tree([
+        def('a'),
+        groupOf('g1', [def('b')], repeat: 2),
+      ]);
+      final r = t.moved('b', newParentGroupId: null, newIndex: 0);
+      expect(r.toDebugString(), 'def:b | def:a');
+    });
+
+    test('move within a single-child group keeps the group', () {
+      final t = tree([
+        def('a'),
+        groupOf('g1', [def('b')], repeat: 2),
+      ]);
+      final r = t.moved('b', newParentGroupId: 'g1', newIndex: 0);
+      expect(r.toDebugString(), 'def:a | group:g1[2]{def:b}');
+    });
+
     test('rejects moving a group into its own subtree', () {
       final t = tree([
         groupOf('g1', [

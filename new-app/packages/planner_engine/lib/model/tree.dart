@@ -193,7 +193,9 @@ class IntervalTree {
   }
 
   /// Moves a subtree under [newParentGroupId] (null = root) at [newIndex].
-  /// The index applies after removal and is clamped into range.
+  /// The index applies after removal and is clamped into range. Moving the
+  /// last child out of a group DISSOLVES that group ("groups are never
+  /// empty" invariant — same cascade as [withoutNodes]).
   IntervalTree moved(
     String nodeId, {
     required String? newParentGroupId,
@@ -225,12 +227,26 @@ class IntervalTree {
     // Guard against the target no longer existing (e.g. removed above).
     if (newParentGroupId != null) _locate(without, newParentGroupId);
 
-    return IntervalTree(
-      _editChildren(without, newParentGroupId, (siblings) {
-        siblings.insert(newIndex.clamp(0, siblings.length), loc.node);
-        return siblings;
-      }),
-    );
+    final inserted = _editChildren(without, newParentGroupId, (siblings) {
+      siblings.insert(newIndex.clamp(0, siblings.length), loc.node);
+      return siblings;
+    });
+    return IntervalTree(_pruneEmpty(inserted));
+  }
+
+  /// Drops any groups left childless (defensive invariant: groups are
+  /// never empty). Applied after structural mutations that can empty one.
+  static List<IntervalNode> _pruneEmpty(List<IntervalNode> nodes) {
+    final rebuilt = <IntervalNode>[];
+    for (final n in nodes) {
+      if (n is GroupNode) {
+        final kids = _pruneEmpty(n.children);
+        if (kids.isNotEmpty) rebuilt.add(GroupNode(n.group, kids));
+      } else {
+        rebuilt.add(n);
+      }
+    }
+    return rebuilt;
   }
 
   // ── debug/test helpers ──────────────────────────────────────────────────

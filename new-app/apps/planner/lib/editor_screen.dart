@@ -18,14 +18,23 @@ import 'theme.dart';
 /// commits the whole copy as one logged unit, then [onDone] fires (the board
 /// passes `appController.reload`) before the route pops.
 ///
-/// Drag-reorder rules (applied by [_acceptDrop], both via real drags and
-/// the DragTarget callbacks):
-///  - drop onto a GROUP row → append at the END of that group;
-///  - drop onto a CHIP row  → the chip's own parent + the chip's index
-///    (the dragged node lands at that chip's position);
-///  - self-drops are ignored; the engine's [TreeOpException] (e.g. a group
-///    dropped into its own subtree) aborts the move silently.
-class EditorScreen extends StatelessWidget {
+/// Drag-reorder rules (slot-in model):
+///  - press + move past touch slop starts a reorder — a clean tap still
+///    opens the interval editor and the long-press delay is gone; the whole
+///    row (chips and groups alike) lifts and follows the pointer VERTICALLY
+///    (X stays locked to the column);
+///  - the list reflows live and a slot marker opens at the prospective drop
+///    position — between chips, inside a group (nested rows included), or at
+///    either end of the list;
+///  - slot mapping: a gap between two siblings inserts between them. A gap
+///    at a group's top/bottom edge is shared between the group and its
+///    parent; the pointer's Y against the group's rect picks INSIDE the
+///    group (within the rect) vs OUTSIDE (above/below the group), so both
+///    "slot into the group" and "above/below the group" are reachable;
+///  - one drag = one undo step; a completed drag clears the selection;
+///  - invalid targets (a group into its own subtree) never become a slot
+///    and the engine rejects anything else (TreeOpException → snap back).
+class EditorScreen extends StatefulWidget {
   const EditorScreen({
     super.key,
     required this.controller,
@@ -61,6 +70,66 @@ class EditorScreen extends StatelessWidget {
     color: AppColors.card,
     borderRadius: BorderRadius.all(Radius.circular(14)),
   );
+
+  @override
+  State<EditorScreen> createState() => _EditorScreenState();
+}
+
+/// A measured leaf row during a drag.
+class _RowInfo {
+  const _RowInfo(this.id, this.parentId, this.index, this.rect);
+
+  final String id;
+  final String? parentId;
+  final int index;
+  final Rect rect;
+}
+
+/// A drop slot: "insert before the node at [index] among the children of
+/// [parentId] (null = root)".
+class _Slot {
+  const _Slot(this.parentId, this.index);
+
+  final String? parentId;
+  final int index;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _Slot && other.parentId == parentId && other.index == index;
+
+  @override
+  int get hashCode => Object.hash(parentId, index);
+}
+
+/// Snapshot of the in-flight drag.
+class _Drag {
+  const _Drag(this.node, this.rect, this.grabDy);
+
+  final IntervalNode node;
+  final Rect rect;
+  final double grabDy;
+}
+
+class _EditorScreenState extends State<EditorScreen> {
+  EditorController get controller => widget.controller;
+
+  // ── drag-reorder state ────────────────────────────────────────────────
+
+  final Map<String, GlobalKey> _rowKeys = <String, GlobalKey>{};
+  _Drag? _drag;
+  Offset? _pendingGrab;
+  Offset _pointer = Offset.zero;
+  _Slot? _target;
+  OverlayEntry? _float;
+
+  GlobalKey _keyFor(String id) => _rowKeys.putIfAbsent(id, GlobalKey.new);
+
+  @override
+  void dispose() {
+    _float?.remove();
+    _float = null;
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -147,7 +216,7 @@ class EditorScreen extends StatelessWidget {
           ),
           onPressed: () async {
             await controller.commit();
-            onDone?.call();
+            widget.onDone?.call();
             if (context.mounted) Navigator.of(context).pop();
           },
           child: const Text(
@@ -163,10 +232,10 @@ class EditorScreen extends StatelessWidget {
   Widget _colorRow() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: _cardDecoration,
+      decoration: EditorScreen._cardDecoration,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [for (final hex in _swatches) _swatch(hex)],
+        children: [for (final hex in EditorScreen._swatches) _swatch(hex)],
       ),
     );
   }
@@ -214,7 +283,7 @@ class EditorScreen extends StatelessWidget {
   Widget _toolbar(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: _cardDecoration,
+      decoration: EditorScreen._cardDecoration,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -279,9 +348,9 @@ class EditorScreen extends StatelessWidget {
         builder: (_) => IntervalEditorScreen(
           controller: controller,
           defId: defId,
-          soundsDir: soundsDir,
-          soundListing: soundListing,
-          player: player,
+          soundsDir: widget.soundsDir,
+          soundListing: widget.soundListing,
+          player: widget.player,
         ),
       ),
     );
@@ -322,76 +391,303 @@ class EditorScreen extends StatelessWidget {
     );
   }
 
-  /// One draggable + drop-target row per node, 8px between siblings.
-  List<Widget> _rows(List<IntervalNode> nodes, {required String? parentGroupId}) {
-    final rows = <Widget>[];
-    for (var i = 0; i < nodes.length; i++) {
-      final node = nodes[i];
-      rows.add(_wrapNode(node, parentGroupId: parentGroupId, index: i));
-      if (i < nodes.length - 1) {
-        rows.add(const SizedBox(height: 8));
+  /// One row per node (8px between entries), with the drag slot marker
+  /// injected at [_target] and the dragged row(s) dropped from the layout
+  /// (the gap it leaves closes; the slot marker is the visible hole).
+  List<Widget> _rows(
+    List<IntervalNode> nodes, {
+    required String? parentGroupId,
+    bool keyed = true,
+  }) {
+    final entries = <Widget>[];
+    for (var i = 0; i <= nodes.length; i++) {
+      final target = _target;
+      if (target != null &&
+          target.parentId == parentGroupId &&
+          target.index == i) {
+        entries.add(_slotGap());
+      }
+      if (i < nodes.length) {
+        final node = nodes[i];
+        // Always Offstage-wrapped (STABLE shape): unmounting the dragged
+        // row — or changing the widget type at its slot — would recreate the
+        // detector's element and dispose its drag recognizer mid-gesture,
+        // so end/cancel would never fire. Only the dragged ROOT is hidden
+        // (its subtree renders normally — it is inside the root's offstage
+        // anyway, and hiding descendants would collapse the group's
+        // IntrinsicHeight measurement to zero).
+        entries.add(
+          Offstage(
+            offstage: _drag?.node.id == node.id,
+            child: _wrapNode(
+              node,
+              parentGroupId: parentGroupId,
+              index: i,
+              keyed: keyed,
+            ),
+          ),
+        );
       }
     }
-    return rows;
+    return [
+      for (var i = 0; i < entries.length; i++) ...[
+        if (i > 0) const SizedBox(height: 8),
+        entries[i],
+      ],
+    ];
   }
 
-  /// Wraps a chip/group row in the drag source AND the drop target; the
-  /// target captures the node's position (parent + index) for [_acceptDrop].
+  /// Wraps a chip/group row in the drag recognizer. A clean tap falls
+  /// through to the row's own tap targets (chip body → interval editor,
+  /// selection circle → select, bracket → repeat stepper); a press + move
+  /// past touch slop lifts the row. Inner rows win the gesture arena over
+  /// their group's recognizer, so children drag individually.
+  ///
+  /// [keyed] is false only for the floating drag copy: a GlobalKey may
+  /// appear ONCE in the tree, so the copy must not re-register the main
+  /// list's row keys (duplicate GlobalKeys steal elements across subtrees).
   Widget _wrapNode(
     IntervalNode node, {
     required String? parentGroupId,
     required int index,
+    bool keyed = true,
   }) {
     final row = switch (node) {
       DefNode(:final def) => _chipRow(def),
-      GroupNode(:final group, :final children) => _groupRow(group, children),
+      GroupNode(:final group, :final children) =>
+        _groupRow(group, children, keyed: keyed),
     };
-    return LongPressDraggable<String>(
-      data: node.id,
-      feedback: _dragFeedback(node),
-      child: DragTarget<String>(
-        key: Key('drop-${node.id}'),
-        onAcceptWithDetails: (details) => _acceptDrop(
-          details.data,
-          target: node,
-          parentGroupId: parentGroupId,
-          index: index,
-        ),
-        builder: (context, _, _) => row,
+    return GestureDetector(
+      key: Key('row-${node.id}'),
+      onVerticalDragDown: (d) => _pendingGrab = d.globalPosition,
+      onVerticalDragStart: (d) => _dragStart(node, d.globalPosition),
+      onVerticalDragUpdate: (d) => _dragUpdate(d.globalPosition),
+      onVerticalDragEnd: (_) => _dragEnd(),
+      onVerticalDragCancel: _dragAbort,
+      child: keyed ? KeyedSubtree(key: _keyFor(node.id), child: row) : row,
+    );
+  }
+
+  // ── drag machinery ────────────────────────────────────────────────────
+
+  /// The prospective drop slot: full-height row marker with a thin outline,
+  /// rendered inline where the dragged node would land.
+  Widget _slotGap() {
+    final h = _drag?.rect.height ?? 40;
+    return Container(
+      key: const Key('drag-slot'),
+      height: h,
+      decoration: BoxDecoration(
+        borderRadius: const BorderRadius.all(Radius.circular(10)),
+        border: Border.all(color: AppColors.outline, width: 1.2),
+        color: AppColors.card.withValues(alpha: 0.35),
       ),
     );
   }
 
-  /// Drop handling per the class-doc rules; never crashes the editor.
-  void _acceptDrop(
-    String draggedId, {
-    required IntervalNode target,
-    required String? parentGroupId,
-    required int index,
-  }) {
-    if (draggedId == target.id) return; // ignore self-drops
+  void _dragStart(IntervalNode node, Offset global) {
+    final rect = _rectOf(node.id);
+    if (rect == null) return;
+    final grabDy = (_pendingGrab ?? global).dy - rect.top;
+    setState(() {
+      _drag = _Drag(node, rect, grabDy);
+      _pointer = global;
+      _target = _slotAt(global);
+    });
+    _float = OverlayEntry(builder: _buildFloat);
+    Overlay.of(context).insert(_float!);
+  }
+
+  void _dragUpdate(Offset global) {
+    if (_drag == null) return;
+    setState(() {
+      _pointer = global;
+      _target = _slotAt(global);
+    });
+    _float?.markNeedsBuild();
+  }
+
+  /// Drop: apply the slot as one move + clear the selection. A null slot or
+  /// a rejected move snaps back with no change.
+  void _dragEnd() {
+    final drag = _drag;
+    final slot = _target;
+    _cleanupDrag();
+    if (drag == null || slot == null) return;
     try {
-      if (target is GroupNode) {
-        // Onto a group row → append at the END of that group.
-        controller.moveNode(
-          draggedId,
-          newParentGroupId: target.id,
-          newIndex: target.children.length,
-        );
-      } else {
-        // Onto a chip row → that chip's parent + its index in that parent.
-        controller.moveNode(
-          draggedId,
-          newParentGroupId: parentGroupId,
-          newIndex: index,
-        );
+      var index = slot.index;
+      if (controller.tree.parentOf(drag.node.id) == slot.parentId &&
+          _indexOf(drag.node.id) < index) {
+        index -= 1; // engine's index applies AFTER removing the node
       }
+      controller.moveNode(
+        drag.node.id,
+        newParentGroupId: slot.parentId,
+        newIndex: index,
+      );
+      controller.clearSelection();
     } on TreeOpException {
-      // Invalid move (e.g. a group dropped into its own subtree) — the
-      // engine rejects it; drop the event silently instead of crashing.
-      return;
+      // Engine rejected the move — snap back with no change.
     }
   }
+
+  /// Cancel (e.g. the recognizer lost the arena mid-gesture): no change.
+  void _dragAbort() => _cleanupDrag();
+
+  void _cleanupDrag() {
+    _float?.remove();
+    _float = null;
+    _pendingGrab = null;
+    if (_drag == null && _target == null) return;
+    setState(() {
+      _drag = null;
+      _target = null;
+    });
+  }
+
+  /// The lifted row floating under the pointer (X locked to its column).
+  Widget _buildFloat(BuildContext context) {
+    final drag = _drag!;
+    final row = switch (drag.node) {
+      DefNode(:final def) => _chipRow(def),
+      GroupNode(:final group, :final children) =>
+        _groupRow(group, children, keyed: false),
+    };
+    return Positioned(
+      left: drag.rect.left,
+      top: _pointer.dy - drag.grabDy,
+      width: drag.rect.width,
+      child: IgnorePointer(
+        child: Opacity(
+          opacity: 0.95,
+          child: Material(
+            color: Colors.transparent,
+            elevation: 8,
+            shadowColor: Colors.black.withValues(alpha: 0.5),
+            child: row,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── slot computation ──────────────────────────────────────────────────
+
+  /// Maps the pointer to a drop slot (class-doc rules). Returns null when
+  /// no legal slot exists (empty list, or the pointer resolved inside the
+  /// dragged subtree).
+  _Slot? _slotAt(Offset p) {
+    final leaves = _leaves();
+    if (leaves.isEmpty) return null;
+
+    var k = leaves.indexWhere((l) => l.rect.center.dy > p.dy);
+    if (k < 0) k = leaves.length;
+
+    _Slot slot;
+    if (k == leaves.length) {
+      slot = _Slot(null, controller.tree.roots.length);
+    } else {
+      slot = _Slot(leaves[k].parentId, leaves[k].index);
+    }
+
+    // Bottom chain: the row above the gap may end one or more nested
+    // groups; while the pointer stays inside such a group's rect the slot
+    // is "end of that group" (innermost first).
+    if (k > 0 &&
+        (k == leaves.length || leaves[k - 1].parentId != leaves[k].parentId)) {
+      String? anc = leaves[k - 1].parentId;
+      while (anc != null && _lastLeafId(anc) == leaves[k - 1].id) {
+        final g = _rectOf(anc);
+        if (g != null && p.dy < g.bottom) return _Slot(anc, _childCount(anc));
+        anc = controller.tree.parentOf(anc);
+      }
+    }
+
+    // Top chain: "before the first child of G" shares its gap with "before
+    // G"; while the pointer is above the group's rect the slot lifts to the
+    // group's own position in its parent (recursively for nested groups).
+    while (slot.parentId != null && slot.index == 0) {
+      final parentId = slot.parentId!;
+      final g = _rectOf(parentId);
+      if (g == null || p.dy >= g.top) break;
+      slot = _Slot(controller.tree.parentOf(parentId), _indexOf(parentId));
+    }
+
+    if (_isDraggedSubtree(slot.parentId)) return null;
+    return slot;
+  }
+
+  /// All leaf rows (chips at any depth) in visual pre-order, excluding the
+  /// dragged subtree, with their measured global rects.
+  List<_RowInfo> _leaves() {
+    final out = <_RowInfo>[];
+    void walk(List<IntervalNode> nodes, String? parent) {
+      for (var i = 0; i < nodes.length; i++) {
+        final n = nodes[i];
+        if (_isDraggedSubtree(n.id)) continue;
+        if (n is DefNode) {
+          final r = _rectOf(n.id);
+          if (r != null) out.add(_RowInfo(n.id, parent, i, r));
+        } else if (n is GroupNode) {
+          walk(n.children, n.id);
+        }
+      }
+    }
+
+    walk(controller.tree.roots, null);
+    return out;
+  }
+
+  /// Global rect of a row by its registered key.
+  Rect? _rectOf(String id) {
+    final ctx = _rowKeys[id]?.currentContext;
+    if (ctx == null) return null;
+    final box = ctx.findRenderObject() as RenderBox?;
+    if (box == null || !box.attached || !box.hasSize) return null;
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
+
+  /// The last leaf (chip) in a node's subtree, in visual order.
+  String? _lastLeafId(String nodeId) {
+    final n = controller.tree.nodeById(nodeId);
+    if (n is DefNode) return n.id;
+    if (n is GroupNode) {
+      for (var i = n.children.length - 1; i >= 0; i--) {
+        final r = _lastLeafId(n.children[i].id);
+        if (r != null) return r;
+      }
+    }
+    return null;
+  }
+
+  /// Number of children of [parentId] (null = root).
+  int _childCount(String? parentId) => parentId == null
+      ? controller.tree.roots.length
+      : (controller.tree.nodeById(parentId) as GroupNode).children.length;
+
+  /// Index of [nodeId] among its siblings.
+  int _indexOf(String nodeId) {
+    final parentId = controller.tree.parentOf(nodeId);
+    final siblings = parentId == null
+        ? controller.tree.roots
+        : (controller.tree.nodeById(parentId) as GroupNode).children;
+    return siblings.indexWhere((n) => n.id == nodeId);
+  }
+
+  /// True for the dragged node and everything inside it.
+  bool _isDraggedSubtree(String? id) {
+    final d = _drag;
+    if (d == null || id == null) return false;
+    if (id == d.node.id) return true;
+    String? cursor = controller.tree.parentOf(id);
+    while (cursor != null) {
+      if (cursor == d.node.id) return true;
+      cursor = controller.tree.parentOf(cursor);
+    }
+    return false;
+  }
+
+  // ── row widgets ───────────────────────────────────────────────────────
 
   /// One interval: selection circle | chip card (bordered, label left,
   /// duration right, alert subtitle below). The CARD body is tappable →
@@ -486,7 +782,11 @@ class EditorScreen extends StatelessWidget {
   /// on top, tappable bar → repeat stepper, see [_bracketTapped]) | the
   /// children stacked inside, recursively — so nested groups stack their
   /// bracket columns further right (UI-REFERENCE items 9–10).
-  Widget _groupRow(GroupDef group, List<IntervalNode> children) {
+  Widget _groupRow(
+    GroupDef group,
+    List<IntervalNode> children, {
+    bool keyed = true,
+  }) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -558,7 +858,11 @@ class EditorScreen extends StatelessWidget {
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: _rows(children, parentGroupId: group.id),
+                    children: _rows(
+                      children,
+                      parentGroupId: group.id,
+                      keyed: keyed,
+                    ),
                   ),
                 ),
               ],
@@ -587,33 +891,6 @@ class EditorScreen extends StatelessWidget {
         child: selected
             ? const Icon(Icons.check, size: 14, color: AppColors.text)
             : null,
-      ),
-    );
-  }
-
-  /// The row preview shown while dragging.
-  Widget _dragFeedback(IntervalNode node) {
-    final label = switch (node) {
-      DefNode(:final def) => def.name ?? 'Interval',
-      GroupNode() => 'Group',
-    };
-    return Material(
-      color: Colors.transparent,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: AppColors.card,
-          borderRadius: const BorderRadius.all(Radius.circular(10)),
-          border: Border.all(color: AppColors.outline, width: 1.4),
-        ),
-        child: Text(
-          label,
-          style: const TextStyle(
-            fontFamily: AppFonts.ui,
-            fontSize: 14,
-            color: AppColors.text,
-          ),
-        ),
       ),
     );
   }

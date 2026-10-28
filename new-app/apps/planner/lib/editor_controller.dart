@@ -92,6 +92,14 @@ class EditorController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Drops the whole selection (drag-reorder and other list actions clear
+  /// selection when they act on a node). View state → no undo step.
+  void clearSelection() {
+    if (selection.isEmpty) return;
+    selection.clear();
+    notifyListeners();
+  }
+
   /// Working-copy rename (undo-pushing).
   void rename(String newName) {
     _pushUndo();

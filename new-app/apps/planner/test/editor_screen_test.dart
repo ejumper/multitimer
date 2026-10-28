@@ -225,26 +225,142 @@ void main() {
 
   // 6. Drop rules: dropping chip a onto chip b moves a into b's parent
   //    (g1) at b's index → G{a, b}; the screen rebuilds accordingly.
+  /// Gesture drag: press [rowKey]'s center, move past touch slop (starts
+  /// the drag), then move to [to] (updates the slot) and release.
+  Future<void> dragRowTo(WidgetTester tester, String rowKey, Offset to) async {
+    final start = tester.getCenter(find.byKey(Key(rowKey)));
+    final gesture = await tester.startGesture(start);
+    await tester.pump();
+    await gesture.moveTo(start + const Offset(0, 20)); // past touch slop
+    await tester.pump();
+    await gesture.moveTo(to);
+    await tester.pump();
+    await gesture.up();
+    await tester.pump();
+  }
+
+  // 6. Drag-drop: movement past slop lifts the whole row; the list reflows
+  //    live with a slot marker; the drop lands at the slot (into groups,
+  //    out to root, group-as-unit); one drag = one undo step and clears the
+  //    selection; same-position drops are harmless no-ops.
   testWidgets('drag_drop_moves_into_group', (tester) async {
     await pumpEditor(tester);
 
-    final target = tester.widget<DragTarget<String>>(
-      find.byKey(const Key('drop-b')),
+    final bTop = tester.getTopLeft(find.byKey(const Key('chip-b'))).dy;
+    await dragRowTo(
+      tester,
+      'chip-a',
+      Offset(tester.getCenter(find.byKey(const Key('chip-a'))).dx, bTop + 8),
     );
-    target.onAcceptWithDetails!(
-      DragTargetDetails<String>(data: 'a', offset: Offset.zero),
-    );
-    await tester.pump();
 
     expect(controller.tree.toDebugString(), 'group:g1[3]{def:a | def:b}');
     expect(
       find.descendant(
-        of: find.byKey(const Key('drop-g1')),
+        of: find.byKey(const Key('row-g1')),
         matching: find.byKey(const Key('chip-a')),
       ),
       findsOneWidget,
       reason: 'screen should rebuild with a inside the group row',
     );
+  });
+
+  testWidgets('drag_slot_gap_shows_during_drag', (tester) async {
+    await pumpEditor(tester);
+
+    final start = tester.getCenter(find.byKey(const Key('chip-a')));
+    final gesture = await tester.startGesture(start);
+    await tester.pump();
+    await gesture.moveTo(start + const Offset(0, 20));
+    await tester.pump();
+    expect(
+      find.byKey(const Key('drag-slot')),
+      findsOneWidget,
+      reason: 'a live slot marker opens while dragging',
+    );
+    await gesture.moveTo(start + const Offset(0, 60));
+    await tester.pump();
+    expect(find.byKey(const Key('drag-slot')), findsOneWidget);
+    await gesture.up();
+    await tester.pump();
+    expect(
+      find.byKey(const Key('drag-slot')),
+      findsNothing,
+      reason: 'the marker disappears on release',
+    );
+  });
+
+  testWidgets('drag_out_of_group_dissolves_and_reorders', (tester) async {
+    await pumpEditor(tester);
+    controller.toggleSelect('a');
+    await tester.pump();
+
+    final aTop = tester.getTopLeft(find.byKey(const Key('chip-a'))).dy;
+    final bX = tester.getCenter(find.byKey(const Key('chip-b'))).dx;
+    await dragRowTo(tester, 'chip-b', Offset(bX, aTop - 2));
+
+    // b lands before a at root; g1's emptied group dissolves (engine
+    // "groups are never empty" invariant).
+    expect(controller.tree.toDebugString(), 'def:b | def:a');
+    expect(
+      controller.selection,
+      isEmpty,
+      reason: 'a completed drag clears the selection',
+    );
+    controller.undo();
+    expect(
+      controller.tree.toDebugString(),
+      'def:a | group:g1[3]{def:b}',
+      reason: 'one drag = one undo step restores the whole move',
+    );
+  });
+
+  testWidgets('drag_group_moves_subtree_as_unit', (tester) async {
+    controller = await buildEditor(
+      IntervalTree([
+        GroupNode(
+          GroupDef(id: 'g1', timerId: timer.id, repeatCount: 2),
+          [def('b'), def('c')],
+        ),
+        def('a'),
+      ]),
+    );
+    await pumpEditor(tester);
+
+    final aBottom = tester.getBottomLeft(find.byKey(const Key('chip-a'))).dy;
+    final bracketX = tester.getCenter(find.byKey(const Key('bracket-g1'))).dx;
+    await dragRowTo(tester, 'bracket-g1', Offset(bracketX, aBottom + 4));
+
+    expect(
+      controller.tree.toDebugString(),
+      'def:a | group:g1[2]{def:b | def:c}',
+      reason: 'the group lands after a with its children intact and ordered',
+    );
+  });
+
+  testWidgets('drag_drop_to_same_position_is_noop', (tester) async {
+    await pumpEditor(tester);
+    final before = controller.tree.toDebugString();
+
+    // Drag the group slightly (pointer stays over its own rows) and release
+    // — the only legal slot is its current position; nothing changes.
+    final bCenter = tester.getCenter(find.byKey(const Key('chip-b')));
+    await dragRowTo(tester, 'bracket-g1', bCenter + const Offset(0, 4));
+
+    expect(controller.tree.toDebugString(), before);
+  });
+
+  testWidgets('drag_clears_selection', (tester) async {
+    await pumpEditor(tester);
+    controller.toggleSelect('a');
+    await tester.pump();
+    expect(controller.selection, isNotEmpty);
+
+    final aX = tester.getCenter(find.byKey(const Key('chip-a'))).dx;
+    final bBottom = tester.getBottomLeft(find.byKey(const Key('chip-b'))).dy;
+    await dragRowTo(tester, 'chip-a', Offset(aX, bBottom + 6));
+
+    expect(controller.tree.toDebugString(), 'group:g1[3]{def:b} | def:a');
+    expect(controller.selection, isEmpty);
   });
 
   // 7. Done: commits the working copy, fires onDone, and the store has
