@@ -36,9 +36,15 @@ dependencies:
   cupertino_icons: ^1.0.8
   window_manager: ^0.5.2
   system_tray: ^2.0.3
+  flutter_local_notifications: ^19.0.0 # Linux: pure-dart DBus notifications
+  audioplayers: ^6.0.0 # Linux: GStreamer mp3 playback
 dev_dependencies:
   flutter_test:
     sdk: flutter
+
+  # In-memory drift database for the controller/widget tests (the engine's
+  # store implementation, driven without any plugin code).
+  drift: ^2.35.3
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

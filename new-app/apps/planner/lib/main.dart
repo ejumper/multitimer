@@ -1,12 +1,26 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:system_tray/system_tray.dart';
 import 'package:window_manager/window_manager.dart';
 
-import 'mock_board.dart';
+import 'adapters/kde_notifier.dart';
+import 'adapters/mp3_player.dart';
+import 'adapters/planner_store.dart';
+import 'adapters/system_clock.dart';
+import 'app_controller.dart';
+import 'debug_screen.dart';
 import 'theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Unattended smoke check (P2 report): fire one real KDE notification and
+  // exit — no window, no tray.
+  if (Platform.environment['PLANNER_SMOKE'] == '1') {
+    await _smoke();
+    return;
+  }
 
   await windowManager.ensureInitialized();
   await windowManager.waitUntilReadyToShow(
@@ -27,11 +41,50 @@ Future<void> main() async {
 
   await _initTray();
 
-  runApp(const PlannerApp());
+  // System adapters + app state seam (P2.1): on-disk store under the XDG
+  // data dir, wall-clock time, KDE notifications, GStreamer sound.
+  await ensurePlannerDirs();
+  final store = await openPlannerStore();
+  final notifier = KdeNotifier(onNotificationClick: _showWindow);
+  await notifier.init();
+  final controller = AppController(
+    store: store,
+    clock: SystemClock(),
+    notifier: notifier,
+    player: Mp3Player(),
+    soundsDir: plannerSoundsDir(),
+    soundListing: listSoundFiles,
+  );
+  await controller.init();
+
+  runApp(PlannerApp(controller: controller));
+}
+
+/// Unattended smoke path (`PLANNER_SMOKE=1`): opens the real store and fires
+/// one real KDE notification, then exits. Prints `SMOKE_OK` on success,
+/// `SMOKE_FAIL: <error>` on failure.
+Future<void> _smoke() async {
+  try {
+    await ensurePlannerDirs();
+    final store = await openPlannerStore();
+    final notifier = KdeNotifier(onNotificationClick: () {});
+    await notifier.init();
+    await notifier.show(title: 'Planner', body: 'Smoke test notification');
+    // ignore: avoid_print
+    print('SMOKE_OK');
+    await store.close();
+    exit(0);
+  } catch (e) {
+    // ignore: avoid_print
+    print('SMOKE_FAIL: $e');
+    exit(1);
+  }
 }
 
 class PlannerApp extends StatelessWidget {
-  const PlannerApp({super.key});
+  const PlannerApp({super.key, required this.controller});
+
+  final AppController controller;
 
   @override
   Widget build(BuildContext context) {
@@ -39,7 +92,7 @@ class PlannerApp extends StatelessWidget {
       title: 'Planner',
       debugShowCheckedModeBanner: false,
       theme: buildPlannerTheme(),
-      home: const MockBoardPage(),
+      home: DebugScreen(controller),
     );
   }
 }
