@@ -26,8 +26,9 @@ class AlertHandler implements EventSink<PlayAlert> {
     unawaited(
       notifier
           .show(
-            title: alert.intervalName ?? 'Interval ${alert.ordinal + 1}',
-            body: alert.timerName,
+            // P5.1 copy: title = the timer; body = the interval's number+label.
+            title: alert.timerName,
+            body: '${alert.ordinal + 1}. ${alert.intervalName ?? 'Interval'}',
           )
           .catchError((Object _) {}),
     );

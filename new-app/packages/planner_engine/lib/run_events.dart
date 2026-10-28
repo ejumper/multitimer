@@ -93,7 +93,9 @@ class RunEventProcessor implements EventSink<InstanceEnded> {
   final String timerName;
 
   /// Injected file names of the alert-sound directory (no dart:io here).
-  final List<String> soundDirectoryListing;
+  /// Called at ALERT-DECISION time (P5.1: the sounds dir may have changed
+  /// since construction — resolution must see a fresh listing at fire time).
+  final List<String> Function() soundDirectoryListing;
 
   /// Where decided alerts go (the app side: sound, notification, UI).
   final EventSink<PlayAlert> alertSink;
@@ -110,7 +112,7 @@ class RunEventProcessor implements EventSink<InstanceEnded> {
     if (requested == null) return; // no configured sound → no alert
     alertSink.emit(
       PlayAlert(
-        soundFile: resolveAlertSound(requested, soundDirectoryListing),
+        soundFile: resolveAlertSound(requested, soundDirectoryListing()),
         timerName: timerName,
         intervalName: instance.name,
         ordinal: event.ordinal,

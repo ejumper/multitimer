@@ -146,7 +146,7 @@ packages:
     source: hosted
     version: "0.7.15"
   drift:
-    dependency: "direct dev"
+    dependency: "direct main"
     description:
       name: drift
       sha256: "3179e7323b36d1852b42997b92ac72e8abcb61b1d58cfa8c6da9b540ab02a540"

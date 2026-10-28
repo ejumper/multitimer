@@ -4,10 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:system_tray/system_tray.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'package:drift/native.dart';
+import 'package:planner_engine/planner_engine.dart';
+
 import 'adapters/kde_notifier.dart';
 import 'adapters/mp3_player.dart';
 import 'adapters/planner_store.dart';
 import 'adapters/system_clock.dart';
+import 'alert_handler.dart';
 import 'app_controller.dart';
 import 'board_screen.dart';
 import 'theme.dart';
@@ -17,8 +21,13 @@ Future<void> main() async {
 
   // Unattended smoke check (P2 report): fire one real KDE notification and
   // exit — no window, no tray.
-  if (Platform.environment['PLANNER_SMOKE'] == '1') {
+  final smoke = Platform.environment['PLANNER_SMOKE'];
+  if (smoke == '1') {
     await _smoke();
+    return;
+  }
+  if (smoke == 'alert') {
+    await _smokeAlert();
     return;
   }
 
@@ -140,4 +149,62 @@ Future<void> _initTray() async {
       _showWindow();
     }
   });
+}
+
+/// Full-pipeline alert smoke (`PLANNER_SMOKE=alert`): drives a real
+/// 1-second session to zero through the engine (TimerSession →
+/// RunEventProcessor → AlertHandler) into the REAL notifier and player.
+/// The in-memory store keeps the user's change log clean. With an empty
+/// sounds dir this also exercises the notify-only fallback live (D13).
+/// Prints `SMOKE_OK` after the alert side effects had their chance to fire.
+Future<void> _smokeAlert() async {
+  try {
+    await ensurePlannerDirs();
+    final clock = SystemClock();
+    final notifier = KdeNotifier(onNotificationClick: () {});
+    await notifier.init();
+    final player = Mp3Player();
+    final store = DriftStore(PlannerDb(NativeDatabase.memory()), clock);
+
+    const instance = IntervalInstance(
+      ordinal: 0,
+      defId: 'smoke',
+      name: 'Smoke',
+      color: '#0055ff',
+      durationSeconds: 1,
+      autoFinish: true,
+      endAlertSoundFile: 'smoke.mp3',
+    );
+    final processor = RunEventProcessor(
+      instances: const [instance],
+      store: store,
+      timerName: 'Planner smoke',
+      soundDirectoryListing: listSoundFiles,
+      alertSink: AlertHandler(
+        player: player,
+        notifier: notifier,
+        soundsDir: plannerSoundsDir(),
+      ),
+    );
+    final session = TimerSession(
+      const [instance],
+      clock: clock,
+      sink: processor,
+    );
+
+    session.start();
+    await Future<void>.delayed(const Duration(milliseconds: 1200));
+    session.settle(clock.now());
+    await processor.flush();
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+
+    // ignore: avoid_print
+    print('SMOKE_OK');
+    await store.close();
+    exit(0);
+  } catch (e) {
+    // ignore: avoid_print
+    print('SMOKE_FAIL: $e');
+    exit(1);
+  }
 }

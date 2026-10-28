@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:drift/native.dart';
 import 'package:planner_engine/planner_engine.dart';
-import 'package:planner_engine/storage/planner_db.dart';
 import 'package:test/test.dart';
 
 /// Event-consumption layer tests (P1.4): end-alert decisions (fire at zero
@@ -53,7 +52,7 @@ void main() {
     instances: instances,
     store: store,
     timerName: timerName,
-    soundDirectoryListing: listing,
+    soundDirectoryListing: () => listing,
     alertSink: alerts,
   );
 
@@ -478,7 +477,7 @@ void main() {
       instances: [inst(0), inst(1), inst(2)],
       store: failing,
       timerName: 'chain',
-      soundDirectoryListing: const [],
+      soundDirectoryListing: () => const [],
       alertSink: RecordingSink<PlayAlert>(),
     );
     for (var i = 0; i < 3; i++) {
@@ -506,6 +505,40 @@ void main() {
     await processor.flush(); // nothing left — idempotent
     expect((await inner.events()).length, 3);
     await inner.close();
+  });
+
+  test('fallback_uses_fresh_listing_at_fire_time', () async {
+    // P5.1: the listing is read AT EVENT TIME, not construction time —
+    // files added/removed after construction change the resolution.
+    var listing = ['a.mp3'];
+    final processor = RunEventProcessor(
+      instances: [inst(0, alert: 'gone.mp3'), inst(1, alert: 'gone.mp3')],
+      store: store,
+      timerName: 't',
+      soundDirectoryListing: () => listing,
+      alertSink: alerts,
+    );
+
+    processor.emit(
+      InstanceEnded(
+        ordinal: 0,
+        defId: 'd',
+        terminal: TerminalState.done,
+        endedAt: t0,
+      ),
+    );
+    expect(alerts.events.single.soundFile, 'a.mp3'); // fallback at fire time
+
+    listing = ['z-new.mp3']; // dir changed since construction
+    processor.emit(
+      InstanceEnded(
+        ordinal: 1,
+        defId: 'd',
+        terminal: TerminalState.done,
+        endedAt: t0,
+      ),
+    );
+    expect(alerts.events.last.soundFile, 'z-new.mp3'); // fresh listing wins
   });
 }
 

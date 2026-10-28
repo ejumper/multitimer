@@ -95,7 +95,7 @@ class AppController extends ChangeNotifier {
       instances: instances,
       store: store,
       timerName: timer.name,
-      soundDirectoryListing: soundListing(),
+      soundDirectoryListing: soundListing,
       alertSink: AlertHandler(
         player: player,
         notifier: notifier,

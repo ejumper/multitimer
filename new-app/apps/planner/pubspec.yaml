@@ -28,6 +28,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  drift: ^2.35.3 # app-side too: smoke mode + tests use NativeDatabase.memory()
   planner_engine:
     path: ../../packages/planner_engine
 
@@ -42,9 +43,6 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
-  # In-memory drift database for the controller/widget tests (the engine's
-  # store implementation, driven without any plugin code).
-  drift: ^2.35.3
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

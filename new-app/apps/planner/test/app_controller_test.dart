@@ -183,7 +183,102 @@ void main() {
     clock.current = clock.current.add(const Duration(seconds: 2));
     await c.tick();
 
-    expect(notifier.shows, [(title: 'Interval 1', body: 'Interval timer')]);
+    // P5.1 copy: title = timer name; body = 'N. label'.
+    expect(notifier.shows, [(title: 'Interval timer', body: '1. Interval')]);
     expect(player.played, ['/sounds/x.mp3']);
+  });
+
+  test('alert_fires_regardless_of_focus', () async {
+    // No widget tree, no window state: the pipeline is focus-independent by
+    // construction (D5 — the app process runs in the tray; alerts fire from
+    // the heartbeat regardless of visibility).
+    final c = makeController(soundListing: () => ['x.mp3']);
+    await c.init();
+    await store.saveTree(
+      c.timer.id,
+      IntervalTree([
+        DefNode(IntervalDef(
+          id: 'd1',
+          timerId: c.timer.id,
+          color: '#0055ff',
+          durationSeconds: 1,
+          autoFinish: true,
+          endAlertSoundFile: 'x.mp3',
+        )),
+      ]),
+      eventKind: 'tree.edit',
+    );
+    await c.reload();
+
+    c.start();
+    clock.current = clock.current.add(const Duration(seconds: 2));
+    await c.tick();
+
+    expect(notifier.shows, hasLength(1));
+    expect(player.played, ['/sounds/x.mp3']);
+    c.dispose();
+    await store.close();
+  });
+
+  test('manual_zero_fires_alert_and_holds', () async {
+    final c = makeController(soundListing: () => ['x.mp3']);
+    await c.init();
+    await store.saveTree(
+      c.timer.id,
+      IntervalTree([
+        DefNode(IntervalDef(
+          id: 'd1',
+          timerId: c.timer.id,
+          color: '#0055ff',
+          durationSeconds: 1,
+          autoFinish: false, // manually complete: holds at zero
+          endAlertSoundFile: 'x.mp3',
+        )),
+      ]),
+      eventKind: 'tree.edit',
+    );
+    await c.reload();
+
+    c.start();
+    clock.current = clock.current.add(const Duration(seconds: 2));
+    await c.tick();
+
+    // Alert fired at zero AND the session holds awaiting advance.
+    expect(notifier.shows, hasLength(1));
+    expect(player.played, ['/sounds/x.mp3']);
+    expect(c.snapshot.state, SessionState.awaitingAdvance);
+    expect(c.snapshot.remaining, Duration.zero);
+    c.dispose();
+    await store.close();
+  });
+
+  test('notify_only_when_no_sound_resolves', () async {
+    // Empty sounds dir: the alert still notifies (D13) but plays nothing.
+    final c = makeController(soundListing: () => const []);
+    await c.init();
+    await store.saveTree(
+      c.timer.id,
+      IntervalTree([
+        DefNode(IntervalDef(
+          id: 'd1',
+          timerId: c.timer.id,
+          color: '#0055ff',
+          durationSeconds: 1,
+          autoFinish: true,
+          endAlertSoundFile: 'gone.mp3',
+        )),
+      ]),
+      eventKind: 'tree.edit',
+    );
+    await c.reload();
+
+    c.start();
+    clock.current = clock.current.add(const Duration(seconds: 2));
+    await c.tick();
+
+    expect(notifier.shows, hasLength(1));
+    expect(player.played, isEmpty); // nothing resolved in an empty dir
+    c.dispose();
+    await store.close();
   });
 }
