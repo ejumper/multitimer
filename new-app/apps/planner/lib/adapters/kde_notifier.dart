@@ -57,10 +57,17 @@ class KdeNotifier implements Notifier {
   }) async {
     // Body clicks fire the `default` action (see init) → onNotificationClick;
     // a non-null actionKey adds one labeled action button routed to onAction.
+    // expiresNever = remain on screen until the user closes it (acceptance
+    // "Notification Expiration").
     final details = actionKey == null
-        ? const NotificationDetails(linux: LinuxNotificationDetails())
+        ? const NotificationDetails(
+            linux: LinuxNotificationDetails(
+              timeout: LinuxNotificationTimeout.expiresNever(),
+            ),
+          )
         : NotificationDetails(
             linux: LinuxNotificationDetails(
+              timeout: LinuxNotificationTimeout.expiresNever(),
               actions: [
                 LinuxNotificationAction(
                   key: actionKey,

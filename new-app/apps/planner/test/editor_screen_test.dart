@@ -214,8 +214,10 @@ void main() {
     await tester.pump();
     expect(controller.tree.roots.length, 2); // back to 2
     expect(controller.tree.allIds.length, before);
-    expect(controller.selection, {'a'}); // snapshot selection restored
+    expect(controller.selection, isEmpty); // action rule: undo clears too
 
+    await tester.tap(find.byKey(const Key('select-a'))); // re-select
+    await tester.pump();
     await tester.tap(find.byKey(const Key('tool-delete')));
     await tester.pump();
     expect(controller.tree.allIds, ['g1', 'b']); // chip a deleted

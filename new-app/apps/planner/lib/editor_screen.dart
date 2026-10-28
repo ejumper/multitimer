@@ -209,7 +209,7 @@ class _EditorScreenState extends State<EditorScreen> {
         TextButton(
           key: const Key('editor-done'),
           style: TextButton.styleFrom(
-            backgroundColor: AppColors.blue,
+            backgroundColor: AppColors.card,
             foregroundColor: AppColors.text,
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
             shape: const RoundedRectangleBorder(
@@ -306,6 +306,8 @@ class _EditorScreenState extends State<EditorScreen> {
           IconButton(
             key: const Key('tool-delete'),
             icon: const Icon(Icons.delete_outline),
+            color: AppColors.danger, // destructive (greyscale-UI rule)
+            disabledColor: AppColors.dimmed,
             tooltip: 'Delete',
             onPressed: controller.hasSelection
                 ? controller.deleteSelection
@@ -462,9 +464,15 @@ class _EditorScreenState extends State<EditorScreen> {
     bool keyed = true,
   }) {
     final row = switch (node) {
-      DefNode(:final def) => _chipRow(def),
+      DefNode(:final def) =>
+        _chipRow(def, showSelection: parentGroupId == null),
       GroupNode(:final group, :final children) =>
-        _groupRow(group, children, keyed: keyed),
+        _groupRow(
+          group,
+          children,
+          keyed: keyed,
+          showSelection: parentGroupId == null,
+        ),
     };
     return GestureDetector(
       onVerticalDragDown: (d) => _pendingGrab = d.globalPosition,
@@ -581,6 +589,8 @@ class _EditorScreenState extends State<EditorScreen> {
       GroupNode(:final group, :final children) =>
         _groupRow(group, children, keyed: false),
     };
+    // (The float renders with selection circles — harmless, it is a visual
+    // copy only.)
     return Positioned(
       left: drag.rect.left,
       top: _pointer.dy - drag.grabDy,
@@ -736,17 +746,20 @@ class _EditorScreenState extends State<EditorScreen> {
 
   // ── row widgets ───────────────────────────────────────────────────────
 
-  /// One interval: selection circle | chip card (bordered, label left,
-  /// duration right, alert subtitle below). The CARD body is tappable →
-  /// edit this def; the selection circle stays independent (it sits
-  /// outside the card, so both gestures never overlap).
-  Widget _chipRow(IntervalDef def) {
+  /// One interval: selection circle (ROOT-level rows only — inside a group
+  /// the rows are one unit and not individually selectable, acceptance
+  /// "group selection semantics"; tapping the card still edits) | chip card
+  /// (interval-color tinted background, bordered, label left, duration
+  /// right, alert subtitle below).
+  Widget _chipRow(IntervalDef def, {bool showSelection = true}) {
     return Row(
       key: Key('chip-${def.id}'),
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        _selectionCircle(def.id),
-        const SizedBox(width: 10),
+        if (showSelection) ...[
+          _selectionCircle(def.id),
+          const SizedBox(width: 10),
+        ],
         // Builder: the tap needs a context and _chipRow has none of its
         // own (same trick as the bracket tap below).
         Expanded(
@@ -770,6 +783,9 @@ class _EditorScreenState extends State<EditorScreen> {
       decoration: BoxDecoration(
         borderRadius: const BorderRadius.all(Radius.circular(10)),
         border: Border.all(color: _hexColor(def.color), width: 1.4),
+        // Interval-color tinted background @ the shared semi-transparent
+        // alpha (acceptance: "Color intervals background in the editor").
+        color: _hexColor(def.color).withValues(alpha: 0x39 / 255),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -834,12 +850,15 @@ class _EditorScreenState extends State<EditorScreen> {
     GroupDef group,
     List<IntervalNode> children, {
     bool keyed = true,
+    bool showSelection = true,
   }) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        _selectionCircle(group.id),
-        const SizedBox(width: 10),
+        if (showSelection) ...[
+          _selectionCircle(group.id),
+          const SizedBox(width: 10),
+        ],
         Expanded(
           // IntrinsicHeight: the bracket must stretch to the children's
           // natural height (raw stretch gets unbounded constraints in here).
@@ -916,7 +935,7 @@ class _EditorScreenState extends State<EditorScreen> {
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           border: Border.all(color: AppColors.outline, width: 1.4),
-          color: selected ? AppColors.blue.withValues(alpha: 0.35) : null,
+          color: selected ? AppColors.text.withValues(alpha: 0.35) : null,
         ),
         child: selected
             ? const Icon(Icons.check, size: 14, color: AppColors.text)
@@ -1008,8 +1027,9 @@ class _LabelFieldState extends State<_LabelField> {
 class _GroupBarPainter extends CustomPainter {
   const _GroupBarPainter();
 
-  /// Outline color @ the shared semi-transparent alpha (theme card).
-  static const Color _fill = Color(0x73F2F2F2);
+  /// Outline color @ the shared semi-transparent alpha (theme card,
+  /// halved per acceptance).
+  static const Color _fill = Color(0x39F2F2F2);
 
   @override
   void paint(Canvas canvas, Size size) {

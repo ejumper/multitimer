@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 
 /// Bundled font families (registered in pubspec.yaml; local-only assets).
@@ -23,14 +25,19 @@ abstract final class AppColors {
   static const Color lime = Color(0xFFB8FF00);
 
   /// Semi-transparent dark "card" background — legible over compositor blur.
-  /// (black @ ~45%; tunable for legibility.)
-  static const Color card = Color(0x73000000);
+  /// (black @ ~22%; halved from 0x73 per acceptance — "too high, cut it in
+  /// half". Tunable for legibility.)
+  static const Color card = Color(0x39000000);
 
   /// Dimmed/disabled content.
   static const Color dimmed = Color(0x66F2F2F2);
 
   /// Hairlines, brackets, outlines.
   static const Color outline = Color(0x40F2F2F2);
+
+  /// Destructive actions (delete, reset) — the ONLY UI color besides the
+  /// timer/interval swatch colors (greyscale-UI rule).
+  static const Color danger = Color(0xFFFF4D4D);
 }
 
 /// Symmetric cross-fade route transition (all platforms).
@@ -93,6 +100,21 @@ class CrossFadePageTransitionsBuilder extends PageTransitionsBuilder {
       );
 }
 
+/// Wraps modal content in a full-screen blur layer (acceptance: "blur the
+/// UI elements behind overlays" for readability).
+Widget blurredBackdrop(Widget dialog, {double sigma = 8}) {
+  return Stack(
+    fit: StackFit.expand,
+    children: [
+      BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+        child: const SizedBox.expand(),
+      ),
+      Center(child: dialog),
+    ],
+  );
+}
+
 /// App theme: transparent scaffold over the compositor's blur, dark content.
 ThemeData buildPlannerTheme() {
   final base = ThemeData.dark(useMaterial3: true);
@@ -110,7 +132,9 @@ ThemeData buildPlannerTheme() {
       displayColor: AppColors.text,
       fontFamily: AppFonts.ui,
     ),
-    iconTheme: const IconThemeData(color: AppColors.lightBlue, size: 26),
+    // Greyscale UI rule: chrome icons use the text color — the only
+    // colored UI is destructive red and the timer/interval swatches.
+    iconTheme: const IconThemeData(color: AppColors.text, size: 26),
     splashFactory: InkSparkle.splashFactory,
     // Plain cross-fade route transitions (see CrossFadePageTransitionsBuilder
     // — the default zoom builder paints a surface scrim and rasterizes

@@ -218,7 +218,7 @@ void main() {
     controller.undo();
     expect(controller.name, 'Focus');
     expect(controller.tree.roots.length, 3);
-    expect(controller.selection, {'b'});
+    expect(controller.selection, isEmpty); // action rule: never restored
 
     // Undo the add: back to the original two defs, name still 'Focus'.
     controller.undo();
@@ -272,7 +272,7 @@ void main() {
       controller.tree.toDebugString(),
       'group:$g1[1]{def:a} | def:b | def:c | def:d',
     );
-    expect(controller.selection, {g1});
+    expect(controller.selection, isEmpty); // action rule: cleared
 
     // (2) [b, c] → G{b, c} between a and d.
     controller.dispose();
@@ -287,7 +287,7 @@ void main() {
       controller.tree.toDebugString(),
       'def:a | group:$g2[1]{def:b | def:c} | def:d',
     );
-    expect(controller.selection, {g2});
+    expect(controller.selection, isEmpty); // action rule: cleared
 
     // (3) Grouping [a, b] first reshapes the root positions; the shifted
     // [c, d] run is still contiguous and groups as a third group.
@@ -306,7 +306,7 @@ void main() {
       controller.tree.toDebugString(),
       'group:$g3[1]{def:a | def:b} | group:$g4[1]{def:c | def:d}',
     );
-    expect(controller.selection, {g4});
+    expect(controller.selection, isEmpty); // action rule: cleared
   });
 
   // 10. Scattered selections are NOT groupable: [a, c] over [a, b, c]
@@ -397,7 +397,7 @@ void main() {
       controller.tree.toDebugString(),
       'group:$outer[1]{def:a | def:b}',
     );
-    expect(controller.selection, {outer});
+    expect(controller.selection, isEmpty); // action rule: no selection
     expect(
       controller.tree.allIds,
       isNot(contains('g1')),

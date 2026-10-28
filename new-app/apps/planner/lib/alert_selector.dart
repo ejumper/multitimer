@@ -75,11 +75,14 @@ class _AlertSelectorScreenState extends State<AlertSelectorScreen> {
   }
 
   /// One selection: stop any running preview FIRST (auto-stop on selection
-  /// change), commit locally, report the pick. Selection never auto-plays.
+  /// change), commit locally, report the pick, and CLOSE (acceptance:
+  /// "Auto closing End Alert UI when a sound is selected"). Selection
+  /// never auto-plays.
   void _select(String? file) {
     unawaited(widget.player.stop());
     setState(() => _selected = file);
     widget.onSelected(file);
+    Navigator.of(context).pop();
   }
 
   /// ▶ on a row: preview that file (the only way a preview starts).
@@ -92,19 +95,23 @@ class _AlertSelectorScreenState extends State<AlertSelectorScreen> {
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: SafeArea(
+        // Centered content block like every other view (acceptance: "End
+        // Alert placement" — the old Expanded empty-state forced the column
+        // full-height, pinning the content to the top); scrolls when long.
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 520),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _header(context),
-                const SizedBox(height: 10),
-                if (_files.isEmpty)
-                  Expanded(child: Center(child: _emptyState()))
-                else
-                  Expanded(child: _list()),
-              ],
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _header(context),
+                  const SizedBox(height: 10),
+                  if (_files.isEmpty) _emptyState() else _list(),
+                ],
+              ),
             ),
           ),
         ),
@@ -140,6 +147,8 @@ class _AlertSelectorScreenState extends State<AlertSelectorScreen> {
   /// "No alert" first, then one card row per file.
   Widget _list() {
     return ListView(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       children: [
         _noneRow(),
@@ -175,7 +184,7 @@ class _AlertSelectorScreenState extends State<AlertSelectorScreen> {
               ),
             ),
             if (_selected == null)
-              const Icon(Icons.check, size: 20, color: AppColors.lightBlue),
+              const Icon(Icons.check, size: 20, color: AppColors.text),
           ],
         ),
       ),
@@ -207,7 +216,7 @@ class _AlertSelectorScreenState extends State<AlertSelectorScreen> {
               ),
             ),
             if (_selected == file)
-              const Icon(Icons.check, size: 20, color: AppColors.lightBlue),
+              const Icon(Icons.check, size: 20, color: AppColors.text),
             IconButton(
               key: Key('as-play-$file'),
               icon: const Icon(Icons.play_arrow_outlined),
@@ -266,7 +275,7 @@ class _BackCircle extends StatelessWidget {
         padding: const EdgeInsets.all(12),
       ),
       onPressed: onPressed,
-      child: const Icon(Icons.arrow_back, size: 22, color: AppColors.lightBlue),
+      child: const Icon(Icons.arrow_back, size: 22, color: AppColors.text),
     );
   }
 }

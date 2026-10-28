@@ -56,25 +56,26 @@ class BoardScreen extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          controller.board.name,
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            fontFamily: AppFonts.ui,
-            fontSize: 17,
-            fontWeight: FontWeight.w700,
-            color: AppColors.lightBlue,
-          ),
-        ),
+        // Board name hidden for v1 (single board — kept for future
+        // multi-board versions, acceptance "Remove the Board Name").
+        // Text(
+        //   controller.board.name,
+        //   textAlign: TextAlign.center,
+        //   style: const TextStyle(
+        //     fontFamily: AppFonts.ui,
+        //     fontSize: 17,
+        //     fontWeight: FontWeight.w700,
+        //     color: AppColors.text,
+        //   ),
+        // ),
         const SizedBox(height: 16),
         _dial(context, snapshot, timerColor),
         const SizedBox(height: 12),
         _controlRow(context, snapshot),
         const SizedBox(height: 12),
-        if (snapshot.state == SessionState.awaitingAdvance)
-          _tapToContinue()
-        else
-          _caption(snapshot),
+        if (snapshot.state == SessionState.awaitingAdvance) _tapToContinue(),
+        // The next-interval caption is gone (acceptance: it was MultiTimer's
+        // advance button stand-in — the '>' control replaced it).
         const SizedBox(height: 24),
       ],
     );
@@ -202,6 +203,10 @@ class BoardScreen extends StatelessWidget {
 
   /// `≫ next interval` caption — shown iff an instance follows the cursor
   /// (at notStarted the first instance is "next").
+  /// The next-interval caption: retired per acceptance (the '>' skip
+  /// control replaced this MultiTimer-era advance hint). Code kept for
+  /// possible future use.
+  // ignore: unused_element
   Widget _caption(TimerSnapshot snapshot) {
     final nextIndex = (snapshot.ordinal ?? -1) + 1;
     if (nextIndex >= controller.instances.length) {
@@ -248,6 +253,7 @@ class BoardScreen extends StatelessWidget {
           key: const Key('btn-reset'),
           icon: Icons.close_outlined,
           tooltip: 'Reset',
+          color: AppColors.danger, // destructive (greyscale-UI rule)
           onPressed: () => _showResetDialog(context),
         ),
         const SizedBox(width: 8),
@@ -267,6 +273,7 @@ class BoardScreen extends StatelessWidget {
     required IconData icon,
     required String tooltip,
     required VoidCallback? onPressed,
+    Color color = AppColors.text,
   }) => Container(
     padding: const EdgeInsets.all(6),
     decoration: const BoxDecoration(
@@ -275,7 +282,7 @@ class BoardScreen extends StatelessWidget {
     ),
     child: IconButton(
       key: key,
-      icon: Icon(icon, size: 26, color: AppColors.blue),
+      icon: Icon(icon, size: 26, color: color),
       tooltip: tooltip,
       onPressed: onPressed,
     ),
@@ -288,12 +295,13 @@ class BoardScreen extends StatelessWidget {
     final current = controller.snapshot.ordinal;
     showDialog<void>(
       context: context,
-      builder: (dialogContext) => Dialog(
-        key: const Key('list-overlay'),
-        backgroundColor: AppColors.card,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(16)),
-        ),
+      builder: (dialogContext) => blurredBackdrop(
+        Dialog(
+          key: const Key('list-overlay'),
+          backgroundColor: AppColors.card,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(16)),
+          ),
         child: SizedBox(
           height: 420,
           width: 360,
@@ -323,9 +331,9 @@ class BoardScreen extends StatelessWidget {
                     final instance = instances[index];
                     final isCurrent = index == current;
                     // Odd rows get a subtle tint; the current row wins it
-                    // with a blue highlight.
+                    // with a grey highlight (greyscale-UI rule).
                     final background = isCurrent
-                        ? AppColors.blue.withValues(alpha: 0.25)
+                        ? AppColors.text.withValues(alpha: 0.25)
                         : index.isOdd
                             ? Colors.white.withValues(alpha: 0.03)
                             : null;
@@ -350,8 +358,8 @@ class BoardScreen extends StatelessWidget {
                                   fontFamily: AppFonts.ui,
                                   fontSize: 15,
                                   color: isCurrent
-                                      ? AppColors.lightBlue
-                                      : AppColors.text,
+                                      ? AppColors.text
+                                      : AppColors.dimmed,
                                 ),
                               ),
                             ),
@@ -375,6 +383,7 @@ class BoardScreen extends StatelessWidget {
             ],
           ),
         ),
+        ),
       ),
     );
   }
@@ -384,27 +393,32 @@ class BoardScreen extends StatelessWidget {
   void _showResetDialog(BuildContext context) {
     showDialog<void>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: AppColors.card,
-        title: const Text('Reset timer?'),
-        content: const Text(
-          'The current run will end and the timer returns to not started.',
+      builder: (dialogContext) => blurredBackdrop(
+        AlertDialog(
+          backgroundColor: AppColors.card,
+          title: const Text('Reset timer?'),
+          content: const Text(
+            'The current run will end and the timer returns to not started.',
+          ),
+          actions: [
+            TextButton(
+              key: const Key('dialog-cancel'),
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              key: const Key('dialog-confirm'),
+              onPressed: () {
+                controller.reset();
+                Navigator.of(dialogContext).pop();
+              },
+              child: const Text(
+                'Reset',
+                style: TextStyle(color: AppColors.danger),
+              ),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            key: const Key('dialog-cancel'),
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            key: const Key('dialog-confirm'),
-            onPressed: () {
-              controller.reset();
-              Navigator.of(dialogContext).pop();
-            },
-            child: const Text('Reset'),
-          ),
-        ],
       ),
     );
   }
@@ -423,7 +437,7 @@ class BoardScreen extends StatelessWidget {
             const Icon(
               Icons.double_arrow,
               size: 18,
-              color: AppColors.lightBlue,
+              color: AppColors.text,
             ),
             const SizedBox(width: 4),
             const Text(
@@ -431,7 +445,7 @@ class BoardScreen extends StatelessWidget {
               style: TextStyle(
                 fontFamily: AppFonts.ui,
                 fontSize: 17,
-                color: AppColors.lightBlue,
+                color: AppColors.text,
               ),
             ),
           ],
@@ -497,8 +511,8 @@ class _DialPainter extends CustomPainter {
   final Color timerColor;
 
   /// Alpha shared with the app's semi-transparent backgrounds (AppColors
-  /// card is 0x73).
-  static const double _dimAlpha = 0x73 / 255;
+  /// card is 0x39 — halved with it per acceptance).
+  static const double _dimAlpha = 0x39 / 255;
 
   /// Elapsed-tick brightness relative to the interval color.
   static const double _dimBrightness = 0.66;
@@ -709,7 +723,7 @@ class _PulseState extends State<_Pulse> with SingleTickerProviderStateMixin {
   );
 }
 
-/// Blue vertical-bar + letters state chip appended to the big line.
+/// Grey vertical-bar + letters state chip appended to the big line.
 class _StateChip extends StatelessWidget {
   const _StateChip(this.label);
 
@@ -720,14 +734,14 @@ class _StateChip extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(width: 2, height: 34, color: AppColors.blue),
+        Container(width: 2, height: 34, color: AppColors.text),
         const SizedBox(width: 8),
         Text(
           label,
           style: const TextStyle(
             fontFamily: AppFonts.ui,
             fontSize: 16,
-            color: AppColors.blue,
+            color: AppColors.text,
             letterSpacing: 2,
           ),
         ),

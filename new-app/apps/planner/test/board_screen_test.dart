@@ -97,8 +97,9 @@ void main() {
     expect(find.text('01'), findsOneWidget);
     expect(find.text('M'), findsOneWidget);
     expect(find.text('30'), findsOneWidget);
-    // Caption offers the FIRST instance as next.
-    expect(find.text('1. break - 1m'), findsOneWidget);
+    // The next-interval caption is retired (acceptance — the '>' skip
+    // control replaced the MultiTimer-era advance hint).
+    expect(find.text('1. break - 1m'), findsNothing);
     expect(find.text('PAUSED'), findsNothing);
     expect(find.text('WAIT'), findsNothing);
 
@@ -115,7 +116,7 @@ void main() {
     expect(find.text('1m'), findsOneWidget); // totalRemaining 90s
     expect(find.text('01:00'), findsOneWidget); // current remaining 60s
     expect(find.text('1. break'), findsOneWidget);
-    expect(find.text('2. Cards - 30s'), findsOneWidget);
+    expect(find.text('2. Cards - 30s'), findsNothing); // caption retired
     expect(find.text('PAUSED'), findsNothing);
     expect(find.text('WAIT'), findsNothing);
 
@@ -291,11 +292,11 @@ void main() {
         matching: find.text('1. break'),
       ),
     );
-    expect(label0.style?.color, AppColors.lightBlue);
+    expect(label0.style?.color, AppColors.text); // greyscale-UI rule
 
     final row0 = tester.widget<Container>(find.byKey(const Key('list-row-0')));
     final row1 = tester.widget<Container>(find.byKey(const Key('list-row-1')));
-    expect(row0.color, AppColors.blue.withValues(alpha: 0.25));
+    expect(row0.color, AppColors.text.withValues(alpha: 0.25));
     expect(row0.color, isNot(equals(row1.color)));
 
     controller.dispose();

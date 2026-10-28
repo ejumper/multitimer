@@ -9,7 +9,7 @@ import 'theme.dart';
 Future<int?> showRepeatModal(BuildContext context, {required int initial}) {
   return showDialog<int>(
     context: context,
-    builder: (context) => _RepeatModal(initial: initial),
+    builder: (context) => blurredBackdrop(_RepeatModal(initial: initial)),
   );
 }
 

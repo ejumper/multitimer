@@ -45,6 +45,12 @@ class EditorController extends ChangeNotifier {
   IntervalTree tree;
 
   /// Selected node ids (def or group), multi-select. Not part of undo.
+  /// Last END-ALERT sound used by a saved def — the default for NEW
+  /// intervals (acceptance: "New Interval Default Sound").
+  String? lastSound;
+
+  /// The selection circles of the tree rows (view state — never restored
+  /// by undo, cleared by every action that acts on nodes).
   final Set<String> selection = <String>{};
 
   /// Snapshot stack, newest last.
@@ -126,6 +132,7 @@ class EditorController extends ChangeNotifier {
     String? endAlertSoundFile,
   }) {
     _pushUndo();
+    if (endAlertSoundFile != null) lastSound = endAlertSoundFile;
     final node = DefNode(
       IntervalDef(
         id: newUuidV4(),
@@ -163,15 +170,19 @@ class EditorController extends ChangeNotifier {
       );
     }
     _pushUndo();
+    if (newDef.endAlertSoundFile != null) {
+      lastSound = newDef.endAlertSoundFile;
+    }
     tree = IntervalTree(_replaceDefIn(tree.roots, defId, newDef));
     notifyListeners();
   }
 
   /// Deep-copies the selected siblings below the last selected node (P1.1
-  /// semantics). Selection is kept unchanged.
+  /// semantics). Selection is CLEARED (action rule).
   void duplicateSelection() {
     _pushUndo();
     tree = tree.duplicated(selection.toList(), newId: newUuidV4);
+    selection.clear();
     notifyListeners();
   }
 
@@ -219,8 +230,9 @@ class EditorController extends ChangeNotifier {
   }
 
   /// Wraps the topmost selected siblings in a fresh group (repeat 1),
-  /// selects that group, and RETURNS its id so callers can open the repeat
-  /// modal for it. One undo step. Throws [StateError] when ![canGroup].
+  /// CLEARS the selection (action rule — the group is NOT auto-selected),
+  /// and RETURNS the new group's id so callers can open the repeat modal
+  /// for it. One undo step. Throws [StateError] when ![canGroup].
   String groupSelection() {
     final topmost = _topmostSelected();
     if (topmost.isEmpty || !_areContiguousSiblings(topmost)) {
@@ -231,9 +243,7 @@ class EditorController extends ChangeNotifier {
     _pushUndo();
     final newGroupId = newUuidV4();
     tree = tree.grouped(topmost, newGroupId: newGroupId, repeatCount: 1);
-    selection
-      ..clear()
-      ..add(newGroupId);
+    selection.clear();
     notifyListeners();
     return newGroupId;
   }
@@ -265,6 +275,7 @@ class EditorController extends ChangeNotifier {
     }
     _pushUndo();
     tree = _treeWithRepeat(tree, groupId, repeat);
+    selection.clear(); // action rule: nothing stays selected
     notifyListeners();
   }
 
@@ -366,17 +377,18 @@ class EditorController extends ChangeNotifier {
       },
   ];
 
-  /// Pops the newest snapshot and restores name/color/tree/selection.
-  /// No-op when the stack is empty; never pushes.
+  /// Pops the newest snapshot and restores name/color/tree. The SELECTION
+  /// is NOT restored — an action never leaves a selection behind
+  /// (acceptance: "undoing a grouping results in the intervals being
+  /// selected … simply shouldn't happen"). No-op when the stack is empty;
+  /// never pushes.
   void undo() {
     if (_undo.isEmpty) return;
     final snapshot = _undo.removeLast();
     name = snapshot.name;
     color = snapshot.color;
     tree = snapshot.tree;
-    selection
-      ..clear()
-      ..addAll(snapshot.selection);
+    selection.clear();
     notifyListeners();
   }
 

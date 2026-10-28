@@ -83,15 +83,18 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
     _def = def;
     _label = TextEditingController(text: def?.name ?? '');
     if (def == null) {
-      // CREATE: `00` boxes, the timer's color, auto-finish ON, and the
-      // first alert file alphabetically (empty listing → no alert).
+      // CREATE: `00` boxes, the timer's color, auto-finish OFF (acceptance
+      // "Auto-finish off by default"), and the LAST USED sound as the end
+      // alert (falling back to the first file alphabetically; empty listing
+      // → no alert).
       _hr = TextEditingController(text: '00');
       _min = TextEditingController(text: '00');
       _sec = TextEditingController(text: '00');
       _color = widget.controller.color;
-      _autoFinish = true;
+      _autoFinish = false;
       final files = [...widget.soundListing()]..sort();
-      _endAlertSoundFile = files.isEmpty ? null : files.first;
+      _endAlertSoundFile = widget.controller.lastSound ??
+          (files.isEmpty ? null : files.first);
     } else {
       // EDIT: seed everything from the def; boxes via the split inverse.
       final parts = splitDuration(Duration(seconds: def.durationSeconds));
@@ -383,7 +386,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
               ),
               focusedBorder: const OutlineInputBorder(
                 borderRadius: BorderRadius.all(Radius.circular(8)),
-                borderSide: BorderSide(color: AppColors.lightBlue),
+                borderSide: BorderSide(color: AppColors.outline),
               ),
             ),
             onChanged: (value) => _boxChanged(controller, value),
@@ -564,7 +567,7 @@ class _BackCircle extends StatelessWidget {
         padding: const EdgeInsets.all(12),
       ),
       onPressed: onPressed,
-      child: const Icon(Icons.arrow_back, size: 22, color: AppColors.lightBlue),
+      child: const Icon(Icons.arrow_back, size: 22, color: AppColors.text),
     );
   }
 }
