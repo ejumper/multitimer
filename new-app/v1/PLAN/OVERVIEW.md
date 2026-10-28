@@ -42,7 +42,7 @@ Same shape as the decompile plan: phases → parts; **one part = one executor se
 
 ## Environment notes (as of 2026-10-27)
 
-- Present: cmake, ninja, gcc, pkg-config, java, rg. **Missing: flutter/dart SDK, clang, gtk3 dev headers.**
+- Present: cmake, ninja, gcc, pkg-config, java, rg. **Missing: flutter/dart SDK, clang, gtk3 dev headers.** Distro: **Kubuntu** (apt/snap).
 - Fonts (ProLisa, MonoLisa) live in `/usr/local/share/fonts/p/` — copied into the app as gitignored assets (public repo; licensed fonts stay local).
 - Repo: `~/HalfaCloud/Jumperpedia/Projects/Repos/multitimer`, branch `main`, remote `github.com/ejumper/multitimer`. All v1 code lives under `new-app/`.
 
