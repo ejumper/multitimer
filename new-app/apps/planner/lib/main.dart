@@ -1,122 +1,90 @@
 import 'package:flutter/material.dart';
+import 'package:system_tray/system_tray.dart';
+import 'package:window_manager/window_manager.dart';
 
-void main() {
-  runApp(const MyApp());
+import 'mock_board.dart';
+import 'theme.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await windowManager.ensureInitialized();
+  await windowManager.waitUntilReadyToShow(
+    const WindowOptions(
+      title: 'Planner',
+      size: Size(1024, 800),
+      minimumSize: Size(640, 480),
+      center: true,
+    ),
+    () async {
+      await windowManager.show();
+      await windowManager.focus();
+    },
+  );
+  // Close button hides to tray instead of quitting (D5: no daemon; the app
+  // must keep running while closed so alarms can fire).
+  await windowManager.setPreventClose(true);
+
+  await _initTray();
+
+  runApp(const PlannerApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class PlannerApp extends StatelessWidget {
+  const PlannerApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Planner',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
-      ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      debugShowCheckedModeBanner: false,
+      theme: buildPlannerTheme(),
+      home: const MockBoardPage(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
-
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
+void _showWindow() {
+  windowManager.show();
+  windowManager.focus();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+/// Tray setup via system_tray (per-platform plugin; Linux path uses
+/// ayatana-appindicator/StatusNotifier — the tray_manager 0.8/nativeapi path
+/// silently failed to register on this desktop, see P0.2 report).
+///
+/// On KDE the panel opens the context menu on any icon click and click events
+/// are not delivered to the app — so "tray click → show window" goes through
+/// the menu's "Show Planner" item, which is the KDE-idiomatic behavior. The
+/// Quit item is the real exit.
+Future<void> _initTray() async {
+  final SystemTray systemTray = SystemTray();
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
-  }
+  await systemTray.initSystemTray(
+    title: 'Planner',
+    iconPath: 'assets/tray/planner_tray.png',
+  );
 
-  @override
-  Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
-    return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
-          children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-          ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ),
-    );
-  }
+  final Menu menu = Menu();
+  await menu.buildFrom([
+    MenuItemLabel(label: 'Show Planner', onClicked: (_) => _showWindow()),
+    MenuSeparator(),
+    MenuItemLabel(
+      label: 'Quit',
+      onClicked: (_) {
+        // Real exit — destroys the window and ends the process.
+        windowManager.destroy();
+      },
+    ),
+  ]);
+
+  await systemTray.setContextMenu(menu);
+
+  // Not delivered on Linux (the panel keeps the clicks); wired for other
+  // platforms / future use.
+  systemTray.registerSystemTrayEventHandler((eventName) {
+    if (eventName == kSystemTrayEventClick) {
+      _showWindow();
+    }
+  });
 }

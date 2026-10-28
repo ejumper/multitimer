@@ -24,3 +24,6 @@ new-app/apps/planner/assets/sounds/
 
 # --- scratch ---
 *.log
+
+# tray icon placeholder (local-only, regenerable via new-app/scripts/gen_tray_icon.py)
+new-app/apps/planner/assets/tray/

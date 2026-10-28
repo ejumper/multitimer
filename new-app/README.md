@@ -46,6 +46,20 @@ build/linux/x64/release/bundle/planner   # run the built app
 cd apps/planner && flutter run -d linux  # dev run with hot reload
 ```
 
+## Desktop prototype notes (P0.2)
+
+- The window background is **fully transparent** — your compositor (KWin)
+  supplies the blur. Recipe lives in
+  `apps/planner/linux/runner/my_application.cc` (RGBA visual + app-paintable +
+  transparent `FlView` background; see flutter/flutter#152154).
+- Fonts (`assets/fonts/`) and the tray icon (`assets/tray/`) are **local-only,
+  gitignored**. Regenerate the tray icon with
+  `python3 scripts/gen_tray_icon.py`; copy fonts from `/usr/local/share/fonts/`
+  (`p/ProLisa_Regular.ttf`, `p/ProLisa_Bold.ttf`, `m/MonoLisa_Medium.ttf`,
+  `m/MonoLisa_Black.ttf`) — a fresh clone needs both before `flutter run`.
+- Close button hides to tray; restore via the tray menu's **Show Planner**
+  (on KDE, clicking the tray icon opens its menu); **Quit** exits.
+
 There is no top-level pubspec/workspace on purpose: each package resolves on
 its own and the scripts above are the single entry point.
 
