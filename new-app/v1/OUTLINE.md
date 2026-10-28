@@ -32,7 +32,7 @@
 
 - **D8 — Icons: Material Symbols (bundled with Flutter).** Nothing to acquire; 2,000+ icons, swappable later. Interval labels in v1 are text + color; per-interval icon sets (MultiTimer-style) deferred.
 
-- **D9 — Font: *(open — pending user pick).*** Plan: bundle the font as a TTF asset so the app matches the desktop theme exactly (Flutter doesn't inherit system fonts). Timer displays use tabular (fixed-width) digits so countdowns don't jitter.
+- **D9 — Fonts: bundle the user's own fonts as local-only assets.** UI text = **ProLisa** (user's GTK theme font); timer/number readouts = **MonoLisa Medium** (monospace → digits don't jitter while counting). Flutter doesn't inherit system fonts, so TTFs ship as app assets; font files stay **gitignored** (public repo, licensed fonts — local-only, like `REFERENCE/`). *(Pending user confirmation.)*
 
 ## Process
 
