@@ -63,6 +63,22 @@ cd apps/planner && flutter run -d linux  # dev run with hot reload
 There is no top-level pubspec/workspace on purpose: each package resolves on
 its own and the scripts above are the single entry point.
 
+## Engine codegen (drift)
+
+`packages/planner_engine` generates `lib/storage/planner_db.g.dart` via drift:
+
+```sh
+cd packages/planner_engine && dart run build_runner build --delete-conflicting-outputs
+```
+
+NB (toolchain quirks found in P1.1, drift_dev 2.35.2 / Dart 3.13.7):
+
+- `int32()` and `textEnum<>()` column types **silently break code generation**
+  (empty `.g.dart`, no error). Use `integer()` (same 64-bit SQLite type) and
+  map enums by name in `DriftStore` instead.
+- If generation ever emits a suspiciously tiny `.g.dart`, delete it and
+  `.dart_tool/build/`, then rebuild.
+
 ## Conventions that matter here
 
 - `packages/planner_engine` must stay **pure Dart** — a purity test in the
