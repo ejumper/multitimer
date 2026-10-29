@@ -259,7 +259,7 @@ class _EditorScreenState extends State<EditorScreen> {
                     height: 10,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: Colors.white,
+                      color: contrastDot(_hexColor(hex)),
                     ),
                   ),
                 )

@@ -234,9 +234,9 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
                   child: Container(
                     width: 10,
                     height: 10,
-                    decoration: const BoxDecoration(
+                    decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: Colors.white,
+                      color: contrastDot(_hexColor(hex)),
                     ),
                   ),
                 )

@@ -9,12 +9,18 @@ abstract final class AppFonts {
   static const String digits = 'MonoLisa';
 }
 
+/// The selected-swatch dot color: black on light swatches (white /
+/// near-white — and anything else too luminous for a white dot, e.g.
+/// lime), white otherwise. Perceptual-luminance threshold at 0.5.
+Color contrastDot(Color background) =>
+    background.computeLuminance() > 0.5 ? Colors.black : Colors.white;
+
 /// v1 color tokens (OUTLINE.md D11).
 abstract final class AppColors {
   /// Text/foreground.
   static const Color text = Color(0xFFF2F2F2);
 
-  /// Preset accent swatches (interval/timer colors).
+/// Preset accent swatches (interval/timer colors).
   static const Color magenta = Color(0xFFFF00B1);
   static const Color violet = Color(0xFF4800FF);
   static const Color blue = Color(0xFF0055FF);
