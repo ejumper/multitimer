@@ -460,7 +460,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
 
   void _openAlertSelector() {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
+      AppPageRoute<void>(
         builder: (_) => AlertSelectorScreen(
           soundsDir: widget.soundsDir,
           soundListing: widget.soundListing,

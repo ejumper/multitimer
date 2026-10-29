@@ -351,7 +351,7 @@ class _EditorScreenState extends State<EditorScreen> {
   /// tapped chip's def.
   void _openIntervalEditor(BuildContext context, {String? defId}) {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
+      AppPageRoute<void>(
         builder: (_) => IntervalEditorScreen(
           controller: controller,
           defId: defId,

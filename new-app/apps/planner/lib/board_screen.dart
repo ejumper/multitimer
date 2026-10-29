@@ -92,7 +92,7 @@ class BoardScreen extends StatelessWidget {
         final tree = await controller.store.loadTree(controller.timer.id);
         if (!context.mounted) return;
         await Navigator.of(context).push(
-          MaterialPageRoute<void>(
+          AppPageRoute<void>(
             builder: (_) => EditorScreen(
               controller: EditorController(
                 store: controller.store,

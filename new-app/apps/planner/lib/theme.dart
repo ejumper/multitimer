@@ -61,9 +61,12 @@ abstract final class AppColors {
 class CrossFadePageTransitionsBuilder extends PageTransitionsBuilder {
   const CrossFadePageTransitionsBuilder();
 
-  /// Exit curve: completes in the first half of the transition — a screen
-  /// going AWAY fades out twice as fast as one coming in.
-  static const Curve _fastOut = Interval(0.0, 0.5, curve: Curves.easeOut);
+  /// Exit curve, written against the DECREASING value axis of a reverse
+  /// animation: Interval(0.5, 1.0) = the value's TOP half = the exit's
+  /// FIRST half (gone by halfway ≈ 75ms of the 150ms transition), and
+  /// easeIn = the fast initial drop — the screen going away is the snappy
+  /// direction (acceptance: fade-out must be faster than fade-in).
+  static const Curve _exitFade = Interval(0.5, 1.0, curve: Curves.easeIn);
 
   @override
   Widget buildTransitions<T>(
@@ -78,7 +81,7 @@ class CrossFadePageTransitionsBuilder extends PageTransitionsBuilder {
       opacity: CurvedAnimation(
         parent: animation,
         curve: Curves.easeOut,
-        reverseCurve: _fastOut,
+        reverseCurve: _exitFade,
       ),
       child: FadeTransition(
         opacity: coverFade(secondaryAnimation),
@@ -93,16 +96,26 @@ class CrossFadePageTransitionsBuilder extends PageTransitionsBuilder {
       (context, animation, secondaryAnimation, allowSnapshotting, child) =>
           FadeTransition(opacity: coverFade(secondaryAnimation), child: child);
 
-  /// The covered route fades OUT (double speed) as the route above comes in
-  /// and back IN (normal speed) when it pops — [ReverseAnimation] flips the
-  /// status, so the covered exit lands on `reverseCurve` and the uncover on
-  /// `curve`.
+  /// The covered route fades OUT (fast — first half of the transition) as
+  /// the route above comes in and back IN (normal) when it pops —
+  /// [ReverseAnimation] flips the status, so the covered exit lands on
+  /// `reverseCurve` and the uncover on `curve`.
   static Animation<double> coverFade(Animation<double> secondary) =>
       CurvedAnimation(
         parent: ReverseAnimation(secondary),
         curve: Curves.easeOut,
-        reverseCurve: _fastOut,
+        reverseCurve: _exitFade,
       );
+}
+
+/// App page route: the theme's cross-fade at HALF the stock duration
+/// (acceptance: "cut both the fade times by half" — snappy page changes;
+/// fades-in run the full 150ms, fades-out are gone by ~75ms).
+class AppPageRoute<T> extends MaterialPageRoute<T> {
+  AppPageRoute({required super.builder, super.settings});
+
+  @override
+  Duration get transitionDuration => const Duration(milliseconds: 150);
 }
 
 /// Wraps modal content in a full-screen blur layer (acceptance: "blur the

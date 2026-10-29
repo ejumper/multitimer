@@ -20,10 +20,10 @@ void main() {
 
     tester
         .state<NavigatorState>(find.byType(Navigator))
-        .push(MaterialPageRoute<void>(builder: (_) => screen('B')));
+        .push(AppPageRoute<void>(builder: (_) => screen('B')));
 
     await tester.pump(); // transition starts
-    await tester.pump(const Duration(milliseconds: 150)); // mid-flight
+    await tester.pump(const Duration(milliseconds: 60)); // mid-flight (150ms total)
 
     // Both routes fade together: the outgoing one is still in the tree
     // (fading out), the incoming one is already fading in.
@@ -46,12 +46,12 @@ void main() {
       MaterialApp(theme: buildPlannerTheme(), home: screen('A')),
     );
     final nav = tester.state<NavigatorState>(find.byType(Navigator));
-    nav.push(MaterialPageRoute<void>(builder: (_) => screen('B')));
+    nav.push(AppPageRoute<void>(builder: (_) => screen('B')));
     await tester.pumpAndSettle();
 
     nav.pop();
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 150));
+    await tester.pump(const Duration(milliseconds: 60));
     // Same cross-fade shape as the push: both routes visible mid-flight.
     expect(find.text('A'), findsOneWidget);
     expect(find.text('B'), findsOneWidget);
