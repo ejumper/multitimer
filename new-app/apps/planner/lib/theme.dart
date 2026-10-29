@@ -118,18 +118,21 @@ class AppPageRoute<T> extends MaterialPageRoute<T> {
   Duration get transitionDuration => const Duration(milliseconds: 150);
 }
 
-/// Wraps modal content in a full-screen blur layer (acceptance: "blur the
-/// UI elements behind overlays" for readability).
+/// Frosted-panel wrapper for modal content (acceptance): blurs ONLY the
+/// area behind [dialog] — the filter hugs the dialog's rounded rect and
+/// the dialog paints as the filter's CHILD, so the blurred backdrop
+/// REPLACES the sharp one inside that rect (the old full-screen sibling
+/// arrangement smeared the whole page AND leaked the sharp copy through
+/// the blur).
 Widget blurredBackdrop(Widget dialog, {double sigma = 8}) {
-  return Stack(
-    fit: StackFit.expand,
-    children: [
-      BackdropFilter(
+  return Center(
+    child: ClipRRect(
+      borderRadius: const BorderRadius.all(Radius.circular(16)),
+      child: BackdropFilter(
         filter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
-        child: const SizedBox.expand(),
+        child: dialog,
       ),
-      Center(child: dialog),
-    ],
+    ),
   );
 }
 
