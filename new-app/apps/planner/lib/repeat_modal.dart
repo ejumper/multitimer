@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 
 import 'theme.dart';
@@ -7,17 +9,19 @@ import 'theme.dart';
 /// once). Returns the confirmed count, or null when dismissed without OK
 /// (barrier tap / back) — the caller then leaves the group untouched.
 Future<int?> showRepeatModal(BuildContext context, {required int initial}) {
-  return showDialog<int>(
-    context: context,
-    barrierColor: Colors.transparent, // effect only behind the menu
-    builder: (context) => blurredBackdrop(_RepeatModal(initial: initial)),
+  return showFrostedDialog<int>(
+    context,
+    builder: (snapshot) => _RepeatModal(initial: initial, snapshot: snapshot),
   );
 }
 
 /// The dialog body — a small stateful widget owning the live count, so the
 /// stepper survives its own setState rebuilds.
 class _RepeatModal extends StatefulWidget {
-  const _RepeatModal({required this.initial});
+  const _RepeatModal({required this.initial, required this.snapshot});
+
+  /// Frosted-panel snapshot of the UI behind the modal (theme.dart).
+  final ui.Image? snapshot;
 
   final int initial;
 
@@ -33,13 +37,15 @@ class _RepeatModalState extends State<_RepeatModal> {
   Widget build(BuildContext context) {
     return Dialog(
       key: const Key('repeat-modal'),
-      backgroundColor: AppColors.card,
+      backgroundColor: Colors.transparent,
       constraints: const BoxConstraints(minWidth: 220),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.all(Radius.circular(16)),
         side: BorderSide(color: AppColors.cardBorder),
       ),
-      child: SizedBox(
+      child: frostedPanel(
+        snapshot: widget.snapshot,
+        child: SizedBox(
         width: 220,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
@@ -87,6 +93,7 @@ class _RepeatModalState extends State<_RepeatModal> {
             ],
           ),
         ),
+      ),
       ),
     );
   }

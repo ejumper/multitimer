@@ -111,6 +111,11 @@ class PlannerApp extends StatelessWidget {
       title: 'Planner',
       debugShowCheckedModeBanner: false,
       theme: buildPlannerTheme(),
+      // Frosted-dialog capture handle (see theme.dart's frostedPanel).
+      builder: (context, child) => RepaintBoundary(
+        key: appFrameKey,
+        child: child ?? const SizedBox.shrink(),
+      ),
       home: BoardScreen(controller),
     );
   }
