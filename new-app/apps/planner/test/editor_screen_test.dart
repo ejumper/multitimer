@@ -1,5 +1,6 @@
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:planner/editor_controller.dart';
 import 'package:planner/editor_screen.dart';
@@ -493,6 +494,104 @@ void main() {
 
   // Edge-slot level follows the pointer's X: content column = the inner
   // group, bracket column = the outer group, left of that = outside all.
+  Future<void> pressWithCtrl(
+    WidgetTester tester,
+    LogicalKeyboardKey key, {
+    bool shift = false,
+  }) async {
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    if (shift) await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(key);
+    if (shift) await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+  }
+
+  // Keyboard sections (acceptance): Tab cycles top/color/name/buttons/
+  // intervals; Ctrl+Home/End jump; Enter acts; Escape = Done.
+  testWidgets('keyboard_editor_sections', (tester) async {
+    await pumpEditor(tester);
+
+    // Tab once -> the color section; Enter picks the first swatch.
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(controller.color, '#e2e2e2');
+
+    // Ctrl+End -> the intervals section; Enter toggles the first circle.
+    await pressWithCtrl(tester, LogicalKeyboardKey.end);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(controller.selection, contains('a'));
+
+    // Escape = Done: commits and closes the editor.
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('editor-done')), findsNothing);
+    expect(controller.canUndo, isTrue); // the color/selection edits landed
+  });
+
+  // Keyboard grid over the nested intervals: the three vertical tracks
+  // (selectors / group columns / rectangles) + reading-order horizontal.
+  testWidgets('keyboard_editor_grid_navigation', (tester) async {
+    controller.dispose();
+    controller = await buildEditor(nestedEdgeTree());
+    await pumpEditor(tester);
+
+    await pressWithCtrl(tester, LogicalKeyboardKey.end); // intervals section
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter); // circle m
+    await tester.pump();
+    expect(controller.selection, contains('m'));
+
+    // Down the SELECTOR track -> g1's circle; Right -> g1's group column.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter); // group column
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('repeat-modal')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
+    // End -> the last cell (x's rectangle); Enter opens x's editor.
+    await tester.sendKeyEvent(LogicalKeyboardKey.end);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('ie-back')), findsOneWidget);
+  });
+
+  // Editor shortcuts (acceptance): Ctrl+Z/C/N/Delete.
+  testWidgets('keyboard_editor_shortcuts', (tester) async {
+    await pumpEditor(tester);
+
+    // Ctrl+N opens the interval editor; Shift+Escape? no — close via back.
+    await pressWithCtrl(tester, LogicalKeyboardKey.keyN);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('ie-back')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('ie-back')));
+    await tester.pumpAndSettle();
+
+    // Focus a chip cell and Ctrl+C duplicates that node.
+    await pressWithCtrl(tester, LogicalKeyboardKey.end);
+    await tester.pump();
+    await pressWithCtrl(tester, LogicalKeyboardKey.keyC);
+    await tester.pump();
+    expect(controller.tree.roots.length, 3); // m? no — fixture [a, g1{b}]
+    // Delete removes the focused node (the duplicate).
+    await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+    await tester.pump();
+    expect(controller.tree.roots.length, 2);
+
+    // Ctrl+Z undoes the delete.
+    await pressWithCtrl(tester, LogicalKeyboardKey.keyZ);
+    await tester.pump();
+    expect(controller.tree.roots.length, 3);
+  });
+
   testWidgets('edge_slot_content_column_targets_inner_group', (tester) async {
     useTallSurface(tester);
     controller = await buildEditor(nestedEdgeTree());

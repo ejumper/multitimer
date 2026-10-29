@@ -12,6 +12,12 @@ import 'package:flutter/services.dart';
 /// Home/End keys belong to the field (typing rule) — the global combos
 /// (Tab, Escape, Ctrl+S, Ctrl+Home/End …) still work.
 
+/// The three vertical tracks of the intervals grid (acceptance): arrows
+/// up/down move within a track — selectors to selectors, group columns to
+/// group columns, rectangles to rectangles ("up from test 3 selects test
+/// 4"); left/right walk the row band in reading order.
+enum NavKind { selector, bar, content }
+
 /// One keyboard-navigable cell.
 class NavCell {
   const NavCell({
@@ -20,7 +26,11 @@ class NavCell {
     required this.col,
     required this.activate,
     this.enabled = true,
+    this.kind = NavKind.content,
   });
+
+  /// Vertical track (see [NavKind]).
+  final NavKind kind;
 
   /// Stable id (node id, button key …) — also the focus-ring lookup.
   final String id;
@@ -118,22 +128,31 @@ class ScreenNav extends ChangeNotifier {
     final focused = _focused;
     if (focused == null) return;
     if (dCol != 0) {
-      final rowCells = [..._cells.where((c) => c.row == focused.row)]
-        ..sort((a, b) => a.col.compareTo(b.col));
-      final at = rowCells.indexWhere((c) => c.id == focused.id);
+      // Horizontal: reading order across the whole grid (row-major), so a
+      // group's circle steps to its group column and on into its content.
+      final all = [..._cells]
+        ..sort((a, b) {
+          final byRow = a.row.compareTo(b.row);
+          return byRow != 0 ? byRow : a.col.compareTo(b.col);
+        });
+      final at = all.indexWhere((c) => c.id == focused.id);
       var i = at + dCol;
-      while (i >= 0 && i < rowCells.length && !rowCells[i].enabled) {
+      while (i >= 0 && i < all.length && !all[i].enabled) {
         i += dCol;
       }
-      if (i >= 0 && i < rowCells.length) {
-        _focusedId = rowCells[i].id;
+      if (i >= 0 && i < all.length) {
+        _focusedId = all[i].id;
         notifyListeners();
       }
       return;
     }
-    // Vertical: same column, nearest enabled cell beyond the current row.
-    final colCells = [..._cells.where((c) => c.col == focused.col)]
-      ..sort((a, b) => a.row.compareTo(b.row));
+    // Vertical: same KIND track (selectors / group columns / rectangles),
+    // nearest enabled cell beyond the current row.
+    final colCells = [..._cells.where((c) => c.kind == focused.kind)]
+      ..sort((a, b) {
+        final byRow = a.row.compareTo(b.row);
+        return byRow != 0 ? byRow : a.col.compareTo(b.col);
+      });
     final at = colCells.indexWhere((c) => c.id == focused.id);
     var i = at + dRow;
     while (i >= 0 && i < colCells.length && !colCells[i].enabled) {
@@ -172,6 +191,23 @@ class ScreenNav extends ChangeNotifier {
 
   /// Ctrl+C / Delete-style actions target the FOCUSED cell's owner.
   NavCell? get focusedCell => _focused;
+}
+
+/// True while a text field owns the primary focus — the "typing rule":
+/// arrows/Home/End belong to the field; the global combos (Tab, Escape,
+/// Ctrl+S, Ctrl+Home/End …) still work. Screens use this to keep their
+/// shortcuts from swallowing text-editing keys (Delete, Ctrl+C …).
+bool editingFieldHasFocus() {
+  final ctx = FocusManager.instance.primaryFocus?.context;
+  var typing = false;
+  ctx?.visitAncestorElements((element) {
+    if (element.widget is EditableText || element.widget is TextField) {
+      typing = true;
+      return false;
+    }
+    return true;
+  });
+  return typing || ctx?.widget is EditableText;
 }
 
 /// The visual focus ring for a keyboard-focused cell (the unified 1.4
@@ -222,19 +258,7 @@ class NavKeyboard extends StatefulWidget {
 }
 
 class _NavKeyboardState extends State<NavKeyboard> {
-  /// True while a text field has the primary focus — arrows belong to it.
-  bool get _typing {
-    final ctx = FocusManager.instance.primaryFocus?.context;
-    var typing = false;
-    ctx?.visitAncestorElements((element) {
-      if (element.widget is EditableText || element.widget is TextField) {
-        typing = true;
-        return false;
-      }
-      return true;
-    });
-    return typing || ctx?.widget is EditableText;
-  }
+  bool get _typing => editingFieldHasFocus();
 
   KeyEventResult _handle(KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;

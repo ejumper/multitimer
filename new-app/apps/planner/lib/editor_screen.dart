@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:planner_engine/planner_engine.dart';
 
 import 'adapters/ports.dart';
 import 'editor_controller.dart';
 import 'format.dart';
 import 'interval_editor.dart';
+import 'keyboard_nav.dart';
 import 'repeat_modal.dart';
 import 'theme.dart';
 
@@ -100,6 +102,14 @@ class _Drag {
 class _EditorScreenState extends State<EditorScreen> {
   EditorController get controller => widget.controller;
 
+  /// Keyboard model (acceptance): sections top row / colors / name /
+  /// buttons / intervals; the intervals are the nested grid.
+  final ScreenNav _nav = ScreenNav(sections: const []);
+
+  /// Real text focus for the name field (the keyboard "name section"
+  /// hands focus here so typing works).
+  final FocusNode _nameFocus = FocusNode();
+
   // ── drag-reorder state ────────────────────────────────────────────────
 
   final Map<String, GlobalKey> _rowKeys = <String, GlobalKey>{};
@@ -113,6 +123,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
   @override
   void dispose() {
+    _nameFocus.dispose();
     _float?.remove();
     _float = null;
     super.dispose();
@@ -127,8 +138,13 @@ class _EditorScreenState extends State<EditorScreen> {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 520),
             child: ListenableBuilder(
-              listenable: controller,
-              builder: (context, _) => SingleChildScrollView(
+              listenable: Listenable.merge([controller, _nav]),
+              builder: (context, _) {
+                _nav.updateSections(_editorSections(context));
+                return NavKeyboard(
+                  nav: _nav,
+                  onKey: _onKey,
+                  child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -155,7 +171,9 @@ class _EditorScreenState extends State<EditorScreen> {
                       _chipList(),
                   ],
                 ),
-              ),
+                ),
+              );
+            },
             ),
           ),
         ),
@@ -163,19 +181,228 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
+  /// The Done flow (shared by the button, Escape and Ctrl+S).
+  Future<void> _commitDone() async {
+    await controller.commit();
+    widget.onDone?.call();
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  /// Node behind the keyboard-focused grid cell (Ctrl+C / Delete act on it;
+  /// toolbar/other cells fall back to the current selection).
+  void _actOnFocused(void Function(String nodeId) onNode) {
+    final id = _nav.focusedCell?.id ?? '';
+    for (final prefix in ['circle-', 'bar-', 'rect-']) {
+      if (id.startsWith(prefix)) {
+        onNode(id.substring(prefix.length));
+        return;
+      }
+    }
+  }
+
+  /// Editor keyboard model (acceptance). Escape/Ctrl+S = Done; Shift+Escape
+  /// = ✕ (revert); Ctrl+Z = undo; Ctrl+C = duplicate the focused item;
+  /// Delete = delete the focused item; Ctrl+N = add; Ctrl+G = group;
+  /// Ctrl+Shift+G = ungroup. While a text field has focus, everything but
+  /// Escape/Ctrl+S belongs to text editing.
+  KeyEventResult? _onKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return null;
+    final key = event.logicalKey;
+    final ctrl = HardwareKeyboard.instance.isControlPressed;
+    final shift = HardwareKeyboard.instance.isShiftPressed;
+
+    if (key == LogicalKeyboardKey.escape) {
+      if (shift) {
+        controller.revert();
+        Navigator.of(context).pop();
+      } else {
+        _commitDone();
+      }
+      return KeyEventResult.handled;
+    }
+    if (ctrl && key == LogicalKeyboardKey.keyS) {
+      _commitDone();
+      return KeyEventResult.handled;
+    }
+    if (editingFieldHasFocus()) return null; // text editing owns the rest
+
+    if (ctrl && key == LogicalKeyboardKey.keyZ) {
+      controller.undo();
+      return KeyEventResult.handled;
+    }
+    if (ctrl && key == LogicalKeyboardKey.keyC) {
+      _actOnFocused((id) {
+        controller.selectOnly(id);
+        controller.duplicateSelection();
+      });
+      return KeyEventResult.handled;
+    }
+    if (ctrl && key == LogicalKeyboardKey.keyN) {
+      _openIntervalEditor(context);
+      return KeyEventResult.handled;
+    }
+    if (ctrl && shift && key == LogicalKeyboardKey.keyG) {
+      if (controller.canUngroup) controller.ungroupSelection();
+      return KeyEventResult.handled;
+    }
+    if (ctrl && key == LogicalKeyboardKey.keyG) {
+      if (controller.canGroup) _groupTapped(context);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.delete ||
+        key == LogicalKeyboardKey.backspace) {
+      _actOnFocused((id) {
+        controller.selectOnly(id);
+        controller.deleteSelection();
+      });
+      return KeyEventResult.handled;
+    }
+    return null;
+  }
+
+  /// The tab-cycle sections: top row, colors, name, buttons, intervals.
+  /// Interval cells form the nested grid (rows = visual order; columns =
+  /// the selector track (0) then one column per nesting depth).
+  List<NavSection> _editorSections(BuildContext context) {
+    final intervalCells = <NavCell>[];
+    var row = 0;
+    void walk(List<IntervalNode> nodes, int depth) {
+      for (final node in nodes) {
+        final r = row++;
+        if (node is GroupNode) {
+          intervalCells.add(
+            NavCell(
+              id: 'circle-${node.id}',
+              row: r,
+              col: 0,
+              kind: NavKind.selector,
+              activate: () => controller.toggleSelect(node.id),
+            ),
+          );
+          intervalCells.add(
+            NavCell(
+              id: 'bar-${node.id}',
+              row: r,
+              col: 1 + depth,
+              kind: NavKind.bar,
+              activate: () => _bracketTapped(context, node.group),
+            ),
+          );
+          walk(node.children, depth + 1);
+        } else {
+          if (depth == 0) {
+            intervalCells.add(
+              NavCell(
+                id: 'circle-${node.id}',
+                row: r,
+                col: 0,
+                kind: NavKind.selector,
+                activate: () => controller.toggleSelect(node.id),
+              ),
+            );
+          }
+          intervalCells.add(
+            NavCell(
+              id: 'rect-${node.id}',
+              row: r,
+              col: 1 + depth,
+              kind: NavKind.content,
+              activate: () => _openIntervalEditor(context, defId: node.id),
+            ),
+          );
+        }
+      }
+    }
+
+    walk(controller.tree.roots, 0);
+    return [
+      NavSection(id: 'top', cells: [
+        NavCell(
+          id: 'top-close',
+          row: 0,
+          col: 0,
+          activate: () {
+            controller.revert();
+            Navigator.of(context).pop();
+          },
+        ),
+        NavCell(id: 'top-done', row: 0, col: 1, activate: _commitDone),
+      ]),
+      NavSection(id: 'color', cells: [
+        for (var i = 0; i < kPresetSwatches.length; i++)
+          NavCell(
+            id: 'color-${kPresetSwatches[i]}',
+            row: 0,
+            col: i,
+            activate: () => controller.setColor(kPresetSwatches[i]),
+          ),
+      ]),
+      NavSection(id: 'name', cells: [
+        NavCell(id: 'name', row: 0, col: 0, activate: _nameFocus.requestFocus),
+      ]),
+      NavSection(id: 'buttons', cells: [
+        NavCell(
+          id: 'tool-add',
+          row: 0,
+          col: 0,
+          activate: () => _openIntervalEditor(context),
+        ),
+        NavCell(
+          id: 'tool-duplicate',
+          row: 0,
+          col: 1,
+          enabled: controller.hasSelection,
+          activate: controller.duplicateSelection,
+        ),
+        NavCell(
+          id: 'tool-delete',
+          row: 0,
+          col: 2,
+          enabled: controller.hasSelection,
+          activate: controller.deleteSelection,
+        ),
+        NavCell(
+          id: 'tool-undo',
+          row: 0,
+          col: 3,
+          enabled: controller.canUndo,
+          activate: controller.undo,
+        ),
+        NavCell(
+          id: 'tool-group',
+          row: 0,
+          col: 4,
+          enabled: controller.canGroup,
+          activate: () => _groupTapped(context),
+        ),
+        NavCell(
+          id: 'tool-ungroup',
+          row: 0,
+          col: 5,
+          enabled: controller.canUngroup,
+          activate: controller.ungroupSelection,
+        ),
+      ]),
+      NavSection(id: 'intervals', cells: intervalCells),
+    ];
+  }
+
   /// ✕ | centered title | Done pill. ✕ reverts and pops WITHOUT [onDone];
   /// Done commits, fires [onDone], then pops.
   Widget _header(BuildContext context) {
     return Row(
       children: [
-        IconButton(
-          key: const Key('editor-close'),
-          icon: const Icon(Icons.close),
-          color: AppColors.text,
-          onPressed: () {
-            controller.revert();
-            Navigator.of(context).pop();
-          },
+        FocusRing(
+          focused: _nav.isFocused('top-close'),
+          child: IconButton(
+            key: const Key('editor-close'),
+            icon: const Icon(Icons.close),
+            color: AppColors.text,
+            onPressed: () {
+              controller.revert();
+              Navigator.of(context).pop();
+            },
+          ),
         ),
         const Expanded(
           child: Text(
@@ -189,7 +416,9 @@ class _EditorScreenState extends State<EditorScreen> {
             ),
           ),
         ),
-        TextButton(
+        FocusRing(
+          focused: _nav.isFocused('top-done'),
+          child: TextButton(
           key: const Key('editor-done'),
           style: TextButton.styleFrom(
             backgroundColor: AppColors.card,
@@ -211,6 +440,7 @@ class _EditorScreenState extends State<EditorScreen> {
             style: TextStyle(fontFamily: AppFonts.ui, color: AppColors.text),
           ),
         ),
+        ),
       ],
     );
   }
@@ -231,7 +461,10 @@ class _EditorScreenState extends State<EditorScreen> {
             ),
           ),
           const Divider(height: 1, thickness: 1.4, color: AppColors.cardBorder),
-          _LabelField(controller: controller),
+          FocusRing(
+            focused: _nav.isFocused('name'),
+            child: _LabelField(controller: controller, focusNode: _nameFocus),
+          ),
         ],
       ),
     );
@@ -239,7 +472,9 @@ class _EditorScreenState extends State<EditorScreen> {
 
   Widget _swatch(String hex) {
     final selected = controller.color == hex;
-    return GestureDetector(
+    return FocusRing(
+      focused: _nav.isFocused('color-$hex'),
+      child: GestureDetector(
       key: Key('swatch-$hex'),
       onTap: () => controller.setColor(hex),
       child: Container(
@@ -266,6 +501,7 @@ class _EditorScreenState extends State<EditorScreen> {
               : null,
         ),
       ),
+      ),
     );
   }
 
@@ -281,13 +517,18 @@ class _EditorScreenState extends State<EditorScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          IconButton(
+          FocusRing(
+            focused: _nav.isFocused('tool-add'),
+            child: IconButton(
             key: const Key('tool-add'),
             icon: const Icon(Icons.add),
             tooltip: 'Add',
             onPressed: () => _openIntervalEditor(context),
           ),
-          IconButton(
+          ),
+          FocusRing(
+            focused: _nav.isFocused('tool-duplicate'),
+            child: IconButton(
             key: const Key('tool-duplicate'),
             icon: const Icon(Icons.copy_outlined),
             tooltip: 'Duplicate',
@@ -295,7 +536,10 @@ class _EditorScreenState extends State<EditorScreen> {
                 ? controller.duplicateSelection
                 : null,
           ),
-          IconButton(
+          ),
+          FocusRing(
+            focused: _nav.isFocused('tool-delete'),
+            child: IconButton(
             key: const Key('tool-delete'),
             icon: const Icon(Icons.delete_outline),
             color: AppColors.danger, // destructive (greyscale-UI rule)
@@ -305,13 +549,19 @@ class _EditorScreenState extends State<EditorScreen> {
                 ? controller.deleteSelection
                 : null,
           ),
-          IconButton(
+          ),
+          FocusRing(
+            focused: _nav.isFocused('tool-undo'),
+            child: IconButton(
             key: const Key('tool-undo'),
             icon: const Icon(Icons.undo),
             tooltip: 'Undo',
             onPressed: controller.canUndo ? controller.undo : null,
           ),
-          IconButton(
+          ),
+          FocusRing(
+            focused: _nav.isFocused('tool-group'),
+            child: IconButton(
             key: const Key('tool-group'),
             icon: const Icon(Icons.layers_outlined),
             tooltip: 'Group',
@@ -322,13 +572,17 @@ class _EditorScreenState extends State<EditorScreen> {
                 ? () => _groupTapped(context)
                 : null,
           ),
-          IconButton(
+          ),
+          FocusRing(
+            focused: _nav.isFocused('tool-ungroup'),
+            child: IconButton(
             key: const Key('tool-ungroup'),
             icon: const Icon(Icons.layers_clear),
             tooltip: 'Ungroup',
             onPressed: controller.canUngroup
                 ? controller.ungroupSelection
                 : null,
+          ),
           ),
         ],
       ),
@@ -761,7 +1015,10 @@ class _EditorScreenState extends State<EditorScreen> {
               key: Key('chip-tap-${def.id}'),
               behavior: HitTestBehavior.opaque,
               onTap: () => _openIntervalEditor(context, defId: def.id),
-              child: _chipCard(def),
+              child: FocusRing(
+                focused: _nav.isFocused('rect-${def.id}'),
+                child: _chipCard(def),
+              ),
             ),
           ),
         ),
@@ -870,7 +1127,9 @@ class _EditorScreenState extends State<EditorScreen> {
                   // has none of its own; opaque so the bare capsule area is
                   // hittable where no child covers the tap point.
                   child: Builder(
-                    builder: (context) => GestureDetector(
+                    builder: (context) => FocusRing(
+                      focused: _nav.isFocused('bar-${group.id}'),
+                      child: GestureDetector(
                       key: Key('bracket-${group.id}'),
                       behavior: HitTestBehavior.opaque,
                       onTap: () => _bracketTapped(context, group),
@@ -899,6 +1158,7 @@ class _EditorScreenState extends State<EditorScreen> {
                         ],
                       ),
                     ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -924,7 +1184,9 @@ class _EditorScreenState extends State<EditorScreen> {
   /// blue-tinted fill + check.
   Widget _selectionCircle(String nodeId) {
     final selected = controller.selection.contains(nodeId);
-    return GestureDetector(
+    return FocusRing(
+      focused: _nav.isFocused('circle-$nodeId'),
+      child: GestureDetector(
       key: Key('select-$nodeId'),
       onTap: () => controller.toggleSelect(nodeId),
       child: Container(
@@ -941,6 +1203,7 @@ class _EditorScreenState extends State<EditorScreen> {
         child: selected
             ? const Icon(Icons.check, size: 14, color: AppColors.text)
             : null,
+      ),
       ),
     );
   }
@@ -984,9 +1247,12 @@ class _EditorScreenState extends State<EditorScreen> {
 /// seeded once from the working-copy name; edits flow back via
 /// [EditorController.rename].
 class _LabelField extends StatefulWidget {
-  const _LabelField({required this.controller});
+  const _LabelField({required this.controller, required this.focusNode});
 
   final EditorController controller;
+
+  /// Keyboard "name section" hands real focus here (typing rule).
+  final FocusNode focusNode;
 
   @override
   State<_LabelField> createState() => _LabelFieldState();
@@ -1009,6 +1275,7 @@ class _LabelFieldState extends State<_LabelField> {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
       child: TextField(
         key: const Key('label-field'),
+        focusNode: widget.focusNode,
         controller: _text,
         decoration: const InputDecoration(
           hintText: 'Add label',
