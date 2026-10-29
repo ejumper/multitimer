@@ -7,6 +7,7 @@ import 'alert_selector.dart';
 import 'duration_utils.dart';
 import 'editor_controller.dart';
 import 'format.dart';
+import 'keyboard_nav.dart';
 import 'theme.dart';
 
 /// The per-interval editor (P4.3, UI-REFERENCE item 6 minus the keypad,
@@ -66,6 +67,23 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
   IntervalDef? _def;
 
   late final TextEditingController _label;
+  /// Keyboard model (acceptance): sections back / colors / name /
+  /// auto-finish / duration / end alert.
+  final ScreenNav _nav = ScreenNav(sections: const []);
+
+  /// Real text focus for the name + duration fields (the typing rule).
+  final FocusNode _nameFocus = FocusNode();
+  final FocusNode _hrFocus = FocusNode();
+  final FocusNode _minFocus = FocusNode();
+  final FocusNode _secFocus = FocusNode();
+
+  /// The duration boxes in cycle order (Enter / Shift+Enter walk them).
+  List<FocusNode> get _boxFocus => [_hrFocus, _minFocus, _secFocus];
+
+  /// The box keyboard adjustments apply to (a focused box wins; otherwise
+  /// this one — so the section behaves like a stepped control).
+  int _activeBox = 0;
+
   late final TextEditingController _hr;
   late final TextEditingController _min;
   late final TextEditingController _sec;
@@ -126,6 +144,10 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
   @override
   void dispose() {
     _label.dispose();
+    _nameFocus.dispose();
+    _hrFocus.dispose();
+    _minFocus.dispose();
+    _secFocus.dispose();
     _hr.dispose();
     _min.dispose();
     _sec.dispose();
@@ -140,7 +162,14 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 520),
-            child: SingleChildScrollView(
+            child: ListenableBuilder(
+              listenable: _nav,
+              builder: (context, _) {
+                _nav.updateSections(_ieSections(context));
+                return NavKeyboard(
+                  nav: _nav,
+                  onKey: _onKey,
+                  child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -156,6 +185,9 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
                   _alertRow(),
                 ],
               ),
+                  ),
+              );
+            },
             ),
           ),
         ),
@@ -163,11 +195,128 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
     );
   }
 
+  /// Interval-editor keyboard model (acceptance): Escape = back; the
+  /// duration boxes use Enter/Shift+Enter to cycle and Up/Down (+Ctrl) to
+  /// adjust by 1 / 10 — everything else is the shared section model.
+  KeyEventResult? _onKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return null;
+    final key = event.logicalKey;
+    final ctrl = HardwareKeyboard.instance.isControlPressed;
+    final shift = HardwareKeyboard.instance.isShiftPressed;
+
+    if (key == LogicalKeyboardKey.escape) {
+      _commitBack();
+      return KeyEventResult.handled;
+    }
+    // Duration keys work EVEN while a box has focus (acceptance: Up/Down
+    // adjust the value, Enter/Shift+Enter cycle the boxes) — they are
+    // checked before the typing rule on purpose.
+    final inDuration = _nav.section.id == 'duration';
+    if (inDuration && (key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter)) {
+      _cycleBox(shift ? -1 : 1);
+      return KeyEventResult.handled;
+    }
+    if (inDuration && (key == LogicalKeyboardKey.arrowUp ||
+        key == LogicalKeyboardKey.arrowDown)) {
+      _adjustBox(key == LogicalKeyboardKey.arrowUp ? 1 : -1, ctrl ? 10 : 1);
+      return KeyEventResult.handled;
+    }
+    if (editingFieldHasFocus() && !ctrl) return null;
+    return null;
+  }
+
+  /// Enter/Shift+Enter within the duration section: focus the next/prev
+  /// box (wrapping) so typing lands there.
+  void _cycleBox(int delta) {
+    final boxes = _boxFocus;
+    _activeBox = (_activeBox + delta) % boxes.length;
+    boxes[_activeBox].requestFocus();
+    _nav.move(0, delta); // keep the visual ring in step
+  }
+
+  /// Up/Down within the duration section: adjust the focused box by
+  /// [delta] units (Ctrl = 10) with the 2-digit wrap.
+  void _adjustBox(int sign, int amount) {
+    final boxes = [_hr, _min, _sec];
+    final idx = _boxFocus.indexWhere((f) => f.hasFocus);
+    if (idx >= 0) _activeBox = idx;
+    final i = _activeBox;
+    final next = ((int.tryParse(boxes[i].text) ?? 0) + sign * amount)
+        .clamp(0, 99);
+    boxes[i].text = next.toString().padLeft(2, '0');
+    // Keep the selection valid (a stale selection fails the framework's
+    // TextEditingValue.isValid check on the next key message).
+    boxes[i].selection = TextSelection.collapsed(
+      offset: boxes[i].text.length,
+    );
+  }
+
+  /// The tab-cycle sections (acceptance).
+  List<NavSection> _ieSections(BuildContext context) {
+    return [
+      NavSection(id: 'top', cells: [
+        NavCell(
+          id: 'ie-back',
+          row: 0,
+          col: 0,
+          activate: _commitBack,
+        ),
+      ]),
+      NavSection(id: 'color', cells: [
+        for (var i = 0; i < kPresetSwatches.length; i++)
+          NavCell(
+            id: 'color-${kPresetSwatches[i]}',
+            row: 0,
+            col: i,
+            activate: () => setState(() => _color = kPresetSwatches[i]),
+          ),
+      ]),
+      NavSection(id: 'name', cells: [
+        NavCell(id: 'name', row: 0, col: 0, activate: _nameFocus.requestFocus),
+      ]),
+      NavSection(id: 'autofinish', cells: [
+        NavCell(
+          id: 'ie-autofinish',
+          row: 0,
+          col: 0,
+          activate: () => setState(() => _autoFinish = !_autoFinish),
+        ),
+      ]),
+      NavSection(id: 'duration', cells: [
+        NavCell(
+          id: 'ie-hr',
+          row: 0,
+          col: 0,
+          activate: _hrFocus.requestFocus,
+        ),
+        NavCell(
+          id: 'ie-min',
+          row: 0,
+          col: 1,
+          activate: _minFocus.requestFocus,
+        ),
+        NavCell(
+          id: 'ie-sec',
+          row: 0,
+          col: 2,
+          activate: _secFocus.requestFocus,
+        ),
+      ]),
+      NavSection(id: 'endalert', cells: [
+        NavCell(id: 'ie-alert-row', row: 0, col: 0, activate: _openAlertSelector),
+      ]),
+    ];
+  }
+
   /// Outlined back circle (→ [_commitBack]) | centered "Interval" title.
   Widget _header() {
     return Row(
       children: [
-        _BackCircle(key: const Key('ie-back'), onPressed: _commitBack),
+        FocusRing(
+          focused: _nav.isFocused('ie-back'),
+          child: _BackCircle(key: const Key('ie-back'), onPressed: _commitBack),
+        ),
         const Expanded(
           child: Text(
             'Interval',
@@ -208,7 +357,10 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
             thickness: 1.4,
             color: AppColors.cardBorder,
           ),
-          _labelField(),
+          FocusRing(
+            focused: _nav.isFocused('name'),
+            child: _labelField(),
+          ),
         ],
       ),
     );
@@ -216,7 +368,9 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
 
   Widget _swatch(String hex) {
     final selected = _color == hex;
-    return GestureDetector(
+    return FocusRing(
+      focused: _nav.isFocused('color-$hex'),
+      child: GestureDetector(
       key: Key('ie-swatch-$hex'),
       onTap: () => setState(() => _color = hex),
       child: Container(
@@ -243,6 +397,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
               : null,
         ),
       ),
+      ),
     );
   }
 
@@ -252,6 +407,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
       child: TextField(
         key: const Key('ie-label'),
+        focusNode: _nameFocus,
         controller: _label,
         decoration: const InputDecoration(
           hintText: 'Add label',
@@ -264,7 +420,9 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
   /// Auto-finish toggle card: the ONLY property toggle — off = the
   /// interval holds at zero until manually advanced.
   Widget _autoFinishCard() {
-    return Container(
+    return FocusRing(
+      focused: _nav.isFocused('ie-autofinish'),
+      child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: AppDecorations.card,
       child: Row(
@@ -303,8 +461,10 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
           ),
         ],
       ),
-    );
+    ),
+  );
   }
+
 
   /// Duration card: three 2-digit boxes (overflow carries UP on every
   /// change) over the live hint — `formatDuration(parsed)`, or `unset`
@@ -320,20 +480,32 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              _durationBox(
-                key: const Key('ie-hr'),
-                controller: _hr,
-                unit: 'hr',
+              FocusRing(
+                focused: _nav.isFocused('ie-hr'),
+                child: _durationBox(
+                  key: const Key('ie-hr'),
+                  controller: _hr,
+                  unit: 'hr',
+                  focusNode: _hrFocus,
+                ),
               ),
-              _durationBox(
-                key: const Key('ie-min'),
-                controller: _min,
-                unit: 'min',
+              FocusRing(
+                focused: _nav.isFocused('ie-min'),
+                child: _durationBox(
+                  key: const Key('ie-min'),
+                  controller: _min,
+                  unit: 'min',
+                  focusNode: _minFocus,
+                ),
               ),
-              _durationBox(
-                key: const Key('ie-sec'),
-                controller: _sec,
-                unit: 'sec',
+              FocusRing(
+                focused: _nav.isFocused('ie-sec'),
+                child: _durationBox(
+                  key: const Key('ie-sec'),
+                  controller: _sec,
+                  unit: 'sec',
+                  focusNode: _secFocus,
+                ),
               ),
             ],
           ),
@@ -359,6 +531,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
     required Key key,
     required TextEditingController controller,
     required String unit,
+    required FocusNode focusNode,
   }) {
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -367,6 +540,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
           width: 72,
           child: TextField(
             key: key,
+            focusNode: focusNode,
             controller: controller,
             textAlign: TextAlign.center,
             keyboardType: TextInputType.number,
@@ -446,7 +620,9 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
   /// back through the pusher's onSelected into the local buffer.
   Widget _alertRow() {
     final file = _endAlertSoundFile;
-    return GestureDetector(
+    return FocusRing(
+      focused: _nav.isFocused('ie-alert-row'),
+      child: GestureDetector(
       key: const Key('ie-alert-row'),
       behavior: HitTestBehavior.opaque,
       onTap: _openAlertSelector,
@@ -479,8 +655,10 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
           ],
         ),
       ),
-    );
+    ),
+  );
   }
+
 
   void _openAlertSelector() {
     Navigator.of(context).push(

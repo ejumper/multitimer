@@ -592,6 +592,96 @@ void main() {
     expect(controller.tree.roots.length, 3);
   });
 
+  // Interval editor keyboard (acceptance): section tabs, the duration
+  // box cycle/adjust keys, Escape = back.
+  testWidgets('keyboard_interval_editor_keys', (tester) async {
+    await pumpEditor(tester);
+    await pressWithCtrl(tester, LogicalKeyboardKey.keyN); // add interval
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('ie-back')), findsOneWidget);
+
+    // Top -> color -> name -> auto-finish: Enter flips the toggle.
+    for (var i = 0; i < 3; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    }
+    await tester.pump();
+    final before = tester
+        .widget<Switch>(find.byKey(const Key('ie-autofinish')))
+        .value;
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(
+      tester.widget<Switch>(find.byKey(const Key('ie-autofinish'))).value,
+      !before,
+    );
+
+    // Duration: Up = +1, Ctrl+Up = +10, Enter cycles the box.
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pump();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('ie-hr')))
+          .controller!
+          .text,
+      '01',
+    );
+    await pressWithCtrl(tester, LogicalKeyboardKey.arrowUp);
+    await tester.pump();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('ie-hr')))
+          .controller!
+          .text,
+      '11',
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter); // -> min box
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pump();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('ie-min')))
+          .controller!
+          .text,
+      '01',
+    );
+
+    // Escape = the back button (commit + close).
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('ie-back')), findsNothing);
+  });
+
+  // End Alert selector keyboard (acceptance): up/down rows, Right previews,
+  // Enter selects (auto-closes back to the interval editor).
+  testWidgets('keyboard_end_alert_selector_keys', (tester) async {
+    await pumpEditor(tester);
+    await pressWithCtrl(tester, LogicalKeyboardKey.keyN);
+    await tester.pumpAndSettle();
+
+    // Ctrl+End -> the end-alert section; Enter opens the selector.
+    await pressWithCtrl(tester, LogicalKeyboardKey.end);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.text('No alert'), findsOneWidget);
+
+    // Down to the first sound; Right previews it (RecordingPlayer).
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(find.text('No alert'), findsOneWidget); // still open
+
+    // Enter selects it and auto-closes back to the interval editor.
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('ie-back')), findsOneWidget);
+    expect(find.text('No alert'), findsNothing);
+  });
+
   testWidgets('edge_slot_content_column_targets_inner_group', (tester) async {
     useTallSurface(tester);
     controller = await buildEditor(nestedEdgeTree());

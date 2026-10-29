@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'adapters/ports.dart';
+import 'keyboard_nav.dart';
 import 'theme.dart';
 
 /// The end-alert sound picker (P4.3, UI-REFERENCE item 11): a full-screen
@@ -47,6 +49,48 @@ class AlertSelectorScreen extends StatefulWidget {
 }
 
 class _AlertSelectorScreenState extends State<AlertSelectorScreen> {
+  /// Keyboard model (acceptance): up/down walks the alerts, Right plays
+  /// the preview, Left stops it, Enter selects, Escape = back.
+  final ScreenNav _nav = ScreenNav(sections: const []);
+
+  KeyEventResult? _onKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return null;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.arrowRight) {
+      final idx = _nav.focusedCell?.row;
+      final file = (idx == null || idx < 1 || idx > _files.length)
+          ? null
+          : _files[idx - 1];
+      if (file != null) _preview(file);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowLeft) {
+      unawaited(widget.player.stop());
+      return KeyEventResult.handled;
+    }
+    return null; // up/down/Home/End/Enter -> shared model; Escape pops
+  }
+
+  List<NavSection> _alertSections() {
+    return [
+      NavSection(id: 'alerts', cells: [
+        NavCell(
+          id: 'alert-none',
+          row: 0,
+          col: 0,
+          activate: () => _select(null),
+        ),
+        for (var i = 0; i < _files.length; i++)
+          NavCell(
+            id: 'alert-$i',
+            row: i + 1,
+            col: 0,
+            activate: () => _select(_files[i]),
+          ),
+      ]),
+    ];
+  }
+
   /// Files captured ONCE at open: `.mp3` only (case-insensitive), sorted
   /// alphabetically by the name WITHOUT its extension.
   late final List<String> _files;
@@ -92,13 +136,19 @@ class _AlertSelectorScreenState extends State<AlertSelectorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    _nav.updateSections(_alertSections());
+    return ListenableBuilder(
+      listenable: _nav,
+      builder: (context, _) => Scaffold(
       backgroundColor: Colors.transparent,
       body: SafeArea(
-        // Centered content block like every other view (acceptance: "End
-        // Alert placement" — the old Expanded empty-state forced the column
-        // full-height, pinning the content to the top); scrolls when long.
-        child: Center(
+        child: NavKeyboard(
+          nav: _nav,
+          onKey: _onKey,
+          // Centered content block like every other view (acceptance: "End
+          // Alert placement" — the old Expanded empty-state forced the column
+          // full-height, pinning the content to the top); scrolls when long.
+          child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 520),
             child: SingleChildScrollView(
@@ -115,6 +165,8 @@ class _AlertSelectorScreenState extends State<AlertSelectorScreen> {
             ),
           ),
         ),
+        ),
+      ),
       ),
     );
   }
@@ -151,10 +203,16 @@ class _AlertSelectorScreenState extends State<AlertSelectorScreen> {
       physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       children: [
-        _noneRow(),
+        FocusRing(
+          focused: _nav.isFocused('alert-none'),
+          child: _noneRow(),
+        ),
         const SizedBox(height: 8),
-        for (final file in _files) ...[
-          _fileRow(file),
+        for (var i = 0; i < _files.length; i++) ...[
+          FocusRing(
+            focused: _nav.isFocused('alert-$i'),
+            child: _fileRow(_files[i]),
+          ),
           const SizedBox(height: 8),
         ],
       ],
