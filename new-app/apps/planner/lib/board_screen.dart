@@ -9,6 +9,7 @@ import 'app_controller.dart';
 import 'editor_controller.dart';
 import 'editor_screen.dart';
 import 'format.dart';
+import 'keyboard_nav.dart';
 import 'theme.dart';
 
 /// The main board screen: header, state-driven dial with the readout in its
@@ -22,25 +23,34 @@ import 'theme.dart';
 ///
 /// No menu/gear buttons in the header: multi-board switching and settings
 /// are out of v1 scope.
-class BoardScreen extends StatelessWidget {
+class BoardScreen extends StatefulWidget {
   const BoardScreen(this.controller, {super.key});
 
   final AppController controller;
 
   @override
+  State<BoardScreen> createState() => _BoardScreenState();
+}
+
+class _BoardScreenState extends State<BoardScreen> {
+  AppController get controller => widget.controller;
+
+  /// Keyboard model (acceptance): one section — the control buttons.
+  late final ScreenNav _nav = ScreenNav(sections: const []);
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: Focus(
-        // Space performs the same context action as a dial tap.
-        autofocus: true,
-        onKeyEvent: _onKeyEvent,
+      body: NavKeyboard(
+        nav: _nav,
+        onKey: _onKey,
         child: SafeArea(
           child: Center(
             child: SingleChildScrollView(
               padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
               child: ListenableBuilder(
-                listenable: controller,
+                listenable: Listenable.merge([controller, _nav]),
                 builder: (context, _) => _buildBoard(context),
               ),
             ),
@@ -51,6 +61,9 @@ class BoardScreen extends StatelessWidget {
   }
 
   Widget _buildBoard(BuildContext context) {
+    // Rebuilt with the state (ListenableBuilder) — the keyboard cells'
+    // enabled flags (e.g. skip) must track it.
+    _nav.updateSections(_sections());
     final snapshot = controller.snapshot;
     final timerColor = _hexColor(controller.timer.color);
     return Column(
@@ -86,27 +99,7 @@ class BoardScreen extends StatelessWidget {
     return GestureDetector(
       key: const Key('dial'),
       onTapDown: (_) => dispatchContextAction(),
-      onSecondaryTapDown: (_) async {
-        // Right-click opens the editor over a freshly loaded tree; Done in
-        // the editor commits and reloads the board's session (onDone).
-        final tree = await controller.store.loadTree(controller.timer.id);
-        if (!context.mounted) return;
-        await Navigator.of(context).push(
-          AppPageRoute<void>(
-            builder: (_) => EditorScreen(
-              controller: EditorController(
-                store: controller.store,
-                timer: controller.timer,
-                initialTree: tree,
-              ),
-              soundsDir: controller.soundsDir,
-              soundListing: controller.soundListing,
-              player: controller.player,
-              onDone: () => controller.reload(),
-            ),
-          ),
-        );
-      },
+      onSecondaryTapDown: (_) => _openEditor(context),
       child: SizedBox(
         width: 340,
         height: 340,
@@ -250,6 +243,7 @@ class BoardScreen extends StatelessWidget {
         _HoverIconButton(
           buttonKey: const Key('btn-list'),
           icon: Icons.menu,
+          focused: _nav.isFocused('btn-list'),
           onPressed: () => _showListOverlay(context),
         ),
         const SizedBox(width: 8),
@@ -257,15 +251,40 @@ class BoardScreen extends StatelessWidget {
           buttonKey: const Key('btn-reset'),
           icon: Icons.close_outlined,
           color: AppColors.danger, // destructive (greyscale-UI rule)
+          focused: _nav.isFocused('btn-reset'),
           onPressed: () => _showResetDialog(context),
         ),
         const SizedBox(width: 8),
         _HoverIconButton(
           buttonKey: const Key('btn-skip'),
           icon: Icons.chevron_right,
+          focused: _nav.isFocused('btn-skip'),
           onPressed: canSkip ? () => controller.skipNext() : null,
         ),
       ],
+    );
+  }
+
+  /// Opens the timer editor over a freshly loaded tree; Done in the
+  /// editor commits and reloads the board's session (onDone). The dial's
+  /// right-click and Escape share this path.
+  Future<void> _openEditor(BuildContext context) async {
+    final tree = await controller.store.loadTree(controller.timer.id);
+    if (!context.mounted) return;
+    await Navigator.of(context).push(
+      AppPageRoute<void>(
+        builder: (_) => EditorScreen(
+          controller: EditorController(
+            store: controller.store,
+            timer: controller.timer,
+            initialTree: tree,
+          ),
+          soundsDir: controller.soundsDir,
+          soundListing: controller.soundListing,
+          player: controller.player,
+          onDone: () => controller.reload(),
+        ),
+      ),
     );
   }
 
@@ -279,7 +298,28 @@ class BoardScreen extends StatelessWidget {
       // No full-window dim: the effect lives only behind the menu —
       // the default black54 barrier darkened the whole page.
       barrierColor: Colors.transparent,
-      builder: (dialogContext) => Dialog(
+      builder: (dialogContext) {
+        final nav = ScreenNav(
+          sections: [
+            NavSection(id: 'rows', cells: [
+              for (var i = 0; i < instances.length; i++)
+                NavCell(
+                  id: 'list-row-$i',
+                  row: i,
+                  col: 0,
+                  activate: () {
+                    controller.jumpTo(i);
+                    Navigator.of(dialogContext).pop();
+                  },
+                ),
+            ]),
+          ],
+        )..focusSection(0);
+        return NavKeyboard(
+          nav: nav,
+          child: ListenableBuilder(
+            listenable: nav,
+            builder: (_, _) => Dialog(
         key: const Key('list-overlay'),
         backgroundColor: Colors.black, // opaque menu panel
         shape: AppDecorations.menuShape,
@@ -323,7 +363,9 @@ class BoardScreen extends StatelessWidget {
                         controller.jumpTo(index);
                         Navigator.of(context).pop();
                       },
-                      child: Container(
+                      child: FocusRing(
+                        focused: nav.isFocused('list-row-$index'),
+                        child: Container(
                         key: Key('list-row-$index'),
                         color: background,
                         padding: const EdgeInsets.symmetric(
@@ -357,6 +399,7 @@ class BoardScreen extends StatelessWidget {
                           ],
                         ),
                       ),
+                      ),
                     );
                   },
                 ),
@@ -364,8 +407,11 @@ class BoardScreen extends StatelessWidget {
             ],
           ),
         ),
+        ),
       ),
     );
+        },
+      );
   }
 
   /// Reset confirmation: nothing happens without an explicit confirm —
@@ -374,29 +420,70 @@ class BoardScreen extends StatelessWidget {
     showDialog<void>(
       context: context,
       barrierColor: Colors.transparent, // effect only behind the menu
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: Colors.black, // opaque menu panel
-        shape: AppDecorations.menuShape,
-        title: const Text('Reset timer?'),
-        content: const Text(
-          'The current run will end and the timer returns to not started.',
-        ),
-        actions: [
-          TextButton(
-            key: const Key('dialog-cancel'),
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
+      builder: (dialogContext) {
+        // Keyboard: focus starts on Cancel; arrows move Cancel <-> Reset,
+        // Enter activates, Escape = Cancel (DismissIntent pops).
+        final nav = ScreenNav(
+          sections: [
+            NavSection(id: 'actions', cells: [
+              NavCell(
+                id: 'dialog-cancel',
+                row: 0,
+                col: 0,
+                activate: () => Navigator.of(dialogContext).pop(),
+              ),
+              NavCell(
+                id: 'dialog-confirm',
+                row: 0,
+                col: 1,
+                activate: () {
+                  controller.reset();
+                  Navigator.of(dialogContext).pop();
+                },
+              ),
+            ]),
+          ],
+        )..focusSection(0);
+        return NavKeyboard(
+          nav: nav,
+          child: ListenableBuilder(
+            listenable: nav,
+            builder: (_, _) => AlertDialog(
+              backgroundColor: Colors.black, // opaque menu panel
+              shape: AppDecorations.menuShape,
+              title: const Text('Reset timer?'),
+              content: const Text(
+                'The current run will end and the timer returns to not '
+                'started.',
+              ),
+              actions: [
+                FocusRing(
+                  focused: nav.isFocused('dialog-cancel'),
+                  child: TextButton(
+                    key: const Key('dialog-cancel'),
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                FocusRing(
+                  focused: nav.isFocused('dialog-confirm'),
+                  child: TextButton(
+                    key: const Key('dialog-confirm'),
+                    onPressed: () {
+                      controller.reset();
+                      Navigator.of(dialogContext).pop();
+                    },
+                    child: const Text(
+                      'Reset',
+                      style: TextStyle(color: AppColors.danger),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-          TextButton(
-            key: const Key('dialog-confirm'),
-            onPressed: () {
-              controller.reset();
-              Navigator.of(dialogContext).pop();
-            },
-            child: const Text('Reset', style: TextStyle(color: AppColors.danger)),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -446,15 +533,68 @@ class BoardScreen extends StatelessWidget {
     }
   }
 
-  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
-    // Space down = the context action; key-ups and key-repeat events (which
-    // arrive as [KeyRepeatEvent], not [KeyDownEvent]) are ignored so a held
-    // Space doesn't flap pause/resume.
-    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.space) {
+  /// Board keyboard model (acceptance): Space = the dial action; the
+  /// arrows/Home/End/Enter walk the control buttons (shared model); the
+  /// quick keys hit the buttons directly — Tab = interval selector,
+  /// Delete = reset, Ctrl+Right = next, Escape = the timer editor.
+  KeyEventResult? _onKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return null;
+    final key = event.logicalKey;
+    final ctrl = HardwareKeyboard.instance.isControlPressed;
+    // Space down = the context action (held Space must not flap —
+    // KeyRepeatEvents never reach here).
+    if (key == LogicalKeyboardKey.space) {
       dispatchContextAction();
       return KeyEventResult.handled;
     }
-    return KeyEventResult.ignored;
+    if (key == LogicalKeyboardKey.tab) {
+      _showListOverlay(context);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.delete ||
+        key == LogicalKeyboardKey.backspace) {
+      _showResetDialog(context);
+      return KeyEventResult.handled;
+    }
+    if (ctrl && key == LogicalKeyboardKey.arrowRight) {
+      if (controller.snapshot.state != SessionState.notStarted) {
+        controller.skipNext();
+      }
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.escape) {
+      _openEditor(context);
+      return KeyEventResult.handled;
+    }
+    return null; // arrows/Home/End/Enter -> the shared button model
+  }
+
+  /// The control buttons as keyboard cells (one row).
+  List<NavSection> _sections() {
+    final canSkip = controller.snapshot.state != SessionState.notStarted;
+    return [
+      NavSection(id: 'controls', cells: [
+        NavCell(
+          id: 'btn-list',
+          row: 0,
+          col: 0,
+          activate: () => _showListOverlay(context),
+        ),
+        NavCell(
+          id: 'btn-reset',
+          row: 0,
+          col: 1,
+          activate: () => _showResetDialog(context),
+        ),
+        NavCell(
+          id: 'btn-skip',
+          row: 0,
+          col: 2,
+          enabled: canSkip,
+          activate: () => controller.skipNext(),
+        ),
+      ]),
+    ];
   }
 }
 
@@ -710,6 +850,7 @@ class _HoverIconButton extends StatefulWidget {
     required this.icon,
     required this.onPressed,
     this.color = AppColors.text,
+    this.focused = false,
   });
 
   /// Lives on the INNER IconButton (tests address the button by key).
@@ -717,6 +858,9 @@ class _HoverIconButton extends StatefulWidget {
   final IconData icon;
   final VoidCallback? onPressed;
   final Color color;
+
+  /// Keyboard-focus ring (acceptance keyboard navigation).
+  final bool focused;
 
   @override
   State<_HoverIconButton> createState() => _HoverIconButtonState();
@@ -735,7 +879,9 @@ class _HoverIconButtonState extends State<_HoverIconButton> {
         height: 46,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: _hovering ? Colors.white.withValues(alpha: 0.08) : null,
+          color: _hovering || widget.focused
+              ? Colors.white.withValues(alpha: 0.08)
+              : null,
         ),
         child: IconButton(
           key: widget.buttonKey,

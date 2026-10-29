@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import 'keyboard_nav.dart';
 
 import 'theme.dart';
 
@@ -26,12 +29,45 @@ class _RepeatModal extends StatefulWidget {
 }
 
 class _RepeatModalState extends State<_RepeatModal> {
+  /// Keyboard (acceptance): Left/Right = -/+1, Ctrl+Left/Right = -/+10,
+  /// Enter = OK, Escape = cancel (DismissIntent pops).
+  late final ScreenNav _nav = ScreenNav(
+    sections: [
+      NavSection(id: 'stepper', cells: [
+        NavCell(
+          id: 'repeat-ok',
+          row: 0,
+          col: 0,
+          activate: () => Navigator.of(context).pop(_count),
+        ),
+      ]),
+    ],
+  )..focusSection(0);
+
+  KeyEventResult? _onKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return null;
+    final key = event.logicalKey;
+    final ctrl = HardwareKeyboard.instance.isControlPressed;
+    if (key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.arrowRight) {
+      final step = (ctrl ? 10 : 1) * (key == LogicalKeyboardKey.arrowRight ? 1 : -1);
+      setState(() => _count = (_count + step).clamp(1, 9999));
+      return KeyEventResult.handled;
+    }
+    return null; // Enter -> shared model (OK); Escape -> DismissIntent
+  }
+
   /// Live pass count; never drops below 1.
   late int _count = widget.initial < 1 ? 1 : widget.initial;
 
   @override
   Widget build(BuildContext context) {
-    return Dialog(
+    return NavKeyboard(
+      nav: _nav,
+      onKey: _onKey,
+      child: ListenableBuilder(
+        listenable: _nav,
+        builder: (_, _) => Dialog(
       key: const Key('repeat-modal'),
       backgroundColor: Colors.black, // opaque menu panel
       constraints: const BoxConstraints(minWidth: 220),
@@ -70,20 +106,25 @@ class _RepeatModalState extends State<_RepeatModal> {
                 ],
               ),
               const Divider(),
-              TextButton(
-                key: const Key('repeat-ok'),
-                onPressed: () => Navigator.of(context).pop(_count),
-                child: const Text(
-                  'OK',
-                  style: TextStyle(
-                    fontFamily: AppFonts.ui,
-                    color: AppColors.text,
+              FocusRing(
+                focused: _nav.isFocused('repeat-ok'),
+                child: TextButton(
+                  key: const Key('repeat-ok'),
+                  onPressed: () => Navigator.of(context).pop(_count),
+                  child: const Text(
+                    'OK',
+                    style: TextStyle(
+                      fontFamily: AppFonts.ui,
+                      color: AppColors.text,
+                    ),
                   ),
                 ),
               ),
             ],
           ),
         ),
+      ),
+      ),
       ),
     );
   }

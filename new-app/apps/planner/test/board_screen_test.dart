@@ -1,5 +1,6 @@
 import 'package:drift/native.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -88,6 +89,86 @@ void main() {
   }
 
   // 1. Not started: the planned readout parts of 90s + first caption.
+  // Keyboard navigation (acceptance): quick keys and dialog keys.
+  testWidgets('keyboard_quick_keys_open_dialogs_and_act', (tester) async {
+    await pumpBoard(tester);
+
+    // Tab = the interval selector button; Escape closes the overlay.
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('list-overlay')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('list-overlay')), findsNothing);
+
+    // Delete = the reset button — focus starts on CANCEL: Enter cancels.
+    await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+    await tester.pumpAndSettle();
+    expect(find.text('Reset timer?'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.text('Reset timer?'), findsNothing);
+    expect(controller.snapshot.state, SessionState.notStarted);
+
+    // Escape on the board = the timer editor.
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('editor-done')), findsOneWidget);
+  });
+
+  testWidgets('keyboard_reset_dialog_right_confirms', (tester) async {
+    await pumpBoard(tester);
+    expect(controller.start(), isTrue);
+    await tester.pump();
+
+    // Delete opens the dialog; Right selects Reset; Enter resets the run.
+    await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(controller.snapshot.state, SessionState.notStarted);
+  });
+
+  testWidgets('keyboard_arrows_walk_control_buttons', (tester) async {
+    await pumpBoard(tester);
+    expect(controller.start(), isTrue);
+    await tester.pump();
+
+    // Focus starts on the first cell (interval selector): Right x2 lands on
+    // the skip button — Enter advances the run (same as the button).
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(controller.snapshot.ordinal, 1); // skip advanced the run
+
+    // Home jumps back to the first button; Enter opens the list overlay.
+    await tester.sendKeyEvent(LogicalKeyboardKey.home);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('list-overlay')), findsOneWidget);
+  });
+
+  testWidgets('keyboard_interval_list_navigation', (tester) async {
+    await pumpBoard(tester);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab); // open the list
+    await tester.pumpAndSettle();
+
+    // Down to the second row, Enter jumps there and closes.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('list-overlay')), findsNothing);
+    expect(controller.snapshot.ordinal, 1);
+    controller.dispose();
+    await store.close();
+  });
+
   testWidgets('board_renders_not_started_planned', (tester) async {
     await pumpBoard(tester);
 
