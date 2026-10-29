@@ -97,8 +97,8 @@ duration · End Alert**.
 | ← (auto-finish) | auto-finish OFF |
 | → (auto-finish) | auto-finish ON |
 | ↑ ↓ (duration) | ±1 unit (Ctrl: ±10) |
-| Enter / Shift+Enter (duration) | cycle hr → min → sec (wraps) |
-| ← → (duration) | same as Enter / Shift+Enter |
+| Enter / Shift+Enter (duration) | cycle hr → min → sec (wraps) — the ONLY cycling keys |
+| ← → (duration) | move the TEXT CURSOR inside the box (they belong to the field) |
 | Enter (End Alert) | open the End Alert selector |
 
 Duration boxes are **always editable** — the active box holds the caret
@@ -106,6 +106,8 @@ Duration boxes are **always editable** — the active box holds the caret
 there is no separate "enter the box" step.
 
 ## End Alert selector
+
+Focus starts in the alert list.
 
 | Key | Action |
 | --- | --- |

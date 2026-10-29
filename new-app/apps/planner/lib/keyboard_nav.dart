@@ -187,6 +187,13 @@ class ScreenNav extends ChangeNotifier {
     }
   }
 
+  /// Focus a specific cell by id (screens whose visual state has its own
+  /// notion of "active item" use this to keep ring and state identical).
+  void focusCell(String id) {
+    _focusedId = id;
+    notifyListeners();
+  }
+
   /// Enter — activate the focused cell (disabled cells never activate).
   void activate() {
     _ensureFocus();

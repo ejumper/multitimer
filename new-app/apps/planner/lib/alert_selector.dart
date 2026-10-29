@@ -114,6 +114,10 @@ class _AlertSelectorScreenState extends State<AlertSelectorScreen> {
   @override
   void initState() {
     super.initState();
+    // Focus starts in the ALERT LIST (acceptance), not on the back button.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _nav.sections.length > 1) _nav.focusSection(1);
+    });
     _selected = widget.selected;
     final files = [
       for (final name in widget.soundListing())
@@ -145,6 +149,8 @@ class _AlertSelectorScreenState extends State<AlertSelectorScreen> {
   void _preview(String file) {
     unawaited(widget.player.play('${widget.soundsDir}/$file'));
   }
+
+
 
   @override
   Widget build(BuildContext context) {

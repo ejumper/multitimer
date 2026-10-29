@@ -738,6 +738,56 @@ void main() {
     expect(find.byKey(const Key('ie-back')), findsNothing);
   });
 
+  // Left/Right are TEXT CURSOR keys in the duration boxes (acceptance) —
+  // only Enter/Shift+Enter cycle the boxes; the ring never drifts.
+  testWidgets('keyboard_duration_arrows_are_cursor_keys', (tester) async {
+    await pumpEditor(tester);
+    await pressWithCtrl(tester, LogicalKeyboardKey.keyN);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab); // -> color
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab); // -> name
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab); // -> autofinish
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab); // -> duration
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter); // hr -> min
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+    // Still the min box: left moved the TEXT CURSOR, not the active box.
+    final hrField = tester.widget<TextField>(find.byKey(const Key('ie-hr')));
+    final minField = tester.widget<TextField>(find.byKey(const Key('ie-min')));
+    expect(minField.focusNode!.hasFocus, isTrue);
+    expect(hrField.focusNode!.hasFocus, isFalse);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+  });
+
+  // End Alert selector: focus starts in the LIST (Enter with no
+  // navigation selects) and Escape = back.
+  testWidgets('keyboard_end_alert_focus_starts_in_list', (tester) async {
+    await pumpEditor(tester);
+    await pressWithCtrl(tester, LogicalKeyboardKey.keyN);
+    await tester.pumpAndSettle();
+    await pressWithCtrl(tester, LogicalKeyboardKey.end);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.text('No alert'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter); // no nav: list focus
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('ie-back')), findsOneWidget); // closed
+
+    // Reopen; Escape inside the selector = the back button.
+    await pressWithCtrl(tester, LogicalKeyboardKey.end);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.text('No alert'), findsOneWidget); // selector open
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('ie-back')), findsOneWidget); // closed
+  });
+
   // End Alert selector: Tab cycles top bar <-> list; Escape = back.
   testWidgets('keyboard_end_alert_tab_and_escape', (tester) async {
     await pumpEditor(tester);

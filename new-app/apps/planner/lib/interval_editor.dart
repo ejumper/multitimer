@@ -88,6 +88,9 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
   /// Focus a duration box and select its value (typing replaces).
   void _focusBox(int i) {
     _activeBox = i.clamp(0, 2);
+    // The ring is bound directly to the active box — no independent ring
+    // movement, so ring and caret can never drift apart.
+    _nav.focusCell(['ie-hr', 'ie-min', 'ie-sec'][_activeBox]);
     final node = _boxFocus[_activeBox];
     node.requestFocus();
     final controller = [_hr, _min, _sec][_activeBox];
@@ -259,11 +262,8 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
       _cycleBox(shift ? -1 : 1);
       return KeyEventResult.handled;
     }
-    if (inDuration && (key == LogicalKeyboardKey.arrowLeft ||
-        key == LogicalKeyboardKey.arrowRight)) {
-      _cycleBox(key == LogicalKeyboardKey.arrowRight ? 1 : -1);
-      return KeyEventResult.handled;
-    }
+    // Left/Right belong to the text box (cursor movement) — Enter /
+    // Shift+Enter are the ONLY box-cycling keys (acceptance).
     if (inDuration && (key == LogicalKeyboardKey.arrowUp ||
         key == LogicalKeyboardKey.arrowDown)) {
       _adjustBox(key == LogicalKeyboardKey.arrowUp ? 1 : -1, ctrl ? 10 : 1);
@@ -276,9 +276,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
   /// Enter/Shift+Enter within the duration section: focus the next/prev
   /// box (wrapping) so typing lands there.
   void _cycleBox(int delta) {
-    final boxes = _boxFocus;
-    _focusBox((_activeBox + delta) % boxes.length);
-    _nav.move(0, delta); // keep the visual ring in step
+    _focusBox((_activeBox + delta) % _boxFocus.length);
   }
 
   /// Up/Down within the duration section: adjust the focused box by
