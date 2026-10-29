@@ -1,7 +1,4 @@
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 
 /// Bundled font families (registered in pubspec.yaml; local-only assets).
 abstract final class AppFonts {
@@ -117,82 +114,6 @@ class AppPageRoute<T> extends MaterialPageRoute<T> {
 
   @override
   Duration get transitionDuration => const Duration(milliseconds: 150);
-}
-
-/// Capture handle for the app's painted frame — main.dart wraps the
-/// navigator in a RepaintBoundary with this key.
-final GlobalKey appFrameKey = GlobalKey();
-
-/// Snapshots the app's current frame (null when no boundary is mounted,
-/// e.g. widget tests — panels then fall back to the plain base).
-Future<ui.Image?> captureAppFrame() async {
-  final ctx = appFrameKey.currentContext;
-  final box = ctx?.findRenderObject();
-  if (box is! RenderRepaintBoundary) return null;
-  try {
-    return await box.toImage(pixelRatio: 1.0);
-  } catch (_) {
-    return null;
-  }
-}
-
-/// Frosted-panel content wrapper — the "hide the sharp element, show the
-/// blurred version" model:
-///
-/// A live [BackdropFilter] cannot do frosted glass over THIS app's
-/// transparent window: it composites its blurred capture OVER the sharp
-/// original, and the capture is see-through everywhere, so the sharp UI
-/// ghosts through the blur (and an opaque base under the filter hides the
-/// UI from the capture itself — black on black). Instead we SNAPSHOT the
-/// UI and show the blurred copy over an opaque base: the base kills the
-/// ghost, the snapshot carries the blur. The snapshot is window-sized and
-/// dialogs are window-centered, so centering it on the panel aligns it
-/// with the live UI.
-Widget frostedPanel({
-  required Widget child,
-  required ui.Image? snapshot,
-  double sigma = 8,
-}) {
-  return ClipRRect(
-    borderRadius: const BorderRadius.all(Radius.circular(16)),
-    child: Stack(
-      children: [
-        // Opaque base — no sharp ghost can show through the panel.
-        const Positioned.fill(child: ColoredBox(color: Colors.black)),
-        if (snapshot != null)
-          Positioned.fill(
-            child: Align(
-              child: SizedBox(
-                width: snapshot.width.toDouble(),
-                height: snapshot.height.toDouble(),
-                child: ImageFiltered(
-                  imageFilter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
-                  child: RawImage(image: snapshot, fit: BoxFit.fill),
-                ),
-              ),
-            ),
-          ),
-        child,
-      ],
-    ),
-  );
-}
-
-/// Opens a modal over a frosted panel: captures the UI first, then shows
-/// [builder]'s dialog (transparent background, content inside
-/// [frostedPanel]). No full-window barrier dim — the effect lives only
-/// behind the menu.
-Future<T?> showFrostedDialog<T>(
-  BuildContext context, {
-  required Widget Function(ui.Image? snapshot) builder,
-}) async {
-  final snapshot = await captureAppFrame();
-  if (!context.mounted) return null;
-  return showDialog<T>(
-    context: context,
-    barrierColor: Colors.transparent,
-    builder: (_) => builder(snapshot),
-  );
 }
 
 /// App theme: transparent scaffold over the compositor's blur, dark content.

@@ -274,18 +274,19 @@ class BoardScreen extends StatelessWidget {
   void _showListOverlay(BuildContext context) {
     final instances = controller.instances;
     final current = controller.snapshot.ordinal;
-    showFrostedDialog<void>(
-      context,
-      builder: (snapshot) => Dialog(
+    showDialog<void>(
+      context: context,
+      // No full-window dim: the effect lives only behind the menu —
+      // the default black54 barrier darkened the whole page.
+      barrierColor: Colors.transparent,
+      builder: (dialogContext) => Dialog(
         key: const Key('list-overlay'),
-        backgroundColor: Colors.transparent,
+        backgroundColor: Colors.black, // opaque menu panel
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.all(Radius.circular(16)),
           side: BorderSide(color: AppColors.cardBorder),
         ),
-        child: frostedPanel(
-          snapshot: snapshot,
-          child: SizedBox(
+        child: SizedBox(
           height: 420,
           width: 360,
           child: Column(
@@ -366,7 +367,6 @@ class BoardScreen extends StatelessWidget {
             ],
           ),
         ),
-        ),
       ),
     );
   }
@@ -374,67 +374,34 @@ class BoardScreen extends StatelessWidget {
   /// Reset confirmation: nothing happens without an explicit confirm —
   /// Cancel and the barrier tap just dismiss.
   void _showResetDialog(BuildContext context) {
-    showFrostedDialog<void>(
-      context,
-      builder: (snapshot) => Dialog(
-        backgroundColor: Colors.transparent,
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.transparent, // effect only behind the menu
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: Colors.black, // opaque menu panel
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.all(Radius.circular(16)),
           side: BorderSide(color: AppColors.cardBorder),
         ),
-        child: frostedPanel(
-          snapshot: snapshot,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 20, 24, 10),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Reset timer?',
-                  style: TextStyle(
-                    fontFamily: AppFonts.ui,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.text,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'The current run will end and the timer returns to not '
-                  'started.',
-                  style: TextStyle(
-                    fontFamily: AppFonts.ui,
-                    fontSize: 14,
-                    color: AppColors.dimmed,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      key: const Key('dialog-cancel'),
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('Cancel'),
-                    ),
-                    TextButton(
-                      key: const Key('dialog-confirm'),
-                      onPressed: () {
-                        controller.reset();
-                        Navigator.of(context).pop();
-                      },
-                      child: const Text(
-                        'Reset',
-                        style: TextStyle(color: AppColors.danger),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
+        title: const Text('Reset timer?'),
+        content: const Text(
+          'The current run will end and the timer returns to not started.',
         ),
+        actions: [
+          TextButton(
+            key: const Key('dialog-cancel'),
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            key: const Key('dialog-confirm'),
+            onPressed: () {
+              controller.reset();
+              Navigator.of(dialogContext).pop();
+            },
+            child: const Text('Reset', style: TextStyle(color: AppColors.danger)),
+          ),
+        ],
       ),
     );
   }
