@@ -682,6 +682,90 @@ void main() {
     expect(find.text('No alert'), findsNothing);
   });
 
+  // Space toggles selector circles (in addition to Enter).
+  testWidgets('keyboard_space_toggles_selector_circles', (tester) async {
+    await pumpEditor(tester);
+    await pressWithCtrl(tester, LogicalKeyboardKey.end); // intervals
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pump();
+    expect(controller.selection, contains('a'));
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pump();
+    expect(controller.selection, isEmpty);
+  });
+
+  // Auto-finish: Space toggles, Left = off, Right = on; and the duration
+  // boxes keep ring and caret in agreement (the active-box model).
+  testWidgets('keyboard_autofinish_and_duration_consistency', (tester) async {
+    await pumpEditor(tester);
+    await pressWithCtrl(tester, LogicalKeyboardKey.keyN);
+    await tester.pumpAndSettle();
+
+    // Auto-finish section: Space toggles; Right forces on; Left forces off.
+    for (var i = 0; i < 3; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    }
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pump();
+    expect(
+      tester.widget<Switch>(find.byKey(const Key('ie-autofinish'))).value,
+      isTrue,
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+    expect(
+      tester.widget<Switch>(find.byKey(const Key('ie-autofinish'))).value,
+      isFalse,
+    );
+
+    // Duration: Enter lands focus on the NEXT box — typing goes THERE
+    // (regression: the ring and the caret must never disagree).
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter); // hr -> min
+    await tester.pump();
+    // The caret lives in the box the ring shows (the regression: they
+    // must never disagree).
+    final hrField = tester.widget<TextField>(find.byKey(const Key('ie-hr')));
+    final minField = tester.widget<TextField>(find.byKey(const Key('ie-min')));
+    expect(minField.focusNode!.hasFocus, isTrue);
+    expect(hrField.focusNode!.hasFocus, isFalse);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('ie-back')), findsNothing);
+  });
+
+  // End Alert selector: Tab cycles top bar <-> list; Escape = back.
+  testWidgets('keyboard_end_alert_tab_and_escape', (tester) async {
+    await pumpEditor(tester);
+    await pressWithCtrl(tester, LogicalKeyboardKey.keyN);
+    await tester.pumpAndSettle();
+    await pressWithCtrl(tester, LogicalKeyboardKey.end); // end-alert section
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.text('No alert'), findsOneWidget);
+
+    // Tab walks to the top bar (back button); Enter = back.
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('ie-back')), findsOneWidget);
+
+    // Reopen; Escape = back too.
+    await pressWithCtrl(tester, LogicalKeyboardKey.end);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('ie-back')), findsOneWidget);
+  });
+
   testWidgets('edge_slot_content_column_targets_inner_group', (tester) async {
     useTallSurface(tester);
     controller = await buildEditor(nestedEdgeTree());

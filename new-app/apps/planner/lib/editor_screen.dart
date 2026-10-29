@@ -105,10 +105,23 @@ class _EditorScreenState extends State<EditorScreen> {
   /// Keyboard model (acceptance): sections top row / colors / name /
   /// buttons / intervals; the intervals are the nested grid.
   final ScreenNav _nav = ScreenNav(sections: const []);
+  final FocusNode _navFocus = FocusNode();
 
   /// Real text focus for the name field (the keyboard "name section"
   /// hands focus here so typing works).
   final FocusNode _nameFocus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    // Hand real text focus to the name field when its section is entered.
+    _nav.onSectionChanged = (id) {
+      // The router retakes focus on every section change (a text field
+      // may have held it); the name section then hands focus to the field.
+      _navFocus.requestFocus();
+      if (id == 'name') _nameFocus.requestFocus();
+    };
+  }
 
   // ── drag-reorder state ────────────────────────────────────────────────
 
@@ -124,6 +137,7 @@ class _EditorScreenState extends State<EditorScreen> {
   @override
   void dispose() {
     _nameFocus.dispose();
+    _navFocus.dispose();
     _float?.remove();
     _float = null;
     super.dispose();
@@ -143,6 +157,7 @@ class _EditorScreenState extends State<EditorScreen> {
                 _nav.updateSections(_editorSections(context));
                 return NavKeyboard(
                   nav: _nav,
+                  node: _navFocus,
                   onKey: _onKey,
                   child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
@@ -225,6 +240,16 @@ class _EditorScreenState extends State<EditorScreen> {
       return KeyEventResult.handled;
     }
     if (editingFieldHasFocus()) return null; // text editing owns the rest
+
+    // Space = Enter for selector circles and color swatches (acceptance).
+    if (key == LogicalKeyboardKey.space) {
+      final id = _nav.focusedCell?.id ?? '';
+      if (id.startsWith('circle-') || id.startsWith('color-')) {
+        _nav.activate();
+        return KeyEventResult.handled;
+      }
+      return null;
+    }
 
     if (ctrl && key == LogicalKeyboardKey.keyZ) {
       controller.undo();

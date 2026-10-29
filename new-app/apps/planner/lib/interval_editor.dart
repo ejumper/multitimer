@@ -70,6 +70,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
   /// Keyboard model (acceptance): sections back / colors / name /
   /// auto-finish / duration / end alert.
   final ScreenNav _nav = ScreenNav(sections: const []);
+  final FocusNode _navFocus = FocusNode();
 
   /// Real text focus for the name + duration fields (the typing rule).
   final FocusNode _nameFocus = FocusNode();
@@ -84,6 +85,19 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
   /// this one — so the section behaves like a stepped control).
   int _activeBox = 0;
 
+  /// Focus a duration box and select its value (typing replaces).
+  void _focusBox(int i) {
+    _activeBox = i.clamp(0, 2);
+    final node = _boxFocus[_activeBox];
+    node.requestFocus();
+    final controller = [_hr, _min, _sec][_activeBox];
+    controller.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: controller.text.length,
+    );
+  }
+
+
   late final TextEditingController _hr;
   late final TextEditingController _min;
   late final TextEditingController _sec;
@@ -96,6 +110,16 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
   @override
   void initState() {
     super.initState();
+    // The "active box" model (acceptance): entering a section hands real
+    // text focus there at once — no separate "enter the box" step, so the
+    // ring and the caret can never disagree. Select-all on arrival makes
+    // typing replace cleanly.
+    _nav.onSectionChanged = (id) {
+      // The router retakes focus first — a text field may have held it —
+      // then hands it on where the section wants it.
+      _navFocus.requestFocus();
+      if (id == 'duration') _focusBox(_activeBox);
+    };
     final defId = widget.defId;
     final def = defId == null ? null : _lookupDef(defId);
     _def = def;
@@ -145,6 +169,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
   void dispose() {
     _label.dispose();
     _nameFocus.dispose();
+    _navFocus.dispose();
     _hrFocus.dispose();
     _minFocus.dispose();
     _secFocus.dispose();
@@ -168,6 +193,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
                 _nav.updateSections(_ieSections(context));
                 return NavKeyboard(
                   nav: _nav,
+                  node: _navFocus,
                   onKey: _onKey,
                   child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
@@ -212,9 +238,30 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
     // adjust the value, Enter/Shift+Enter cycle the boxes) — they are
     // checked before the typing rule on purpose.
     final inDuration = _nav.section.id == 'duration';
+
+    // Auto-finish section: Space toggles, Left = off, Right = on.
+    if (_nav.section.id == 'autofinish') {
+      if (key == LogicalKeyboardKey.space) {
+        setState(() => _autoFinish = !_autoFinish);
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.arrowLeft && !_autoFinish) {
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.arrowRight) {
+        setState(() => _autoFinish = key == LogicalKeyboardKey.arrowRight);
+        return KeyEventResult.handled;
+      }
+    }
+
     if (inDuration && (key == LogicalKeyboardKey.enter ||
         key == LogicalKeyboardKey.numpadEnter)) {
       _cycleBox(shift ? -1 : 1);
+      return KeyEventResult.handled;
+    }
+    if (inDuration && (key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.arrowRight)) {
+      _cycleBox(key == LogicalKeyboardKey.arrowRight ? 1 : -1);
       return KeyEventResult.handled;
     }
     if (inDuration && (key == LogicalKeyboardKey.arrowUp ||
@@ -230,8 +277,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
   /// box (wrapping) so typing lands there.
   void _cycleBox(int delta) {
     final boxes = _boxFocus;
-    _activeBox = (_activeBox + delta) % boxes.length;
-    boxes[_activeBox].requestFocus();
+    _focusBox((_activeBox + delta) % boxes.length);
     _nav.move(0, delta); // keep the visual ring in step
   }
 
@@ -315,6 +361,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
       children: [
         FocusRing(
           focused: _nav.isFocused('ie-back'),
+          circular: true,
           child: _BackCircle(key: const Key('ie-back'), onPressed: _commitBack),
         ),
         const Expanded(
@@ -480,32 +527,23 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              FocusRing(
-                focused: _nav.isFocused('ie-hr'),
-                child: _durationBox(
-                  key: const Key('ie-hr'),
-                  controller: _hr,
-                  unit: 'hr',
-                  focusNode: _hrFocus,
-                ),
+              _durationBox(
+                key: const Key('ie-hr'),
+                controller: _hr,
+                unit: 'hr',
+                focusNode: _hrFocus,
               ),
-              FocusRing(
-                focused: _nav.isFocused('ie-min'),
-                child: _durationBox(
-                  key: const Key('ie-min'),
-                  controller: _min,
-                  unit: 'min',
-                  focusNode: _minFocus,
-                ),
+              _durationBox(
+                key: const Key('ie-min'),
+                controller: _min,
+                unit: 'min',
+                focusNode: _minFocus,
               ),
-              FocusRing(
-                focused: _nav.isFocused('ie-sec'),
-                child: _durationBox(
-                  key: const Key('ie-sec'),
-                  controller: _sec,
-                  unit: 'sec',
-                  focusNode: _secFocus,
-                ),
+              _durationBox(
+                key: const Key('ie-sec'),
+                controller: _sec,
+                unit: 'sec',
+                focusNode: _secFocus,
               ),
             ],
           ),
@@ -538,7 +576,9 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
       children: [
         SizedBox(
           width: 72,
-          child: TextField(
+          child: FocusRing(
+            focused: _nav.isFocused('ie-$unit'),
+            child: TextField(
             key: key,
             focusNode: focusNode,
             controller: controller,
@@ -588,6 +628,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
               ),
             ),
             onChanged: (value) => _boxChanged(controller, value),
+          ),
           ),
         ),
         const SizedBox(height: 4),

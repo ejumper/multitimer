@@ -241,6 +241,7 @@ class _BoardScreenState extends State<BoardScreen> {
       mainAxisSize: MainAxisSize.min,
       children: [
         _HoverIconButton(
+          circularRing: true,
           buttonKey: const Key('btn-list'),
           icon: Icons.menu,
           focused: _nav.isFocused('btn-list'),
@@ -248,6 +249,7 @@ class _BoardScreenState extends State<BoardScreen> {
         ),
         const SizedBox(width: 8),
         _HoverIconButton(
+          circularRing: true,
           buttonKey: const Key('btn-reset'),
           icon: Icons.close_outlined,
           color: AppColors.danger, // destructive (greyscale-UI rule)
@@ -256,6 +258,7 @@ class _BoardScreenState extends State<BoardScreen> {
         ),
         const SizedBox(width: 8),
         _HoverIconButton(
+          circularRing: true,
           buttonKey: const Key('btn-skip'),
           icon: Icons.chevron_right,
           focused: _nav.isFocused('btn-skip'),
@@ -543,7 +546,8 @@ class _BoardScreenState extends State<BoardScreen> {
     final ctrl = HardwareKeyboard.instance.isControlPressed;
     // Space down = the context action (held Space must not flap —
     // KeyRepeatEvents never reach here).
-    if (key == LogicalKeyboardKey.space) {
+    if (key == LogicalKeyboardKey.space ||
+        key == LogicalKeyboardKey.mediaPlayPause) {
       dispatchContextAction();
       return KeyEventResult.handled;
     }
@@ -851,6 +855,7 @@ class _HoverIconButton extends StatefulWidget {
     required this.onPressed,
     this.color = AppColors.text,
     this.focused = false,
+    this.circularRing = true,
   });
 
   /// Lives on the INNER IconButton (tests address the button by key).
@@ -861,6 +866,9 @@ class _HoverIconButton extends StatefulWidget {
 
   /// Keyboard-focus ring (acceptance keyboard navigation).
   final bool focused;
+
+  /// Round buttons get a circular ring.
+  final bool circularRing;
 
   @override
   State<_HoverIconButton> createState() => _HoverIconButtonState();
@@ -883,10 +891,14 @@ class _HoverIconButtonState extends State<_HoverIconButton> {
               ? Colors.white.withValues(alpha: 0.08)
               : null,
         ),
-        child: IconButton(
-          key: widget.buttonKey,
-          icon: Icon(widget.icon, size: 26, color: widget.color),
-          onPressed: widget.onPressed,
+        child: FocusRing(
+          focused: widget.focused,
+          circular: widget.circularRing,
+          child: IconButton(
+            key: widget.buttonKey,
+            icon: Icon(widget.icon, size: 26, color: widget.color),
+            onPressed: widget.onPressed,
+          ),
         ),
       ),
     );

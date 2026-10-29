@@ -68,11 +68,23 @@ class _AlertSelectorScreenState extends State<AlertSelectorScreen> {
       unawaited(widget.player.stop());
       return KeyEventResult.handled;
     }
-    return null; // up/down/Home/End/Enter -> shared model; Escape pops
+    if (key == LogicalKeyboardKey.escape) {
+      Navigator.of(context).pop(); // = the back button (acceptance)
+      return KeyEventResult.handled;
+    }
+    return null; // up/down/Home/End/Enter -> shared model
   }
 
   List<NavSection> _alertSections() {
     return [
+      NavSection(id: 'top', cells: [
+        NavCell(
+          id: 'alert-back',
+          row: 0,
+          col: 0,
+          activate: () => Navigator.of(context).pop(),
+        ),
+      ]),
       NavSection(id: 'alerts', cells: [
         NavCell(
           id: 'alert-none',
@@ -175,9 +187,13 @@ class _AlertSelectorScreenState extends State<AlertSelectorScreen> {
   Widget _header(BuildContext context) {
     return Row(
       children: [
-        _BackCircle(
-          key: const Key('as-back'),
-          onPressed: () => Navigator.of(context).pop(),
+        FocusRing(
+          focused: _nav.isFocused('alert-back'),
+          circular: true,
+          child: _BackCircle(
+            key: const Key('as-back'),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
         ),
         const Expanded(
           child: Text(

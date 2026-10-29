@@ -59,6 +59,11 @@ class ScreenNav extends ChangeNotifier {
   ScreenNav({required this.sections});
 
   List<NavSection> sections;
+
+  /// Fires whenever the focused SECTION changes — screens use it to hand
+  /// real text focus to their fields (the "active box" model).
+  void Function(String sectionId)? onSectionChanged;
+
   int _sectionIndex = 0;
   String? _focusedId;
 
@@ -106,6 +111,7 @@ class ScreenNav extends ChangeNotifier {
     _focusedId = null;
     _ensureFocus();
     notifyListeners();
+    onSectionChanged?.call(section.id);
   }
 
   /// Tab / Shift+Tab. Returns true when the section changed.
@@ -213,10 +219,18 @@ bool editingFieldHasFocus() {
 /// The visual focus ring for a keyboard-focused cell (the unified 1.4
 /// border width, in the text color — same family as the hover circle).
 class FocusRing extends StatelessWidget {
-  const FocusRing({super.key, required this.focused, required this.child});
+  const FocusRing({
+    super.key,
+    required this.focused,
+    required this.child,
+    this.circular = false,
+  });
 
   final bool focused;
   final Widget child;
+
+  /// True for round buttons — the ring is a circle, not a rounded rect.
+  final bool circular;
 
   @override
   Widget build(BuildContext context) {
@@ -225,7 +239,10 @@ class FocusRing extends StatelessWidget {
         border: focused
             ? Border.all(color: Colors.white, width: 1.4)
             : null,
-        borderRadius: const BorderRadius.all(Radius.circular(14)),
+        shape: circular ? BoxShape.circle : BoxShape.rectangle,
+        borderRadius: circular
+            ? null
+            : const BorderRadius.all(Radius.circular(14)),
       ),
       child: child,
     );
@@ -242,7 +259,12 @@ class NavKeyboard extends StatefulWidget {
     required this.nav,
     required this.child,
     this.onKey,
+    this.node,
   });
+
+  /// Optional external focus node — screens hold it so they can hand
+  /// focus BACK to the router after visiting a text field.
+  final FocusNode? node;
 
   final ScreenNav nav;
   final Widget child;
@@ -319,6 +341,7 @@ class _NavKeyboardState extends State<NavKeyboard> {
   Widget build(BuildContext context) {
     return Focus(
       autofocus: true,
+      focusNode: widget.node,
       onKeyEvent: (node, event) => _handle(event),
       child: widget.child,
     );

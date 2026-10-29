@@ -89,6 +89,18 @@ void main() {
 
   // 1. Not started: the planned readout parts of 90s + first caption.
   // Keyboard navigation (acceptance): quick keys and dialog keys.
+  testWidgets('keyboard_media_key_acts_like_space', (tester) async {
+    await pumpBoard(tester);
+    await tester.sendKeyEvent(LogicalKeyboardKey.mediaPlayPause);
+    await tester.pump();
+    expect(controller.snapshot.state, SessionState.running);
+    await tester.sendKeyEvent(LogicalKeyboardKey.mediaPlayPause);
+    await tester.pump();
+    expect(controller.snapshot.state, SessionState.paused);
+    controller.dispose();
+    await store.close();
+  });
+
   testWidgets('keyboard_quick_keys_open_dialogs_and_act', (tester) async {
     await pumpBoard(tester);
 
