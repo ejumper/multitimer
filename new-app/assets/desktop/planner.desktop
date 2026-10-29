@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Planner
+Comment=Interval timer with nested repeat groups and end alerts
+Exec=@EXEC@
+Icon=planner
+Terminal=false
+Type=Application
+Categories=Utility;
+StartupWMClass=planner

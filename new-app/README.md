@@ -56,6 +56,20 @@ Both print `SMOKE_OK` and exit; the alert smoke drives a real 1-second session
 through the engine into the real notifier + sound player (in-memory DB — the
 real change log stays clean).
 
+## Install (KDE/Linux)
+
+```sh
+scripts/build.sh        # release bundle
+scripts/install.sh      # -> ~/.local (app, icon, launcher) — no root
+```
+
+`install.sh` copies the self-contained bundle to `~/.local/lib/planner`,
+installs the icon (`assets/icon/planner.png`) into the hicolor theme,
+writes `~/.local/share/applications/planner.desktop`, and symlinks
+`~/.local/bin/planner` for terminal use. Then "Planner" appears in the
+app launcher. Re-run after a rebuild to upgrade; `scripts/uninstall.sh`
+removes all of it.
+
 ## Desktop notes
 
 - The window background is **fully transparent** — your compositor (KWin)

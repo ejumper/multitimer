@@ -34,6 +34,10 @@ static void my_application_activate(GApplication* application) {
     return;
   }
 
+  // Window/taskbar icon: the "planner" hicolor theme icon (installed by
+  // scripts/install.sh) — also matched to the launcher via StartupWMClass.
+  gtk_window_set_default_icon_name("planner");
+
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
   self->window = GTK_WIDGET(window);
