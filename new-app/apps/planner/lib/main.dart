@@ -106,6 +106,15 @@ Future<void> _smoke() async {
   }
 }
 
+/// The real exit. windowManager.destroy() tears the GTK window down and
+/// takes the process with it via a teardown SIGSEGV — KDE then shows a
+/// crash notification for a perfectly normal close. State is durable
+/// (the store commits per statement), so a clean process exit is the
+/// honest end.
+void quitPlanner() {
+  exit(0);
+}
+
 /// Whether a close request should hide to tray (true) or quit (false):
 /// a live run is worth protecting — closing must not kill its alerts.
 bool closeHidesToTray(SessionState state) => state != SessionState.notStarted;
@@ -123,7 +132,7 @@ class _CloseBehavior extends WindowListener {
     if (closeHidesToTray(controller.snapshot.state)) {
       unawaited(windowManager.hide());
     } else {
-      windowManager.destroy();
+      quitPlanner();
     }
   }
 }
@@ -171,10 +180,8 @@ Future<void> _initTray() async {
     MenuSeparator(),
     MenuItemLabel(
       label: 'Quit',
-      onClicked: (_) {
-        // Real exit — destroys the window and ends the process.
-        windowManager.destroy();
-      },
+      // ignore: discarded_futures
+      onClicked: (_) async => quitPlanner(),
     ),
   ]);
 

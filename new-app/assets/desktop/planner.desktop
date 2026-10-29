@@ -2,7 +2,7 @@
 Name=Planner
 Comment=Interval timer with nested repeat groups and end alerts
 Exec=@EXEC@
-Icon=planner-timer
+Icon=@ICON@
 Terminal=false
 Type=Application
 Categories=Utility;

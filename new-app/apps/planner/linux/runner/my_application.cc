@@ -34,11 +34,21 @@ static void my_application_activate(GApplication* application) {
     return;
   }
 
-  // Window/taskbar icon: the "planner-timer" hicolor theme icon (installed
-  // by scripts/install.sh). NOT "planner" — that name is taken by the
-  // Breeze/Slot-Ars themes' old GNOME Planner icon and shadows ours in
-  // lookup. Also matched to the launcher via StartupWMClass.
-  gtk_window_set_default_icon_name("planner-timer");
+  // Window/taskbar icon: set from the BUNDLED asset by absolute path —
+  // bypasses icon-theme lookup entirely (the name "planner" is shadowed
+  // by the Breeze/Slot-Ars themes' old GNOME Planner icon, and we don't
+  // want the window icon to depend on theme resolution at all).
+  {
+    g_autoptr(GError) icon_error = nullptr;
+    g_autofree gchar* exe_dir = g_path_get_dirname(g_file_read_link(
+        "/proc/self/exe", nullptr));
+    g_autofree gchar* icon_path = g_build_filename(
+        exe_dir, "data", "flutter_assets", "assets", "tray",
+        "planner_tray.png", nullptr);
+    if (!gtk_window_set_default_icon_from_file(icon_path, &icon_error)) {
+      g_warning("window icon: %s", icon_error->message);
+    }
+  }
 
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));

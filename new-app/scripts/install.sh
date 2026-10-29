@@ -31,7 +31,9 @@ cp "$REPO/assets/icon/planner-timer.png" "$ICON_DIR/planner-timer.png"
 
 echo "· launcher    -> $APPS_DIR/planner.desktop"
 mkdir -p "$APPS_DIR"
-sed "s|@EXEC@|$APP_DIR/planner|" "$REPO/assets/desktop/planner.desktop" \
+sed -e "s|@EXEC@|$APP_DIR/planner|" \
+       -e "s|@ICON@|$ICON_DIR/planner-timer.png|" \
+       "$REPO/assets/desktop/planner.desktop" \
   > "$APPS_DIR/planner.desktop"
 chmod +x "$APPS_DIR/planner.desktop"
 
