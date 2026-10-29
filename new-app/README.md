@@ -83,8 +83,10 @@ removes all of it.
   `python3 scripts/gen_tray_icon.py`; copy fonts from `/usr/local/share/fonts/`
   (`p/ProLisa_Regular.ttf`, `p/ProLisa_Bold.ttf`, `m/MonoLisa_Medium.ttf`,
   `m/MonoLisa_Black.ttf`) — a fresh clone needs both before `flutter run`.
-- Close button hides to tray; restore via the tray menu's **Show Planner**
-  (on KDE, clicking the tray icon opens its menu); **Quit** exits.
+- Close button (Alt+F4, task-manager close): **hides to tray while a run
+  is active** — alerts keep firing — and **quits when idle** (the hybrid
+  close policy). Restore via the tray menu's **Show Planner**; **Quit**
+  exits unconditionally.
 - v1 plan + reports + acceptance script live in `v1/` (`v1/ACCEPTANCE.md`,
   `v1/BUILD-NOTES.md`).
 

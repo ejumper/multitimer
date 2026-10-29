@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -44,8 +45,8 @@ Future<void> main() async {
       await windowManager.focus();
     },
   );
-  // Close button hides to tray instead of quitting (D5: no daemon; the app
-  // must keep running while closed so alarms can fire).
+  // Close is handled by [_CloseBehavior] (hybrid — see below); the raw
+  // close event must be swallowed so it can decide hide-vs-quit.
   await windowManager.setPreventClose(true);
 
   await _initTray();
@@ -76,6 +77,11 @@ Future<void> main() async {
   controller = appController;
   await appController.init();
 
+  // Hybrid close (acceptance): a LIVE run hides to tray so its alerts keep
+  // firing (D5 — no daemon; the process must outlive the window); idle
+  // closes for real.
+  windowManager.addListener(_CloseBehavior(appController));
+
   runApp(PlannerApp(controller: appController));
 }
 
@@ -97,6 +103,28 @@ Future<void> _smoke() async {
     // ignore: avoid_print
     print('SMOKE_FAIL: $e');
     exit(1);
+  }
+}
+
+/// Whether a close request should hide to tray (true) or quit (false):
+/// a live run is worth protecting — closing must not kill its alerts.
+bool closeHidesToTray(SessionState state) => state != SessionState.notStarted;
+
+/// The window-close policy (hybrid close, acceptance): hide to tray while
+/// a timer run is active, quit when idle. Alt+F4 / the task-manager close
+/// ride the same path as the window's close button.
+class _CloseBehavior extends WindowListener {
+  _CloseBehavior(this.controller);
+
+  final AppController controller;
+
+  @override
+  void onWindowClose() {
+    if (closeHidesToTray(controller.snapshot.state)) {
+      unawaited(windowManager.hide());
+    } else {
+      windowManager.destroy();
+    }
   }
 }
 
