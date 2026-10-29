@@ -25,5 +25,5 @@ new-app/apps/planner/assets/sounds/
 # --- scratch ---
 *.log
 
-# tray icon placeholder (local-only, regenerable via new-app/scripts/gen_tray_icon.py)
-new-app/apps/planner/assets/tray/
+# (the tray icon IS committed now — it is the app icon; the old
+#  generate-a-placeholder rule died with gen_tray_icon.py in cleanup)

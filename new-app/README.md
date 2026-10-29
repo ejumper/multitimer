@@ -78,11 +78,11 @@ removes all of it.
   transparent `FlView` background; see flutter/flutter#152154). Server-side KDE
   decorations come from NOT setting a GTK header bar (xdg-decoration). Second
   launches focus the existing window (GApplication single-instance).
-- Fonts (`assets/fonts/`) and the tray icon (`assets/tray/`) are **local-only,
-  gitignored**. Regenerate the tray icon with
-  `python3 scripts/gen_tray_icon.py`; copy fonts from `/usr/local/share/fonts/`
-  (`p/ProLisa_Regular.ttf`, `p/ProLisa_Bold.ttf`, `m/MonoLisa_Medium.ttf`,
-  `m/MonoLisa_Black.ttf`) — a fresh clone needs both before `flutter run`.
+- Fonts (`assets/fonts/`) are **local-only, gitignored** — copy from
+  `/usr/local/share/fonts/` (`p/ProLisa_Regular.ttf`, `p/ProLisa_Bold.ttf`,
+  `m/MonoLisa_Medium.ttf`, `m/MonoLisa_Black.ttf`); a fresh clone needs
+  them before `flutter run`. The tray icon (`assets/tray/`) is the app
+  icon and **is committed** (see `assets/icon/`).
 - Close button (Alt+F4, task-manager close): **hides to tray while a run
   is active** — alerts keep firing — and **quits when idle** (the hybrid
   close policy). Restore via the tray menu's **Show Planner**; **Quit**

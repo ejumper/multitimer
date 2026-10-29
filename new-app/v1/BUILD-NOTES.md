@@ -45,9 +45,8 @@ heartbeat does `settle` → `flush` → rebuild.
    needs to change, but don't "clean up" to `textEnum` without re-checking.
    Regen: `dart run build_runner build --delete-conflicting-outputs` (if the
    generated file is tiny, delete it + `.dart_tool/build` and rerun).
-3. **Mock board is dead weight**: `lib/mock_board.dart` (+ its test) is the
-   P0.2 shell prototype, superseded by `board_screen.dart`. Kept as a visual
-   regression reference; delete whenever it annoys you.
+3. ~~Mock board is dead weight~~ — **removed in the final cleanup** (it was
+   the P0.2 shell prototype; `board_screen.dart` superseded it).
 4. **Single-instance is GApplication-id based** (`com.example.planner` — the
    TEMPLATE id). When app identity is decided (Android time, D10), rename the
    APPLICATION_ID in `linux/CMakeLists.txt` and the desktop file together.
@@ -57,9 +56,11 @@ heartbeat does `settle` → `flush` → rebuild.
 6. **Notification actions** (the P6.1 stretch): only `Continue`, only on
    manually-complete alerts. The parked items (Snooze/Reset buttons, action on
    auto-finish alerts) live in `../FINAL-APP-OUTLINE.md` §Parked.
-7. **No app icon / .desktop file** (nice-to-have, skipped): the tray icon is a
-   generated placeholder (`new-app/scripts/gen_tray_icon.py`); a real icon +
-   desktop entry belong with packaging work (flatpak/deb — not started).
+7. ~~No app icon / .desktop file~~ — **resolved**: the app icon
+   (`assets/icon/planner-timer.png`) drives the launcher, taskbar, window
+   decoration and tray; `scripts/install.sh` installs the bundle + a
+   `com.example.planner.desktop` entry (the app-id name is what Wayland
+   decoration lookup needs). Flatpak/deb packaging remains v2.
 8. **Test-only `drift` dependency in the app** also serves `PLANNER_SMOKE=alert`
    (in-memory DB so smoke runs don't pollute the real change log).
 
