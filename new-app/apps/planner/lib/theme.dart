@@ -119,18 +119,30 @@ class AppPageRoute<T> extends MaterialPageRoute<T> {
 }
 
 /// Frosted-panel wrapper for modal content (acceptance): blurs ONLY the
-/// area behind [dialog] — the filter hugs the dialog's rounded rect and
-/// the dialog paints as the filter's CHILD, so the blurred backdrop
-/// REPLACES the sharp one inside that rect (the old full-screen sibling
-/// arrangement smeared the whole page AND leaked the sharp copy through
-/// the blur).
+/// area behind [dialog]. Two hard-won details (transparent-window
+/// artifact):
+///  - BackdropFilter composites its blurred capture OVER the sharp
+///    backdrop — it only occludes the sharp copy when the capture is
+///    OPAQUE. On this transparent window the capture is see-through, so
+///    the sharp UI bled through the blur ("both the blur and the unblurred
+///    version"). The fix is to HIDE the sharp elements: an opaque base is
+///    painted inside the panel rect but BELOW the filter, so it becomes
+///    part of the captured backdrop — the blurred capture is opaque and
+///    covers the sharp board completely.
+///  - the filter hugs the dialog's rounded rect (ClipRRect), not the page.
 Widget blurredBackdrop(Widget dialog, {double sigma = 8}) {
   return Center(
     child: ClipRRect(
       borderRadius: const BorderRadius.all(Radius.circular(16)),
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
-        child: dialog,
+      child: Stack(
+        children: [
+          // Opaque base — beneath the filter on purpose (see doc).
+          const Positioned.fill(child: ColoredBox(color: Colors.black)),
+          BackdropFilter(
+            filter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+            child: dialog,
+          ),
+        ],
       ),
     ),
   );

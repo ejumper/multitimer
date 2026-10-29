@@ -9,6 +9,7 @@ import 'theme.dart';
 Future<int?> showRepeatModal(BuildContext context, {required int initial}) {
   return showDialog<int>(
     context: context,
+    barrierColor: Colors.transparent, // effect only behind the menu
     builder: (context) => blurredBackdrop(_RepeatModal(initial: initial)),
   );
 }

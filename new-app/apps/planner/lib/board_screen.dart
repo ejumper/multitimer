@@ -276,6 +276,9 @@ class BoardScreen extends StatelessWidget {
     final current = controller.snapshot.ordinal;
     showDialog<void>(
       context: context,
+      // No full-window dim: the effect lives only behind the menu
+      // (acceptance) — the default black54 barrier darkened the page.
+      barrierColor: Colors.transparent,
       builder: (dialogContext) => blurredBackdrop(
         Dialog(
           key: const Key('list-overlay'),
@@ -375,6 +378,9 @@ class BoardScreen extends StatelessWidget {
   void _showResetDialog(BuildContext context) {
     showDialog<void>(
       context: context,
+      // No full-window dim: the effect lives only behind the menu
+      // (acceptance) — the default black54 barrier darkened the page.
+      barrierColor: Colors.transparent,
       builder: (dialogContext) => blurredBackdrop(
         AlertDialog(
           backgroundColor: AppColors.card,
