@@ -365,12 +365,10 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   /// Bracket-bar tap → reopen the stepper for that group, seeded with its
-  /// current count. Documented MultiTimer-mirroring decision: ONLY
-  /// root-level groups respond — an inner group's bracket does NOTHING
-  /// (parent != null); inner groups become reachable only after the group
-  /// holding them is ungrouped.
+  /// current count. ALL groups respond, nested ones included (acceptance:
+  /// the earlier outermost-only rule was a misreading — a nested group
+  /// that repeats 2× inside a parent that repeats 3× is exactly the point).
   Future<void> _bracketTapped(BuildContext context, GroupDef group) async {
-    if (controller.tree.parentOf(group.id) != null) return; // inner: no-op
     controller.selectOnly(group.id);
     final repeat = await showRepeatModal(context, initial: group.repeatCount);
     if (repeat != null && context.mounted) {
@@ -458,13 +456,11 @@ class _EditorScreenState extends State<EditorScreen> {
     final row = switch (node) {
       DefNode(:final def) =>
         _chipRow(def, showSelection: parentGroupId == null),
+      // Groups keep their selector at EVERY depth (they are units —
+      // selecting/duplicating/deleting a nested group must be possible);
+      // only chips inside groups lose the circle (joined-unit rule).
       GroupNode(:final group, :final children) =>
-        _groupRow(
-          group,
-          children,
-          keyed: keyed,
-          showSelection: parentGroupId == null,
-        ),
+        _groupRow(group, children, keyed: keyed),
     };
     return GestureDetector(
       onVerticalDragDown: (d) => _pendingGrab = d.globalPosition,

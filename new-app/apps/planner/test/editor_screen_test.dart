@@ -759,14 +759,15 @@ void main() {
     );
   });
 
-  // 13. Inner groups stay unreachable: over [G1{G2{def}}], tapping G2's
-  //     bracket does NOTHING — no modal opens and the selection is
-  //     untouched (only outermost groups respond; MultiTimer mirroring).
-  testWidgets('inner_bracket_tap_ignored', (tester) async {
+  // 13. Nested groups are REACHABLE (acceptance: the outermost-only rule
+  //     was a misreading): tapping an inner bracket opens ITS repeat
+  //     stepper — the "nested group repeats 2× inside a parent that
+  //     repeats 3×" case.
+  testWidgets('inner_bracket_tap_opens_repeat_modal', (tester) async {
     controller.dispose();
     controller = await buildEditor(
       IntervalTree([
-        GroupNode(GroupDef(id: 'g1', timerId: timer.id, repeatCount: 1), [
+        GroupNode(GroupDef(id: 'g1', timerId: timer.id, repeatCount: 3), [
           GroupNode(GroupDef(id: 'g2', timerId: timer.id, repeatCount: 2), [
             def('x', name: 'lap'),
           ]),
@@ -778,9 +779,16 @@ void main() {
     await tester.tap(find.byKey(const Key('bracket-g2')));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('repeat-modal')), findsNothing);
-    expect(controller.selection, isEmpty);
-    expect(controller.canUndo, isFalse);
+    expect(find.byKey(const Key('repeat-modal')), findsOneWidget);
+    // Bump the inner repeat 2 -> 4 and confirm.
+    await tester.tap(find.byKey(const Key('repeat-plus')));
+    await tester.tap(find.byKey(const Key('repeat-plus')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('repeat-ok')));
+    await tester.pumpAndSettle();
+
+    // The INNER group's repeat changed; the outer's is untouched.
+    expect(controller.tree.toDebugString(), 'group:g1[3]{group:g2[4]{def:x}}');
   });
 
   // 14. Ungroup toolbar flow: select the root group → button enables →
