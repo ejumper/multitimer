@@ -5,11 +5,12 @@ set -euo pipefail
 APP_DIR="$HOME/.local/lib/planner"
 BIN="$HOME/.local/bin/planner"
 ICON="$HOME/.local/share/icons/hicolor/256x256/apps/planner-timer.png"
-DESKTOP="$HOME/.local/share/applications/planner.desktop"
+DESKTOP="$HOME/.local/share/applications/com.example.planner.desktop"
+LEGACY_DESKTOP="$HOME/.local/share/applications/planner.desktop"
 APPS_DIR="$HOME/.local/share/applications"
 
 rm -rf "$APP_DIR"
-rm -f "$BIN" "$ICON" "$DESKTOP"
+rm -f "$BIN" "$ICON" "$DESKTOP" "$LEGACY_DESKTOP"
 
 update-desktop-database "$APPS_DIR" 2>/dev/null || true
 gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true

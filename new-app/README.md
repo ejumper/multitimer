@@ -65,7 +65,7 @@ scripts/install.sh      # -> ~/.local (app, icon, launcher) — no root
 
 `install.sh` copies the self-contained bundle to `~/.local/lib/planner`,
 installs the icon (`assets/icon/planner-timer.png`) into the hicolor theme
-writes `~/.local/share/applications/planner.desktop`, and symlinks
+writes `~/.local/share/applications/com.example.planner.desktop` (named after the app-id so Wayland resolves the decoration icon), and symlinks
 `~/.local/bin/planner` for terminal use. Then "Planner" appears in the
 app launcher. Re-run after a rebuild to upgrade; `scripts/uninstall.sh`
 removes all of it.

@@ -29,13 +29,17 @@ echo "· icon        -> $ICON_DIR/planner-timer.png"
 mkdir -p "$ICON_DIR"
 cp "$REPO/assets/icon/planner-timer.png" "$ICON_DIR/planner-timer.png"
 
-echo "· launcher    -> $APPS_DIR/planner.desktop"
+echo "· launcher    -> $APPS_DIR/com.example.planner.desktop"
 mkdir -p "$APPS_DIR"
+# The FILE NAME must match the app-id (com.example.planner): on Wayland the
+# window decoration's icon is resolved from the app-id -> desktop file, and
+# a mismatch leaves KWin's generic placeholder in the titlebar.
 sed -e "s|@EXEC@|$APP_DIR/planner|" \
        -e "s|@ICON@|$ICON_DIR/planner-timer.png|" \
        "$REPO/assets/desktop/planner.desktop" \
-  > "$APPS_DIR/planner.desktop"
-chmod +x "$APPS_DIR/planner.desktop"
+  > "$APPS_DIR/com.example.planner.desktop"
+chmod +x "$APPS_DIR/com.example.planner.desktop"
+rm -f "$APPS_DIR/planner.desktop"   # legacy name from earlier installs
 
 echo "· terminal    -> $BIN_DIR/planner"
 mkdir -p "$BIN_DIR"
