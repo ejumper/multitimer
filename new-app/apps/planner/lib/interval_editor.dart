@@ -147,9 +147,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
                 children: [
                   _header(),
                   const SizedBox(height: 10),
-                  _colorRow(),
-                  const SizedBox(height: 10),
-                  _labelField(),
+                  _identityCard(),
                   const SizedBox(height: 10),
                   _autoFinishCard(),
                   const SizedBox(height: 10),
@@ -190,13 +188,28 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
   /// The six preset swatches (same D11 set as the timer editor); the
   /// selected one shows a ring + center dot. Local [_color], committed on
   /// back.
-  Widget _colorRow() {
+  /// The color swatches and the name field share ONE background rectangle,
+  /// split by a hairline in the border's own style (acceptance).
+  Widget _identityCard() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: _cardDecoration,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [for (final hex in _swatches) _swatch(hex)],
+      decoration: AppDecorations.card,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [for (final hex in kPresetSwatches) _swatch(hex)],
+            ),
+          ),
+          const Divider(
+            height: 1,
+            thickness: 1.4,
+            color: AppColors.cardBorder,
+          ),
+          _labelField(),
+        ],
       ),
     );
   }
@@ -210,10 +223,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
         width: 44,
         height: 44,
         padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: selected ? Border.all(color: AppColors.text, width: 2) : null,
-        ),
+        decoration: const BoxDecoration(shape: BoxShape.circle),
         child: Container(
           decoration: BoxDecoration(
             shape: BoxShape.circle,
@@ -238,9 +248,8 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
 
   /// Label card — the buffered name lives in [_label]'s text.
   Widget _labelField() {
-    return Container(
+    return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-      decoration: _cardDecoration,
       child: TextField(
         key: const Key('ie-label'),
         controller: _label,
@@ -257,7 +266,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
   Widget _autoFinishCard() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: _cardDecoration,
+      decoration: AppDecorations.card,
       child: Row(
         children: [
           Expanded(
@@ -304,7 +313,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
     final parsed = _parsed();
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: _cardDecoration,
+      decoration: AppDecorations.card,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -377,16 +386,31 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
                 horizontal: 4,
               ),
               border: const OutlineInputBorder(
-                borderRadius: BorderRadius.all(Radius.circular(8)),
-                borderSide: BorderSide(color: AppColors.outline),
+                borderRadius: BorderRadius.all(
+                  Radius.circular(AppDecorations.rectRadius),
+                ),
+                borderSide: BorderSide(
+                  color: AppColors.outline,
+                  width: AppDecorations.borderWidth,
+                ),
               ),
               enabledBorder: const OutlineInputBorder(
-                borderRadius: BorderRadius.all(Radius.circular(8)),
-                borderSide: BorderSide(color: AppColors.outline),
+                borderRadius: BorderRadius.all(
+                  Radius.circular(AppDecorations.rectRadius),
+                ),
+                borderSide: BorderSide(
+                  color: AppColors.outline,
+                  width: AppDecorations.borderWidth,
+                ),
               ),
               focusedBorder: const OutlineInputBorder(
-                borderRadius: BorderRadius.all(Radius.circular(8)),
-                borderSide: BorderSide(color: AppColors.outline),
+                borderRadius: BorderRadius.all(
+                  Radius.circular(AppDecorations.rectRadius),
+                ),
+                borderSide: BorderSide(
+                  color: AppColors.outline,
+                  width: AppDecorations.borderWidth,
+                ),
               ),
             ),
             onChanged: (value) => _boxChanged(controller, value),
@@ -428,7 +452,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
       onTap: _openAlertSelector,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: _cardDecoration,
+        decoration: AppDecorations.card,
         child: Row(
           children: [
             const Expanded(
@@ -536,23 +560,6 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
 
 /// Preset accent swatches (D11), in reference order — the timer editor's
 /// set, duplicated as a private copy here.
-const List<String> _swatches = [
-  '#ff00b1',
-  '#4800ff',
-  '#0055ff',
-  '#00a8ff',
-  '#00ad6b',
-  '#b8ff00',
-];
-
-/// Dark card background used by the row/toolbar containers — with the
-/// 25%-more-opaque hairline border (acceptance).
-const BoxDecoration _cardDecoration = BoxDecoration(
-  color: AppColors.card,
-  border: Border.fromBorderSide(BorderSide(color: AppColors.cardBorder)),
-  borderRadius: BorderRadius.all(Radius.circular(14)),
-);
-
 /// Circular outlined button — the mock board's `_RoundOutlineButton` style,
 /// used here for the header's back affordance.
 class _BackCircle extends StatelessWidget {
@@ -565,7 +572,10 @@ class _BackCircle extends StatelessWidget {
     return OutlinedButton(
       style: OutlinedButton.styleFrom(
         shape: const CircleBorder(),
-        side: const BorderSide(color: AppColors.outline, width: 1.5),
+        side: const BorderSide(
+          color: AppColors.outline,
+          width: AppDecorations.borderWidth,
+        ),
         padding: const EdgeInsets.all(12),
       ),
       onPressed: onPressed,

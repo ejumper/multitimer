@@ -282,10 +282,7 @@ class BoardScreen extends StatelessWidget {
       builder: (dialogContext) => Dialog(
         key: const Key('list-overlay'),
         backgroundColor: Colors.black, // opaque menu panel
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(16)),
-          side: BorderSide(color: AppColors.cardBorder),
-        ),
+        shape: AppDecorations.menuShape,
         child: SizedBox(
           height: 420,
           width: 360,
@@ -379,10 +376,7 @@ class BoardScreen extends StatelessWidget {
       barrierColor: Colors.transparent, // effect only behind the menu
       builder: (dialogContext) => AlertDialog(
         backgroundColor: Colors.black, // opaque menu panel
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(16)),
-          side: BorderSide(color: AppColors.cardBorder),
-        ),
+        shape: AppDecorations.menuShape,
         title: const Text('Reset timer?'),
         content: const Text(
           'The current run will end and the timer returns to not started.',

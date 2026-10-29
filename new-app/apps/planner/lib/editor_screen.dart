@@ -57,23 +57,6 @@ class EditorScreen extends StatefulWidget {
   /// Invoked after a successful commit, just before the route pops.
   final VoidCallback? onDone;
 
-  /// Preset accent swatches (D11), in reference order.
-  static const List<String> _swatches = [
-    '#ff00b1',
-    '#4800ff',
-    '#0055ff',
-    '#00a8ff',
-    '#00ad6b',
-    '#b8ff00',
-  ];
-
-  /// Dark card background used by the row/toolbar containers — with the
-  /// 25%-more-opaque hairline border (acceptance).
-  static const BoxDecoration _cardDecoration = BoxDecoration(
-    color: AppColors.card,
-    border: Border.fromBorderSide(BorderSide(color: AppColors.cardBorder)),
-    borderRadius: BorderRadius.all(Radius.circular(14)),
-  );
 
   @override
   State<EditorScreen> createState() => _EditorScreenState();
@@ -152,9 +135,7 @@ class _EditorScreenState extends State<EditorScreen> {
                   children: [
                     _header(context),
                     const SizedBox(height: 10),
-                    _colorRow(),
-                    const SizedBox(height: 10),
-                    _LabelField(controller: controller),
+                    _identityCard(),
                     const SizedBox(height: 16),
                     const Text(
                       'Intervals',
@@ -213,11 +194,12 @@ class _EditorScreenState extends State<EditorScreen> {
           style: TextButton.styleFrom(
             backgroundColor: AppColors.card,
             foregroundColor: AppColors.text,
-            side: const BorderSide(color: AppColors.cardBorder),
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-            shape: const RoundedRectangleBorder(
-              borderRadius: BorderRadius.all(Radius.circular(20)),
+            side: const BorderSide(
+              color: AppColors.cardBorder,
+              width: AppDecorations.borderWidth,
             ),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            shape: const StadiumBorder(),
           ),
           onPressed: () async {
             await controller.commit();
@@ -233,14 +215,24 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
-  /// The six preset swatches; the selected one shows a ring + center dot.
-  Widget _colorRow() {
+  /// The color swatches and the name field share ONE background rectangle,
+  /// split by a hairline in the border's own style (acceptance).
+  Widget _identityCard() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: EditorScreen._cardDecoration,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [for (final hex in EditorScreen._swatches) _swatch(hex)],
+      decoration: AppDecorations.card,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [for (final hex in kPresetSwatches) _swatch(hex)],
+            ),
+          ),
+          const Divider(height: 1, thickness: 1.4, color: AppColors.cardBorder),
+          _LabelField(controller: controller),
+        ],
       ),
     );
   }
@@ -254,10 +246,7 @@ class _EditorScreenState extends State<EditorScreen> {
         width: 44,
         height: 44,
         padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: selected ? Border.all(color: AppColors.text, width: 2) : null,
-        ),
+        decoration: const BoxDecoration(shape: BoxShape.circle),
         child: Container(
           decoration: BoxDecoration(
             shape: BoxShape.circle,
@@ -288,7 +277,7 @@ class _EditorScreenState extends State<EditorScreen> {
   Widget _toolbar(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: EditorScreen._cardDecoration,
+      decoration: AppDecorations.card,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -497,8 +486,13 @@ class _EditorScreenState extends State<EditorScreen> {
       key: const Key('drag-slot'),
       height: h,
       decoration: BoxDecoration(
-        borderRadius: const BorderRadius.all(Radius.circular(10)),
-        border: Border.all(color: AppColors.outline, width: 1.2),
+        borderRadius: const BorderRadius.all(
+          Radius.circular(AppDecorations.rectRadius),
+        ),
+        border: Border.all(
+          color: AppColors.outline,
+          width: AppDecorations.borderWidth,
+        ),
         color: AppColors.card.withValues(alpha: 0.35),
       ),
     );
@@ -784,8 +778,13 @@ class _EditorScreenState extends State<EditorScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        borderRadius: const BorderRadius.all(Radius.circular(10)),
-        border: Border.all(color: _hexColor(def.color), width: 1.4),
+        borderRadius: const BorderRadius.all(
+          Radius.circular(AppDecorations.rectRadius),
+        ),
+        border: Border.all(
+          color: _hexColor(def.color),
+          width: AppDecorations.borderWidth,
+        ),
         // Interval-color tinted background @ the shared semi-transparent
         // alpha (acceptance: "Color intervals background in the editor").
         color: _hexColor(def.color).withValues(alpha: AppColors.card.a),
@@ -937,7 +936,10 @@ class _EditorScreenState extends State<EditorScreen> {
         height: 20,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          border: Border.all(color: AppColors.outline, width: 1.4),
+          border: Border.all(
+            color: AppColors.outline,
+            width: AppDecorations.borderWidth,
+          ),
           color: selected ? AppColors.text.withValues(alpha: 0.35) : null,
         ),
         child: selected
@@ -1007,9 +1009,8 @@ class _LabelFieldState extends State<_LabelField> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-      decoration: EditorScreen._cardDecoration,
       child: TextField(
         key: const Key('label-field'),
         controller: _text,
@@ -1045,7 +1046,7 @@ class _GroupBarPainter extends CustomPainter {
       bar,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 2
+        ..strokeWidth = AppDecorations.borderWidth
         ..color = AppColors.outline,
     );
   }

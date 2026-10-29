@@ -170,7 +170,7 @@ class _AlertSelectorScreenState extends State<AlertSelectorScreen> {
       onTap: () => _select(null),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: _cardDecoration,
+        decoration: AppDecorations.card,
         child: Row(
           children: [
             const Expanded(
@@ -201,7 +201,7 @@ class _AlertSelectorScreenState extends State<AlertSelectorScreen> {
       onTap: () => _select(file),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        decoration: _cardDecoration,
+        decoration: AppDecorations.card,
         child: Row(
           children: [
             Expanded(
@@ -271,7 +271,10 @@ class _BackCircle extends StatelessWidget {
     return OutlinedButton(
       style: OutlinedButton.styleFrom(
         shape: const CircleBorder(),
-        side: const BorderSide(color: AppColors.outline, width: 1.5),
+        side: const BorderSide(
+          color: AppColors.outline,
+          width: AppDecorations.borderWidth,
+        ),
         padding: const EdgeInsets.all(12),
       ),
       onPressed: onPressed,
@@ -279,14 +282,6 @@ class _BackCircle extends StatelessWidget {
     );
   }
 }
-
-/// Dark card background used by the row containers — with the
-/// 25%-more-opaque hairline border (acceptance).
-const BoxDecoration _cardDecoration = BoxDecoration(
-  color: AppColors.card,
-  border: Border.fromBorderSide(BorderSide(color: AppColors.cardBorder)),
-  borderRadius: BorderRadius.all(Radius.circular(14)),
-);
 
 /// `chime.mp3` → `chime`: the row label / check display drops the extension.
 String _baseName(String file) {

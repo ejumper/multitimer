@@ -116,6 +116,53 @@ class AppPageRoute<T> extends MaterialPageRoute<T> {
   Duration get transitionDuration => const Duration(milliseconds: 150);
 }
 
+/// Preset accent swatches — D11 colors plus the grey scale (acceptance),
+/// in row order. Shared by the timer and interval editors.
+const List<String> kPresetSwatches = [
+  '#e2e2e2',
+  '#5d5d5d',
+  '#080808',
+  '#ff00b1',
+  '#4800ff',
+  '#0055ff',
+  '#00a8ff',
+  '#00ad6b',
+  '#b8ff00',
+];
+
+/// The unified shape system (acceptance "unify the UI elements") — exactly
+/// TWO corner radii and ONE border width everywhere:
+///  - PILL (stadium) — done button, toggle, group bars;
+///  - [rectRadius] rectangle — every semi-transparent background, interval
+///    chip, duration setter and menu (the cards' "slightly more" value the
+///    user picked over the chips' old 10);
+///  - [borderWidth] — the intervals' 1.4, now the only border thickness.
+abstract final class AppDecorations {
+  static const double rectRadius = 14;
+  static const double borderWidth = 1.4;
+
+  /// Shared card background (translucent + hairline border).
+  static const BoxDecoration card = BoxDecoration(
+    color: AppColors.card,
+    border: Border.fromBorderSide(
+      BorderSide(color: AppColors.cardBorder, width: borderWidth),
+    ),
+    borderRadius: BorderRadius.all(Radius.circular(rectRadius)),
+  );
+
+  /// Shared dialog/menu shape — rectangle radius + unified border.
+  static const ShapeBorder menuShape = RoundedRectangleBorder(
+    borderRadius: BorderRadius.all(Radius.circular(rectRadius)),
+    side: BorderSide(color: AppColors.cardBorder, width: borderWidth),
+  );
+
+  /// The hairline separator inside joined cards (border's own style).
+  static const BorderSide divider = BorderSide(
+    color: AppColors.cardBorder,
+    width: borderWidth,
+  );
+}
+
 /// App theme: transparent scaffold over the compositor's blur, dark content.
 ThemeData buildPlannerTheme() {
   final base = ThemeData.dark(useMaterial3: true);
