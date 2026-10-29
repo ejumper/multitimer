@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Installs Planner into ~/.local — no root, no installer.
 #   app bundle  -> ~/.local/lib/planner        (self-contained Flutter bundle)
-#   icon        -> ~/.local/share/icons/hicolor/256x256/apps/planner.png
+#   icon        -> ~/.local/share/icons/hicolor/256x256/apps/planner-timer.png
+#   (NOT "planner" — that name is taken by the Breeze/Slot-Ars themes)
 #   launcher    -> ~/.local/share/applications/planner.desktop
 #   terminal    -> ~/.local/bin/planner        (symlink)
 # Re-run after `scripts/build.sh` to upgrade. See uninstall.sh to remove.
@@ -24,9 +25,9 @@ rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR"
 cp -r "$BUNDLE"/. "$APP_DIR"/
 
-echo "· icon        -> $ICON_DIR/planner.png"
+echo "· icon        -> $ICON_DIR/planner-timer.png"
 mkdir -p "$ICON_DIR"
-cp "$REPO/assets/icon/planner.png" "$ICON_DIR/planner.png"
+cp "$REPO/assets/icon/planner-timer.png" "$ICON_DIR/planner-timer.png"
 
 echo "· launcher    -> $APPS_DIR/planner.desktop"
 mkdir -p "$APPS_DIR"

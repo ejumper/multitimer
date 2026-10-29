@@ -4,7 +4,7 @@ set -euo pipefail
 
 APP_DIR="$HOME/.local/lib/planner"
 BIN="$HOME/.local/bin/planner"
-ICON="$HOME/.local/share/icons/hicolor/256x256/apps/planner.png"
+ICON="$HOME/.local/share/icons/hicolor/256x256/apps/planner-timer.png"
 DESKTOP="$HOME/.local/share/applications/planner.desktop"
 APPS_DIR="$HOME/.local/share/applications"
 
