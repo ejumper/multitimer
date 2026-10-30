@@ -645,6 +645,18 @@ void main() {
     expect(find.byKey(const Key('btn-list')), findsOneWidget);
     expect(find.byKey(const Key('btn-reset')), findsOneWidget);
     expect(find.byKey(const Key('btn-skip')), findsOneWidget);
+    expect(
+      [
+        for (final w in tester.widgetList<IconButton>(
+          find.descendant(
+            of: find.byKey(const Key('control-row')),
+            matching: find.byType(IconButton),
+          ),
+        ))
+          w.key!,
+      ],
+      const [Key('btn-adjust'), Key('btn-list'), Key('btn-reset'), Key('btn-skip')],
+    );
 
     // The fixture's intervals are manually complete: the run lands in
     // limbo and the row switches.
@@ -657,6 +669,23 @@ void main() {
     expect(find.byKey(const Key('btn-list')), findsOneWidget); // kept
     expect(find.byKey(const Key('btn-reset')), findsOneWidget); // kept
     expect(find.byKey(const Key('btn-skip')), findsNothing); // the dial
+    // Slot contract (user tweak): the shared buttons keep their spots —
+    // silence takes skip's far-right slot in both modes.
+    List<Key> rowKeys(WidgetTester t) => [
+      for (final w in t.widgetList<IconButton>(
+        find.descendant(
+          of: find.byKey(const Key('control-row')),
+          matching: find.byType(IconButton),
+        ),
+      ))
+        w.key!,
+    ];
+    expect(rowKeys(tester), const [
+      Key('btn-adjust'),
+      Key('btn-list'),
+      Key('btn-reset'),
+      Key('btn-silence'),
+    ]);
     controller.dispose();
   });
 

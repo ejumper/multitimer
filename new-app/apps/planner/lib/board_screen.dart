@@ -239,23 +239,14 @@ class _BoardScreenState extends State<BoardScreen> {
     final canSkip = snapshot.state != SessionState.notStarted;
     final inLimbo = snapshot.state == SessionState.awaitingAdvance;
     const gap = SizedBox(width: 8);
-    // Tweaks #5: while a manually-complete interval holds at zero, the
-    // row leads with the limbo actions — silence the looping alarm and
-    // add time — then keeps Choose interval + Reset (the user wants them
-    // here too). Only Skip steps aside: the dial completes the hold.
+    // Tweaks #5: in limbo the row keeps the shared buttons in their
+    // usual slots — only Skip is swapped out, and Silence alarm takes
+    // its place on the far right (the dial completes the hold).
     if (inLimbo) {
       return Row(
         key: const Key('control-row'),
         mainAxisSize: MainAxisSize.min,
         children: [
-          _HoverIconButton(
-            circularRing: true,
-            buttonKey: const Key('btn-silence'),
-            icon: Icons.alarm_off,
-            focused: _nav.isFocused('btn-silence'),
-            onPressed: () => controller.silenceAlarm(),
-          ),
-          gap,
           _HoverIconButton(
             circularRing: true,
             buttonKey: const Key('btn-adjust'),
@@ -279,6 +270,14 @@ class _BoardScreenState extends State<BoardScreen> {
             color: AppColors.danger, // destructive (greyscale-UI rule)
             focused: _nav.isFocused('btn-reset'),
             onPressed: () => _showResetDialog(context),
+          ),
+          gap,
+          _HoverIconButton(
+            circularRing: true,
+            buttonKey: const Key('btn-silence'),
+            icon: Icons.alarm_off,
+            focused: _nav.isFocused('btn-silence'),
+            onPressed: () => controller.silenceAlarm(),
           ),
         ],
       );
@@ -646,28 +645,28 @@ class _BoardScreenState extends State<BoardScreen> {
       return [
         NavSection(id: 'controls', cells: [
           NavCell(
-            id: 'btn-silence',
-            row: 0,
-            col: 0,
-            activate: () => controller.silenceAlarm(),
-          ),
-          NavCell(
             id: 'btn-adjust',
             row: 0,
-            col: 1,
+            col: 0,
             activate: () => _openAdjust(context),
           ),
           NavCell(
             id: 'btn-list',
             row: 0,
-            col: 2,
+            col: 1,
             activate: () => _showListOverlay(context),
           ),
           NavCell(
             id: 'btn-reset',
             row: 0,
-            col: 3,
+            col: 2,
             activate: () => _showResetDialog(context),
+          ),
+          NavCell(
+            id: 'btn-silence',
+            row: 0,
+            col: 3,
+            activate: () => controller.silenceAlarm(),
           ),
         ]),
       ];
