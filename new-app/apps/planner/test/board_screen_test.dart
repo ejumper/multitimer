@@ -721,4 +721,21 @@ void main() {
     expect(controller.snapshot.state, SessionState.awaitingAdvance);
     controller.dispose();
   });
+
+  // Tweaks #8 end-to-end (the user's exact flow): open the editor on a
+  // RUNNING timer, hit Done — the run keeps going.
+  testWidgets('tweaks_editor_done_keeps_the_run', (tester) async {
+    await pumpBoard(tester);
+    controller.start();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape); // open editor
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300)); // route in
+    expect(find.byKey(const Key('editor-done')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('editor-done')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300)); // route out
+    expect(controller.snapshot.state, SessionState.running);
+    controller.dispose();
+  });
 }

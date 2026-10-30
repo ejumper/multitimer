@@ -833,6 +833,212 @@ void main() {
     s.start();
     expect(s.snapshot(clock.current).remaining, secs(5));
   });
+
+  // ── Tweaks #8: adopt — live tree edit (the TWEAKS.md matrix) ──────
+
+  IntervalInstance copy(IntervalInstance i, {int? seconds}) =>
+      IntervalInstance(
+        ordinal: i.ordinal,
+        defId: i.defId,
+        name: i.name,
+        color: i.color,
+        durationSeconds: seconds ?? i.durationSeconds,
+        autoFinish: i.autoFinish,
+        endAlertSoundFile: i.endAlertSoundFile,
+      );
+
+  test('adopt_keeps_run_on_same_instance_across_reorder', () {
+    final a = inst(0, seconds: 60, defId: 'a');
+    final b = inst(1, seconds: 60, defId: 'b');
+    final c = inst(2, seconds: 60, defId: 'c');
+    final s = session([a, b, c]);
+    s.start();
+    s.jumpTo(1); // the run is on b
+    warpBy(secs(20));
+    // The edit moves b to the end: identity survives, so does the run.
+    expect(s.adopt([copy(a, seconds: 60), copy(c, seconds: 60), copy(b, seconds: 60)]), isTrue);
+    final snap = s.snapshot(clock.current);
+    expect(snap.state, SessionState.running);
+    expect(snap.ordinal, 2);
+    expect(snap.remaining, secs(40));
+  });
+
+  test('adopt_duration_delta_rederives_remaining', () {
+    // The TWEAKS.md example: 5min into a 10min interval edited to 15min
+    // leaves 10min — remaining = new − elapsed.
+    final a = inst(0, seconds: 600, defId: 'a');
+    final s = session([a, inst(1, seconds: 60, defId: 'b')]);
+    s.start();
+    warpBy(secs(300)); // 5min in
+    expect(s.adopt([copy(a, seconds: 900), copy(s.instances[1])]), isTrue);
+    expect(s.snapshot(clock.current).remaining, secs(600));
+  });
+
+  test('adopt_shrink_below_elapsed_manual_holds', () {
+    final a = inst(0, seconds: 60, autoFinish: false, defId: 'a');
+    final s = session([a, inst(1, seconds: 60, defId: 'b')]);
+    s.start();
+    warpBy(secs(20));
+    expect(s.adopt([copy(a, seconds: 10), copy(s.instances[1])]), isTrue);
+    expect(s.snapshot(clock.current).state, SessionState.awaitingAdvance);
+    expect(sink.events.length, 1);
+    expect(sink.events.single.terminal, TerminalState.done);
+  });
+
+  test('adopt_shrink_below_elapsed_auto_advances_with_full_remaining', () {
+    final a = inst(0, seconds: 60, defId: 'a');
+    final b = inst(1, seconds: 45, defId: 'b');
+    final s = session([a, b]);
+    s.start();
+    warpBy(secs(20));
+    expect(s.adopt([copy(a, seconds: 10), copy(b)]), isTrue);
+    final snap = s.snapshot(clock.current);
+    expect(snap.ordinal, 1);
+    expect(snap.remaining, secs(45));
+    expect(sink.events.length, 1);
+  });
+
+  test('adopt_shrink_while_paused_parks_next_paused', () {
+    final a = inst(0, seconds: 60, defId: 'a');
+    final b = inst(1, seconds: 45, defId: 'b');
+    final s = session([a, b]);
+    s.start();
+    warpBy(secs(20));
+    s.pause();
+    expect(s.adopt([copy(a, seconds: 10), copy(b)]), isTrue);
+    final snap = s.snapshot(clock.current);
+    expect(snap.state, SessionState.paused);
+    expect(snap.ordinal, 1);
+    expect(snap.remaining, secs(45));
+  });
+
+  test('adopt_held_gaining_length_is_promoted_like_add_time', () {
+    final a = inst(0, seconds: 60, autoFinish: false, defId: 'a');
+    final b = inst(1, seconds: 60, defId: 'b');
+    final s = session([a, b]);
+    s.start();
+    warpBy(secs(70)); // held at zero — its 60s are consumed
+    expect(s.adopt([copy(a, seconds: 90), copy(b)]), isTrue);
+    final snap = s.snapshot(clock.current);
+    expect(snap.state, SessionState.running);
+    expect(snap.remaining, secs(30)); // exactly the gained 30s
+  });
+
+  test('adopt_held_shrinking_stays_held_without_duplicate_done', () {
+    final a = inst(0, seconds: 60, autoFinish: false, defId: 'a');
+    final b = inst(1, seconds: 60, defId: 'b');
+    final s = session([a, b]);
+    s.start();
+    warpBy(secs(70));
+    s.settle(clock.current); // materialize the zero-crossing first
+    expect(sink.events.length, 1); // its one done, logged at the crossing
+    expect(s.adopt([copy(a, seconds: 30), copy(b)]), isTrue);
+    expect(s.snapshot(clock.current).state, SessionState.awaitingAdvance);
+    expect(sink.events.length, 1); // never twice
+  });
+
+  test('adopt_current_deleted_continues_at_the_next_survivor', () {
+    final a = inst(0, seconds: 60, defId: 'a');
+    final b = inst(1, seconds: 60, defId: 'b');
+    final c = inst(2, seconds: 45, defId: 'c');
+    final s = session([a, b, c]);
+    s.start();
+    s.jumpTo(1); // running runs on at the target
+    warpBy(secs(10));
+    final eventsBefore = sink.events.length;
+    expect(s.adopt([copy(a), copy(c)]), isTrue);
+    final snap = s.snapshot(clock.current);
+    expect(snap.ordinal, 1);
+    expect(snap.remaining, secs(45)); // full remaining takeover
+    expect(sink.events.length, eventsBefore); // adopt logs no run time
+  });
+
+  test('adopt_current_deleted_with_nothing_after_completes_the_run', () {
+    final a = inst(0, seconds: 60, defId: 'a');
+    final b = inst(1, seconds: 60, defId: 'b');
+    final s = session([a, b]);
+    s.start();
+    s.jumpTo(1); // the run is on b — the tail
+    warpBy(secs(10));
+    final eventsBefore = sink.events.length;
+    expect(s.adopt([copy(a)]), isFalse);
+    expect(s.snapshot(clock.current).state, SessionState.notStarted);
+    expect(sink.events.length, eventsBefore); // the edit is not run time
+  });
+
+  test('adopt_deleting_the_held_instance_takes_the_successor_over', () {
+    final a = inst(0, seconds: 60, autoFinish: false, defId: 'a');
+    final b = inst(1, seconds: 60, defId: 'b');
+    final s = session([a, b]);
+    s.start();
+    warpBy(secs(70)); // a is held at zero
+    expect(s.adopt([copy(b)]), isTrue); // a deleted — the hold dies with it
+    final snap = s.snapshot(clock.current);
+    expect(snap.state, SessionState.running);
+    expect(snap.ordinal, 0);
+    expect(snap.remaining, secs(60)); // full remaining takeover
+    expect(sink.events.length, 1); // still just a's one done
+  });
+
+  test('adopt_empty_schedule_ends_the_run', () {
+    final s = session([inst(0, seconds: 60, defId: 'a')]);
+    s.start();
+    expect(s.adopt(const []), isFalse);
+    expect(s.snapshot(clock.current).state, SessionState.notStarted);
+  });
+
+  test('adopt_repeat_shrink_clamps_the_occurrence', () {
+    // The same def flattened three times (a repeated interval); the run
+    // is on occurrence 2 and the edit collapses repeats to one.
+    final r = inst(0, seconds: 60, defId: 'r');
+    final s = session([copy(r, seconds: 60), copy(r, seconds: 60), copy(r, seconds: 60)]);
+    s.start();
+    s.jumpTo(2); // running runs on at the target (occurrence 2)
+    warpBy(secs(10));
+    expect(s.adopt([copy(r)]), isTrue);
+    final snap = s.snapshot(clock.current);
+    expect(snap.ordinal, 0);
+    expect(snap.remaining, secs(50));
+  });
+
+  test('adopt_adjustments_follow_their_instance', () {
+    final a = inst(0, seconds: 60, defId: 'a');
+    final b = inst(1, seconds: 60, defId: 'b');
+    final s = session([a, b]);
+    s.start();
+    s.adjustCurrent(30); // +30s on a
+    expect(s.adopt([copy(b), copy(a)]), isTrue); // a moves to ordinal 1
+    // The current instance moved position — its +30s follows it.
+    final snap = s.snapshot(clock.current);
+    expect(snap.ordinal, 1);
+    expect(snap.remaining, secs(90));
+  });
+
+  test('adopt_future_edits_only_change_the_lineup', () {
+    final a = inst(0, seconds: 60, defId: 'a');
+    final b = inst(1, seconds: 60, defId: 'b');
+    final s = session([a, b]);
+    s.start();
+    warpBy(secs(20));
+    // Add a future interval and shrink another: the current is untouched.
+    expect(s.adopt([
+      copy(a),
+      copy(b, seconds: 30),
+      copy(inst(2, seconds: 15, defId: 'c')),
+    ]), isTrue);
+    final snap = s.snapshot(clock.current);
+    expect(snap.ordinal, 0);
+    expect(snap.remaining, secs(40));
+    expect(snap.totalRemaining, secs(85)); // 40 + 30 + 15
+  });
+
+  test('adopt_not_started_swaps_the_schedule', () {
+    final s = session([inst(0, seconds: 60, defId: 'a')]);
+    expect(s.adopt([copy(s.instances[0], seconds: 90)]), isFalse);
+    expect(s.snapshot(clock.current).totalPlanned, secs(90));
+    expect(s.snapshot(clock.current).state, SessionState.notStarted);
+  });
+
 }
 
 /// Mutable test clock: virtual time is free — assign [current] directly.

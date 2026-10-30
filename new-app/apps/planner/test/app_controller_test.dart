@@ -602,4 +602,39 @@ void main() {
     controller.start();
     expect(controller.snapshot.remaining, const Duration(seconds: 5));
   });
+
+  // Tweaks #8 (the user's report): Done on a running timer must not
+  // reset the run — the edit applies live, remaining re-derives as
+  // new − elapsed.
+  test('apply_tree_edit_keeps_the_run', () async {
+    await controller.init();
+    await saveDefs([def('a', seconds: 5), def('b', seconds: 5)]);
+    await controller.reload();
+    controller.start();
+    clock.current = clock.current.add(const Duration(seconds: 2));
+    await controller.tick();
+    // The edit grows interval a from 5s to 10s.
+    await saveDefs([def('a', seconds: 10), def('b', seconds: 5)]);
+    await controller.applyTreeEdit();
+    expect(controller.snapshot.state, SessionState.running);
+    expect(controller.snapshot.remaining, const Duration(seconds: 8)); // 10-2
+    // The old path (reload) is what used to reset it.
+    await controller.reload();
+    expect(controller.snapshot.state, SessionState.notStarted);
+  });
+
+  test('apply_tree_edit_deleted_current_continues_at_next', () async {
+    await controller.init();
+    await saveDefs([def('a', seconds: 5), def('b', seconds: 7)]);
+    await controller.reload();
+    controller.start();
+    clock.current = clock.current.add(const Duration(seconds: 2));
+    await controller.tick();
+    // The edit deletes the RUNNING interval a.
+    await saveDefs([def('b', seconds: 7)]);
+    await controller.applyTreeEdit();
+    expect(controller.snapshot.state, SessionState.running);
+    expect(controller.snapshot.ordinal, 0);
+    expect(controller.snapshot.remaining, const Duration(seconds: 7));
+  });
 }

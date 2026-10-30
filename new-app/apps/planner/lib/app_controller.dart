@@ -99,6 +99,37 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Tweaks #8: the editor's Done — apply the edited tree WITHOUT
+  /// resetting a live run. The session adopts the new schedule (the
+  /// TWEAKS.md matrix: the current instance survives by identity, its
+  /// remaining re-derives as new − elapsed, a deleted current continues
+  /// at the next survivor, adjustments re-key). Idle behaves like a
+  /// plain reload.
+  Future<void> applyTreeEdit() async {
+    final timers = await store.timersInBoard(board.id);
+    timer = timers.firstWhere((t) => t.id == timer.id, orElse: () => timer);
+    // Pending run-log entries belong to the old schedule — land them
+    // before the processor is rebuilt over the edited one.
+    await processor.flush();
+    final tree = await store.loadTree(timer.id);
+    final next = flatten(tree);
+    alerts = AlertHandler(
+      player: player,
+      notifier: notifier,
+      soundsDir: soundsDir,
+    );
+    processor = RunEventProcessor(
+      instances: next,
+      store: store,
+      timerName: timer.name,
+      soundDirectoryListing: soundListing,
+      alertSink: alerts,
+    );
+    session.adopt(next, sink: processor);
+    instances = next;
+    notifyListeners();
+  }
+
   Future<void> _buildSession() async {
     final tree = await store.loadTree(timer.id);
     instances = flatten(tree);

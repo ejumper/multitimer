@@ -348,7 +348,7 @@ class _BoardScreenState extends State<BoardScreen> {
           soundsDir: controller.soundsDir,
           soundListing: controller.soundListing,
           player: controller.player,
-          onDone: () => controller.reload(),
+          onDone: () => controller.applyTreeEdit(), // tweaks #8: keep the run
         ),
       ),
     );

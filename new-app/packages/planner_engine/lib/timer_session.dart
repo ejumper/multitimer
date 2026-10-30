@@ -100,16 +100,25 @@ class TimerSnapshot {
 /// wall-clock anchors, emitting one [InstanceEnded] per instance end
 /// (zero-crossing → `done`; force-end before zero → `skipped`).
 class TimerSession {
-  TimerSession(this.instances, {required this.clock, required this.sink});
+  TimerSession(
+    List<IntervalInstance> instances, {
+    required this.clock,
+    required EventSink<InstanceEnded> sink,
+  }) : _instances = instances,
+       // ignore: prefer_initializing_formals
+       _sink = sink;
+
+  List<IntervalInstance> _instances;
+  EventSink<InstanceEnded> _sink;
 
   /// The flattened schedule to play; [IntervalInstance.ordinal] == index.
-  final List<IntervalInstance> instances;
+  List<IntervalInstance> get instances => _instances;
 
   /// Injected time source; the session never reads the OS clock.
   final Clock clock;
 
   /// Injected sink for [InstanceEnded] events.
-  final EventSink<InstanceEnded> sink;
+  EventSink<InstanceEnded> get sink => _sink;
 
   static const _Cursor _fresh = _Cursor(SessionState.notStarted, null, 0, 0);
 
@@ -166,6 +175,165 @@ class TimerSession {
       SessionState.running,
       _cursor.ordinal,
       _cursor.accumulatedMs,
+      nowMs,
+    );
+    return true;
+  }
+
+  /// Tweaks #8 — live tree edit (the TWEAKS.md matrix, spec-aligned:
+  /// native MultiTimer applies config edits from ANY state). Swaps in the
+  /// edited schedule mid-run and maps the run state onto it BY IDENTITY
+  /// (defId + occurrence — flattened repeats share defIds). Returns
+  /// whether a live run continues on the new schedule.
+  ///
+  /// Rules:
+  ///  - the current instance survives (rename/reorder/reparent anywhere):
+  ///    stay on it; elapsed is kept and remaining re-derives as
+  ///    newLength − elapsed (the duration-delta rule, clamped at zero →
+  ///    the [adjustCurrent] clamp semantics: `done` once, manual → hold,
+  ///    auto → next full — a held instance never logs `done` twice);
+  ///  - a held instance that GAINED length is promoted back to running
+  ///    (the add-time rule) with exactly the gained amount;
+  ///  - the current instance is deleted: the run continues at the first
+  ///    survivor that came after it (first in the NEW order) with full
+  ///    remaining (paused runs park paused-ready); nothing after it
+  ///    survives → the run completes cleanly. NO run-log event either
+  ///    way — the edit belongs to the tree's change log, not run time;
+  ///  - repeat counts shrinking clamp the occurrence to the nearest
+  ///    surviving one; per-run adjustments re-key by the same identity;
+  ///  - empty schedule → clean end.
+  bool adopt(
+    List<IntervalInstance> next, {
+    EventSink<InstanceEnded>? sink,
+  }) {
+    final nowMs = _settleAtClock(); // old-schedule events land first
+    final prev = _instances;
+    if (sink != null) _sink = sink;
+
+    // Identity keys: (defId, occurrence index) over the old schedule.
+    final keyOf = <int, (String, int)>{};
+    final seenOld = <String, int>{};
+    for (var i = 0; i < prev.length; i++) {
+      final d = prev[i].defId;
+      final occ = seenOld[d] ?? 0;
+      seenOld[d] = occ + 1;
+      keyOf[i] = (d, occ);
+    }
+    // The new schedule's identities; occurrence clamps to the LAST
+    // surviving one when repeats shrank.
+    final occOf = <(String, int), int>{};
+    final lastOf = <String, int>{};
+    final seenNew = <String, int>{};
+    for (var j = 0; j < next.length; j++) {
+      final d = next[j].defId;
+      final occ = seenNew[d] ?? 0;
+      seenNew[d] = occ + 1;
+      occOf[(d, occ)] = j;
+      lastOf[d] = j;
+    }
+
+    int? map(int oldOrdinal) {
+      final key = keyOf[oldOrdinal]!;
+      return occOf[key] ?? lastOf[key.$1];
+    }
+
+    // Per-run adjustments follow their instances (tweaks #7 layer).
+    final oldAdjust = Map<int, int>.of(_adjustMs);
+    final newAdjust = <int, int>{};
+    for (final e in oldAdjust.entries) {
+      final j = map(e.key);
+      if (j != null) newAdjust[j] = (newAdjust[j] ?? 0) + e.value;
+    }
+
+    final state = _cursor.state;
+    _instances = next;
+    _adjustMs
+      ..clear()
+      ..addAll(newAdjust);
+
+    if (state == SessionState.notStarted || next.isEmpty) {
+      _cursor = _fresh;
+      return false;
+    }
+
+    final oldOrdinal = _cursor.ordinal!;
+    final j = map(oldOrdinal);
+    if (j == null) {
+      // The current instance is gone: the show goes on at the first
+      // survivor that came AFTER it (first in the new order).
+      final candidates = <int>[];
+      for (var i = oldOrdinal + 1; i < prev.length; i++) {
+        final m = map(i);
+        if (m != null) candidates.add(m);
+      }
+      candidates.sort();
+      if (candidates.isEmpty) {
+        _cursor = _fresh;
+        return false;
+      }
+      // The hold belonged to the deleted instance — a live run takes the
+      // successor over with full remaining (the jumpTo parking rule).
+      _cursor = _Cursor(
+        state == SessionState.paused ? SessionState.paused : SessionState.running,
+        candidates.first,
+        0,
+        nowMs,
+      );
+      return true;
+    }
+
+    // The current survives: keep its elapsed, re-derive the remaining
+    // against the edited length (the user's delta rule: 5min into a 10min
+    // interval edited to 15min → 10min left = 15 − 5).
+    final oldEffectiveMs =
+        prev[oldOrdinal].durationSeconds * 1000 + (oldAdjust[oldOrdinal] ?? 0);
+    final int elapsedMs;
+    if (state == SessionState.awaitingAdvance) {
+      elapsedMs = oldEffectiveMs; // a held instance consumed its length
+    } else {
+      final sinceAnchor =
+          state == SessionState.running && nowMs > _cursor.anchorMs
+          ? nowMs - _cursor.anchorMs
+          : 0;
+      elapsedMs = _cursor.accumulatedMs + sinceAnchor;
+    }
+    final newEffectiveMs =
+        next[j].durationSeconds * 1000 + (_adjustMs[j] ?? 0);
+    final remainingMs = newEffectiveMs - elapsedMs;
+
+    if (remainingMs <= 0) {
+      // Clamp at zero — but a HELD instance already logged its `done`.
+      if (state != SessionState.awaitingAdvance) {
+        _sink.emit(
+          InstanceEnded(
+            ordinal: j,
+            defId: next[j].defId,
+            terminal: TerminalState.done,
+            endedAt: DateTime.fromMillisecondsSinceEpoch(nowMs, isUtc: true),
+          ),
+        );
+      }
+      _adjustMs.remove(j);
+      if (!next[j].autoFinish) {
+        _cursor = _Cursor(SessionState.awaitingAdvance, j, 0, nowMs);
+      } else if (j == next.length - 1) {
+        _cursor = _fresh;
+      } else {
+        _cursor = _Cursor(
+          state == SessionState.paused ? SessionState.paused : SessionState.running,
+          j + 1,
+          0,
+          nowMs,
+        );
+      }
+      return true;
+    }
+    // Continue on the same instance; a held instance that gained length
+    // is promoted back to running (the add-time rule).
+    _cursor = _Cursor(
+      state == SessionState.awaitingAdvance ? SessionState.running : state,
+      j,
+      elapsedMs,
       nowMs,
     );
     return true;
