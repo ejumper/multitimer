@@ -121,6 +121,13 @@ class _EditorScreenState extends State<EditorScreen> {
       _navFocus.requestFocus();
       if (id == 'name') _nameFocus.requestFocus();
     };
+    // Tweaks #1: the editor opens with the name field focused (the section
+    // handoff above gives the TextField real text focus).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final i = _nav.sections.indexWhere((s) => s.id == 'name');
+      if (i >= 0) _nav.focusSection(i);
+    });
   }
 
   // ── drag-reorder state ────────────────────────────────────────────────
@@ -203,6 +210,49 @@ class _EditorScreenState extends State<EditorScreen> {
     if (mounted) Navigator.of(context).pop();
   }
 
+  /// Duplicate rule (tweaks #3/#6): a real interval SELECTION wins — while
+  /// any interval is selected the focused row is ignored and the selection
+  /// is duplicated. With no interval selected, the focused row is. Focus
+  /// lands on the first copy either way.
+  void _duplicateByRule() {
+    List<String> created;
+    if (controller.selection.any(_isInterval)) {
+      created = controller.duplicateSelection();
+    } else {
+      String? focused;
+      _actOnFocused((id) => focused = id);
+      final target = focused;
+      if (target == null) return;
+      created = controller.duplicateNodes([target]);
+    }
+    if (created.isEmpty) return;
+    // Focus lands ON the copy (tweaks #3): switch to the intervals
+    // section first (a cell id outside the current section gets reset by
+    // the next updateSections), then the row's cell — and take the REAL
+    // keyboard focus too, so the next Delete acts on the copy at once.
+    final si = _nav.sections.indexWhere((s) => s.id == 'intervals');
+    if (si >= 0) _nav.focusSection(si);
+    _nav.focusCell('rect-${created.first}');
+    _navFocus.requestFocus();
+  }
+
+  /// True when [id] resolves to an authored interval (leaf), not a group.
+  bool _isInterval(String id) {
+    var result = false;
+    void walk(List<IntervalNode> nodes) {
+      for (final n in nodes) {
+        if (n.id == id) {
+          result = n is DefNode;
+          return;
+        }
+        if (n is GroupNode) walk(n.children);
+      }
+    }
+
+    walk(controller.tree.roots);
+    return result;
+  }
+
   /// Node behind the keyboard-focused grid cell (Ctrl+C / Delete act on it;
   /// toolbar/other cells fall back to the current selection).
   void _actOnFocused(void Function(String nodeId) onNode) {
@@ -239,6 +289,21 @@ class _EditorScreenState extends State<EditorScreen> {
       _commitDone();
       return KeyEventResult.handled;
     }
+    // Non-colliding nav chords work even while a text field has focus
+    // (tweaks #1: the editor opens with the name focused — Ctrl+N must
+    // not die in there). Ctrl+C/Z stay with text editing while typing.
+    if (ctrl && key == LogicalKeyboardKey.keyN) {
+      _openIntervalEditor(context);
+      return KeyEventResult.handled;
+    }
+    if (ctrl && key == LogicalKeyboardKey.keyG) {
+      if (shift) {
+        if (controller.canUngroup) controller.ungroupSelection();
+      } else {
+        if (controller.canGroup) _groupTapped(context);
+      }
+      return KeyEventResult.handled;
+    }
     if (editingFieldHasFocus()) return null; // text editing owns the rest
 
     // Space = Enter for selector circles and color swatches (acceptance).
@@ -256,22 +321,7 @@ class _EditorScreenState extends State<EditorScreen> {
       return KeyEventResult.handled;
     }
     if (ctrl && key == LogicalKeyboardKey.keyC) {
-      _actOnFocused((id) {
-        controller.selectOnly(id);
-        controller.duplicateSelection();
-      });
-      return KeyEventResult.handled;
-    }
-    if (ctrl && key == LogicalKeyboardKey.keyN) {
-      _openIntervalEditor(context);
-      return KeyEventResult.handled;
-    }
-    if (ctrl && shift && key == LogicalKeyboardKey.keyG) {
-      if (controller.canUngroup) controller.ungroupSelection();
-      return KeyEventResult.handled;
-    }
-    if (ctrl && key == LogicalKeyboardKey.keyG) {
-      if (controller.canGroup) _groupTapped(context);
+      _duplicateByRule();
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.delete ||
@@ -377,7 +427,7 @@ class _EditorScreenState extends State<EditorScreen> {
           row: 0,
           col: 1,
           enabled: controller.hasSelection,
-          activate: controller.duplicateSelection,
+          activate: _duplicateByRule,
         ),
         NavCell(
           id: 'tool-delete',
@@ -558,7 +608,7 @@ class _EditorScreenState extends State<EditorScreen> {
             icon: const Icon(Icons.copy_outlined),
             tooltip: 'Duplicate',
             onPressed: controller.hasSelection
-                ? controller.duplicateSelection
+                ? _duplicateByRule
                 : null,
           ),
           ),

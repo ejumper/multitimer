@@ -121,8 +121,15 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
       // The router retakes focus first — a text field may have held it —
       // then hands it on where the section wants it.
       _navFocus.requestFocus();
+      if (id == 'name') _nameFocus.requestFocus();
       if (id == 'duration') _focusBox(_activeBox);
     };
+    // Tweaks #1: the editor opens with the name field focused.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final i = _nav.sections.indexWhere((s) => s.id == 'name');
+      if (i >= 0) _nav.focusSection(i);
+    });
     final defId = widget.defId;
     final def = defId == null ? null : _lookupDef(defId);
     _def = def;
@@ -233,6 +240,13 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
     final ctrl = HardwareKeyboard.instance.isControlPressed;
     final shift = HardwareKeyboard.instance.isShiftPressed;
 
+    // Tweaks #2: while a text field has focus (the name field), Tab /
+    // Shift+Tab must move on and Escape must go back — handled here so
+    // they cannot get trapped inside the field.
+    if (editingFieldHasFocus() && key == LogicalKeyboardKey.tab) {
+      _nav.cycleSection(shift ? -1 : 1);
+      return KeyEventResult.handled;
+    }
     if (key == LogicalKeyboardKey.escape) {
       _commitBack();
       return KeyEventResult.handled;

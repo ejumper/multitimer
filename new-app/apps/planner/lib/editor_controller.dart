@@ -179,11 +179,24 @@ class EditorController extends ChangeNotifier {
 
   /// Deep-copies the selected siblings below the last selected node (P1.1
   /// semantics). Selection is CLEARED (action rule).
-  void duplicateSelection() {
+  /// Duplicates the selected subtrees; returns the NEW ids in selection
+  /// order (callers move focus to the first copy — tweaks #3).
+  List<String> duplicateSelection() => duplicateNodes(selection.toList());
+
+  /// Duplicates [ids] (each copy is inserted after its source) and returns
+  /// the new ids in the given order. The selection is cleared — focus
+  /// lands on the copies instead (tweaks #3/#6).
+  List<String> duplicateNodes(List<String> ids) {
     _pushUndo();
-    tree = tree.duplicated(selection.toList(), newId: newUuidV4);
+    final created = <String>[];
+    tree = tree.duplicated(ids, newId: () {
+      final id = newUuidV4();
+      created.add(id);
+      return id;
+    });
     selection.clear();
     notifyListeners();
+    return created;
   }
 
   /// Removes the selected subtrees (emptied groups cascade); the deleted

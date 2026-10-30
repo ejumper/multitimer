@@ -1,6 +1,7 @@
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:planner/editor_controller.dart';
 import 'package:planner/editor_screen.dart';
@@ -511,8 +512,11 @@ void main() {
   testWidgets('keyboard_editor_sections', (tester) async {
     await pumpEditor(tester);
 
-    // Tab once -> the color section; Enter picks the first swatch.
+    // The editor opens on the name section (tweaks #1); Shift+Tab once
+    // wraps back to the color section, Enter picks the first swatch.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
@@ -600,10 +604,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('ie-back')), findsOneWidget);
 
-    // Top -> color -> name -> auto-finish: Enter flips the toggle.
-    for (var i = 0; i < 3; i++) {
-      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-    }
+    // The interval editor opens on the name section (tweaks #1); one Tab
+    // reaches auto-finish, Enter flips the toggle.
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
     await tester.pump();
     final before = tester
         .widget<Switch>(find.byKey(const Key('ie-autofinish')))
@@ -702,10 +705,9 @@ void main() {
     await pressWithCtrl(tester, LogicalKeyboardKey.keyN);
     await tester.pumpAndSettle();
 
-    // Auto-finish section: Space toggles; Right forces on; Left forces off.
-    for (var i = 0; i < 3; i++) {
-      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-    }
+    // Auto-finish section (one Tab from the opening name section —
+    // tweaks #1): Space toggles; Right forces on; Left forces off.
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.space);
     await tester.pump();
@@ -744,8 +746,6 @@ void main() {
     await pumpEditor(tester);
     await pressWithCtrl(tester, LogicalKeyboardKey.keyN);
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.tab); // -> color
-    await tester.sendKeyEvent(LogicalKeyboardKey.tab); // -> name
     await tester.sendKeyEvent(LogicalKeyboardKey.tab); // -> autofinish
     await tester.sendKeyEvent(LogicalKeyboardKey.tab); // -> duration
     await tester.pump();
@@ -1152,5 +1152,73 @@ void main() {
           .onPressed,
       isNull,
     );
+  });
+
+  // ── Tweaks batch 1 (TWEAKS.md #1/#3/#6) ───────────────────────────
+
+  // #1: the editor opens with the name field focused.
+  testWidgets('tweaks_opens_with_name_field_focused', (tester) async {
+    await pumpEditor(tester);
+    await tester.pump(); // the post-frame name focus
+    final field =
+        tester.widget<TextField>(find.byKey(const Key('label-field')));
+    expect(field.focusNode!.hasFocus, isTrue);
+  });
+
+  // #3: duplicate (toolbar button) lands focus on the copy — Delete,
+  // acting on the focused item, removes exactly the copy.
+  testWidgets('tweaks_duplicate_focus_lands_on_copy', (tester) async {
+    await pumpEditor(tester);
+    await tester.tap(find.byKey(const Key('select-a')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('tool-duplicate')));
+    await tester.pump();
+    final copyId = controller.tree.roots[1].id;
+    expect(copyId, isNot('a'));
+    await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+    await tester.pump();
+    expect(controller.tree.allIds.contains(copyId), isFalse);
+    expect(controller.tree.allIds.contains('a'), isTrue);
+  });
+
+  // #6: with an interval SELECTED, Ctrl+C duplicates the selection — the
+  // keyboard-focused row is ignored.
+  testWidgets('tweaks_ctrl_c_selection_beats_focus', (tester) async {
+    await pumpEditor(tester);
+    await tester.tap(find.byKey(const Key('select-a')));
+    await tester.pump();
+    // Keyboard-focus row b: two Tabs reach the intervals grid (the editor
+    // opens on name), then reading-order Right walks circle-a, rect-a,
+    // circle-g1, bar-g1, rect-b.
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    for (var i = 0; i < 4; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    }
+    await pressWithCtrl(tester, LogicalKeyboardKey.keyC);
+    await tester.pump();
+    // A's copy landed at roots[1]; b (inside g1) was NOT duplicated.
+    expect(controller.tree.roots.length, 3);
+    expect(controller.tree.roots[1].id, isNot('a'));
+    expect(controller.tree.roots[1], isA<DefNode>());
+    final g1 = controller.tree.nodeById('g1') as GroupNode;
+    expect(g1.children.map((n) => n.id), ['b']);
+  });
+
+  // #6: with NOTHING selected, Ctrl+C duplicates the focused row.
+  testWidgets('tweaks_ctrl_c_no_selection_duplicates_focused', (tester) async {
+    await pumpEditor(tester);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    for (var i = 0; i < 4; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    }
+    await pressWithCtrl(tester, LogicalKeyboardKey.keyC);
+    await tester.pump();
+    final g1 = controller.tree.nodeById('g1') as GroupNode;
+    expect(g1.children.length, 2);
+    expect(g1.children[0].id, 'b');
+    expect(g1.children[1].id, isNot('b'));
+    expect(g1.children[1], isA<DefNode>());
   });
 }

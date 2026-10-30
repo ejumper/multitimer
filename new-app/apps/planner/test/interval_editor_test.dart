@@ -1,5 +1,6 @@
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:planner/editor_controller.dart';
 import 'package:planner/interval_editor.dart';
@@ -235,5 +236,33 @@ void main() {
 
     final def = (controller.tree.roots.single as DefNode).def;
     expect(def.endAlertSoundFile, 'alpha.mp3');
+  });
+
+  // ── Tweaks batch 1 (TWEAKS.md #1/#2) ──────────────────────────────
+
+  // #1: the editor opens with the name field focused.
+  testWidgets('tweaks_opens_with_name_field_focused', (tester) async {
+    await pumpEditor(tester, defId: 'a');
+    await tester.pump(); // the post-frame name focus
+    final field =
+        tester.widget<TextField>(find.byKey(const Key('ie-label')));
+    expect(field.focusNode!.hasFocus, isTrue);
+  });
+
+  // #2: the name field is not a trap — Tab moves focus out of it, and
+  // Escape commits + goes back even mid-edit.
+  testWidgets('tweaks_name_field_tab_and_escape_are_not_trapped',
+      (tester) async {
+    await pumpEditor(tester, defId: 'a');
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('ie-label')), 'Focus');
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    final field =
+        tester.widget<TextField>(find.byKey(const Key('ie-label')));
+    expect(field.focusNode!.hasFocus, isFalse);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(defOf('a').name, 'Focus');
   });
 }
