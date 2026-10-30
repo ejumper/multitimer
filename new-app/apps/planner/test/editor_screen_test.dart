@@ -493,6 +493,15 @@ void main() {
     };
   }
 
+  Future<void> pressWithAlt(
+    WidgetTester tester,
+    LogicalKeyboardKey key,
+  ) async {
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+    await tester.sendKeyEvent(key);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+  }
+
   // Edge-slot level follows the pointer's X: content column = the inner
   // group, bracket column = the outer group, left of that = outside all.
   Future<void> pressWithCtrl(
@@ -1220,5 +1229,19 @@ void main() {
     expect(g1.children[0].id, 'b');
     expect(g1.children[1].id, isNot('b'));
     expect(g1.children[1], isA<DefNode>());
+  });
+
+  // Tweaks #4: Alt+Down moves the focused interval (+ selection) as one
+  // block. Fixture [a, g1{b}]: a steps past the group-header row — into
+  // the group's first child slot.
+  testWidgets('tweaks_alt_arrow_moves_focused_interval', (tester) async {
+    await pumpEditor(tester);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab); // intervals grid
+    await pressWithAlt(tester, LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(controller.tree.roots.map((n) => n.id), ['g1']);
+    final g1 = controller.tree.nodeById('g1') as GroupNode;
+    expect(g1.children.map((n) => n.id), ['a', 'b']);
   });
 }

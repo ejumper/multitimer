@@ -429,4 +429,96 @@ void main() {
     expect(controller.name, 'n4');
     expect(controller.canUndo, isFalse);
   });
+
+  // ── Tweaks #4: Alt+Up/Down block move ("gather") ──────────────────
+
+  Future<EditorController> six() => buildEditor(
+      IntervalTree([def('a'), def('b'), def('c'), def('d'), def('e'), def('f')]));
+
+  test('block_move_single_row_steps_one', () async {
+    controller = await six();
+    expect(controller.moveBlockBy(1, 'b'), isTrue);
+    expect(controller.tree.roots.map((n) => n.id),
+        ['a', 'c', 'b', 'd', 'e', 'f']);
+    expect(controller.moveBlockBy(-1, 'b'), isTrue);
+    expect(controller.tree.roots.map((n) => n.id),
+        ['a', 'b', 'c', 'd', 'e', 'f']);
+  });
+
+  test('block_move_gathers_noncontiguous_behind_focus', () async {
+    controller = await six();
+    controller.toggleSelect('a');
+    controller.toggleSelect('c');
+    // The TWEAKS.md example: selection {a, c}, focus e, Alt+Down —
+    // the block steps past f and re-inserts contiguous above e.
+    expect(controller.moveBlockBy(1, 'e'), isTrue);
+    expect(controller.tree.roots.map((n) => n.id),
+        ['b', 'd', 'f', 'a', 'c', 'e']);
+  });
+
+  test('block_move_blocked_edge_is_noop', () async {
+    controller = await six();
+    controller.toggleSelect('b');
+    expect(controller.moveBlockBy(-1, 'a'), isFalse);
+    expect(controller.moveBlockBy(1, 'f'), isFalse);
+    expect(controller.tree.roots.map((n) => n.id),
+        ['a', 'b', 'c', 'd', 'e', 'f']);
+    expect(controller.canUndo, isFalse);
+  });
+
+  test('block_move_is_one_undo_step', () async {
+    controller = await six();
+    controller.toggleSelect('a');
+    controller.toggleSelect('c');
+    controller.moveBlockBy(1, 'e');
+    controller.undo();
+    expect(controller.tree.roots.map((n) => n.id),
+        ['a', 'b', 'c', 'd', 'e', 'f']);
+    expect(controller.canUndo, isFalse);
+  });
+
+  test('block_move_down_past_group_header_enters_group', () async {
+    controller = await buildEditor(IntervalTree(
+        [def('a'), groupOf('g', [def('b'), def('c')]), def('d')]));
+    expect(controller.moveBlockBy(1, 'a'), isTrue);
+    final g = controller.tree.nodeById('g') as GroupNode;
+    expect(g.children.map((n) => n.id), ['a', 'b', 'c']);
+    expect(controller.tree.roots.map((n) => n.id), ['g', 'd']);
+  });
+
+  test('block_move_up_past_group_header_exits_and_dissolves', () async {
+    controller = await buildEditor(IntervalTree(
+        [def('a'), groupOf('g', [def('b'), def('c')]), def('d')]));
+    controller.toggleSelect('c');
+    expect(controller.moveBlockBy(-1, 'b'), isTrue);
+    // Both children leave — the emptied group dissolves.
+    expect(controller.tree.roots.map((n) => n.id), ['a', 'b', 'c', 'd']);
+  });
+
+  test('block_move_repeat_keeps_block_together', () async {
+    controller = await buildEditor(IntervalTree([
+      def('a'), def('b'), def('c'), def('d'),
+      def('e'), def('f'), def('g'), def('h'),
+    ]));
+    controller.toggleSelect('a');
+    controller.toggleSelect('c');
+    controller.moveBlockBy(1, 'e');
+    expect(controller.tree.roots.map((n) => n.id),
+        ['b', 'd', 'f', 'a', 'c', 'e', 'g', 'h']);
+    controller.moveBlockBy(1, 'e');
+    expect(controller.tree.roots.map((n) => n.id),
+        ['b', 'd', 'f', 'g', 'a', 'c', 'e', 'h']);
+  });
+
+  test('block_move_dedupes_selected_descendants', () async {
+    controller = await buildEditor(IntervalTree(
+        [def('a'), groupOf('g', [def('b'), def('c')]), def('d')]));
+    controller.toggleSelect('g');
+    controller.toggleSelect('b'); // child of the selected group
+    expect(controller.moveBlockBy(1, 'g'), isTrue);
+    // g moves as its whole subtree; b rides along, not moved twice.
+    expect(controller.tree.roots.map((n) => n.id), ['a', 'd', 'g']);
+    final g = controller.tree.nodeById('g') as GroupNode;
+    expect(g.children.map((n) => n.id), ['b', 'c']);
+  });
 }

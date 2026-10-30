@@ -239,6 +239,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
     final key = event.logicalKey;
     final ctrl = HardwareKeyboard.instance.isControlPressed;
     final shift = HardwareKeyboard.instance.isShiftPressed;
+    final alt = HardwareKeyboard.instance.isAltPressed;
 
     // Tweaks #2: while a text field has focus (the name field), Tab /
     // Shift+Tab must move on and Escape must go back — handled here so
@@ -278,7 +279,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
     }
     // Left/Right belong to the text box (cursor movement) — Enter /
     // Shift+Enter are the ONLY box-cycling keys (acceptance).
-    if (inDuration && (key == LogicalKeyboardKey.arrowUp ||
+    if (inDuration && !alt && (key == LogicalKeyboardKey.arrowUp ||
         key == LogicalKeyboardKey.arrowDown)) {
       _adjustBox(key == LogicalKeyboardKey.arrowUp ? 1 : -1, ctrl ? 10 : 1);
       return KeyEventResult.handled;

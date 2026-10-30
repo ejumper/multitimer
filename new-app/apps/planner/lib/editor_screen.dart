@@ -275,6 +275,7 @@ class _EditorScreenState extends State<EditorScreen> {
     final key = event.logicalKey;
     final ctrl = HardwareKeyboard.instance.isControlPressed;
     final shift = HardwareKeyboard.instance.isShiftPressed;
+    final alt = HardwareKeyboard.instance.isAltPressed;
 
     if (key == LogicalKeyboardKey.escape) {
       if (shift) {
@@ -305,6 +306,16 @@ class _EditorScreenState extends State<EditorScreen> {
       return KeyEventResult.handled;
     }
     if (editingFieldHasFocus()) return null; // text editing owns the rest
+
+    // Tweaks #4: Alt+Up/Down moves the focused interval + the selected
+    // intervals as one contiguous block (see moveBlockBy).
+    if (alt && (key == LogicalKeyboardKey.arrowUp ||
+        key == LogicalKeyboardKey.arrowDown)) {
+      _actOnFocused((id) {
+        controller.moveBlockBy(key == LogicalKeyboardKey.arrowDown ? 1 : -1, id);
+      });
+      return KeyEventResult.handled;
+    }
 
     // Space = Enter for selector circles and color swatches (acceptance).
     if (key == LogicalKeyboardKey.space) {

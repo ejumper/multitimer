@@ -70,6 +70,10 @@ row · intervals**.
 | Ctrl+N | add interval |
 | Ctrl+G | group the selection (needs a contiguous selection) |
 | Ctrl+Shift+G | ungroup the selection |
+| Alt+↑ / Alt+↓ | move the focused interval + the selected intervals as
+  ONE contiguous block, past one row (a non-contiguous selection gathers
+  together behind the focus; passing a group header row moves the block
+  into / out of the group) |
 | Space | toggle the focused selector circle / pick the focused color |
 
 - **Top row / button row**: ← → move between buttons (skipping greyed-out

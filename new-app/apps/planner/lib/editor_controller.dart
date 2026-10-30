@@ -179,6 +179,135 @@ class EditorController extends ChangeNotifier {
 
   /// Deep-copies the selected siblings below the last selected node (P1.1
   /// semantics). Selection is CLEARED (action rule).
+  /// Tweaks #4 — Alt+Up/Down: moves the focused node + the selection as
+  /// ONE contiguous block ("gather"). Returns whether anything moved.
+  ///
+  /// Rules: the block keeps members' row order and steps PAST exactly one
+  /// non-member row in [dir] (+1 down / -1 up) — a blocked edge is a
+  /// no-op, never a half move. The block re-inserts contiguous at the
+  /// position just beyond that passed row: passing a group header row
+  /// downward enters the group (first child slot), passing it upward
+  /// leaves the group (above it). Mixed-depth selections flatten to the
+  /// destination parent. Selected groups move as subtrees; a member with
+  /// a member-ancestor rides along inside it and is dropped from the
+  /// list. One call = one undo step.
+  bool moveBlockBy(int dir, String focusedId) {
+    final rows = _flatRows();
+    final idxOf = <String, int>{};
+    for (var i = 0; i < rows.length; i++) {
+      idxOf[rows[i].id] = i;
+    }
+    // The moving set: focused + selected, ancestor-deduped.
+    final raw = <String>{focusedId, ...selection};
+    final members = <String>[
+      for (final id in raw)
+        if (idxOf.containsKey(id) && !_hasAncestorIn(id, raw)) id,
+    ];
+    if (members.isEmpty) return false;
+    members.sort((a, b) => idxOf[a]!.compareTo(idxOf[b]!));
+    final moving = <String>{};
+    for (final id in members) {
+      final n = tree.nodeById(id);
+      if (n != null) _collectIds(n, moving);
+    }
+    // The first row beyond the block that is not moving = the row the
+    // block steps past.
+    final lead = dir > 0 ? idxOf[members.last]! : idxOf[members.first]!;
+    var w = -1;
+    for (var i = lead + dir; i >= 0 && i < rows.length; i += dir) {
+      if (!moving.contains(rows[i].id)) {
+        w = i;
+        break;
+      }
+    }
+    if (w < 0) return false; // block at the edge
+    final wRow = rows[w];
+    String? parent;
+    String? anchorSibling;
+    var after = false;
+    var fallback = 0;
+    if (dir > 0 && wRow.isGroup) {
+      // Down past a group header = INTO the group, first child slot.
+      parent = wRow.id;
+      final g = tree.nodeById(wRow.id) as GroupNode;
+      if (g.children.isNotEmpty) {
+        anchorSibling = g.children.first.id;
+      } else {
+        fallback = 0;
+      }
+    } else {
+      // Down past a normal row = after it; up past ANY row = before it
+      // (for a group header that is outside the group).
+      parent = wRow.parentId;
+      anchorSibling = wRow.id;
+      after = dir > 0;
+    }
+    _pushUndo();
+    var anchor = anchorSibling;
+    for (final id in members) {
+      final kids = parent == null
+          ? tree.roots
+          : (tree.nodeById(parent) as GroupNode).children;
+      final ai =
+          anchor == null ? -1 : kids.indexWhere((n) => n.id == anchor);
+      int idx;
+      if (ai < 0) {
+        idx = fallback;
+      } else {
+        idx = ai + (after ? 1 : 0);
+        // moved() inserts at a POST-removal index — a member sitting
+        // before the anchor in the same parent shifts it left by one.
+        final mi = kids.indexWhere((n) => n.id == id);
+        if (mi >= 0 && mi < ai) idx -= 1;
+      }
+      tree = tree.moved(id,
+          newParentGroupId: parent,
+          newIndex: idx < kids.length ? idx : kids.length);
+      anchor = id;
+      after = true;
+    }
+    notifyListeners();
+    return true;
+  }
+
+  /// Grid rows in reading order (pre-order) with each row's slot.
+  List<({String id, String? parentId, bool isGroup})> _flatRows() {
+    final rows = <({String id, String? parentId, bool isGroup})>[];
+    void walk(List<IntervalNode> nodes, String? parentId) {
+      for (final n in nodes) {
+        rows.add((
+          id: n.id,
+          parentId: parentId,
+          isGroup: n is GroupNode,
+        ));
+        if (n is GroupNode) walk(n.children, n.id);
+      }
+    }
+
+    walk(tree.roots, null);
+    return rows;
+  }
+
+  /// Adds [node]'s whole subtree to [out].
+  void _collectIds(IntervalNode node, Set<String> out) {
+    out.add(node.id);
+    if (node is GroupNode) {
+      for (final c in node.children) {
+        _collectIds(c, out);
+      }
+    }
+  }
+
+  /// True when another member of [set] is an ancestor of [id].
+  bool _hasAncestorIn(String id, Set<String> set) {
+    var cursor = tree.parentOf(id);
+    while (cursor != null) {
+      if (set.contains(cursor)) return true;
+      cursor = tree.parentOf(cursor);
+    }
+    return false;
+  }
+
   /// Duplicates the selected subtrees; returns the NEW ids in selection
   /// order (callers move focus to the first copy — tweaks #3).
   List<String> duplicateSelection() => duplicateNodes(selection.toList());
