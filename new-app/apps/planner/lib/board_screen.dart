@@ -240,9 +240,9 @@ class _BoardScreenState extends State<BoardScreen> {
     final inLimbo = snapshot.state == SessionState.awaitingAdvance;
     const gap = SizedBox(width: 8);
     // Tweaks #5: while a manually-complete interval holds at zero, the
-    // row switches to the limbo actions — silence the looping alarm and
-    // add time (the play button completes; choose/reset/skip are the
-    // abandon-run paths and step aside).
+    // row leads with the limbo actions — silence the looping alarm and
+    // add time — then keeps Choose interval + Reset (the user wants them
+    // here too). Only Skip steps aside: the dial completes the hold.
     if (inLimbo) {
       return Row(
         key: const Key('control-row'),
@@ -262,6 +262,23 @@ class _BoardScreenState extends State<BoardScreen> {
             icon: Icons.schedule,
             focused: _nav.isFocused('btn-adjust'),
             onPressed: () => _openAdjust(context),
+          ),
+          gap,
+          _HoverIconButton(
+            circularRing: true,
+            buttonKey: const Key('btn-list'),
+            icon: Icons.menu,
+            focused: _nav.isFocused('btn-list'),
+            onPressed: () => _showListOverlay(context),
+          ),
+          gap,
+          _HoverIconButton(
+            circularRing: true,
+            buttonKey: const Key('btn-reset'),
+            icon: Icons.close_outlined,
+            color: AppColors.danger, // destructive (greyscale-UI rule)
+            focused: _nav.isFocused('btn-reset'),
+            onPressed: () => _showResetDialog(context),
           ),
         ],
       );
@@ -625,7 +642,7 @@ class _BoardScreenState extends State<BoardScreen> {
     final state = controller.snapshot.state;
     final canSkip = state != SessionState.notStarted;
     if (state == SessionState.awaitingAdvance) {
-      // The limbo actions (tweaks #5) mirror the row's second mode.
+      // The limbo row (tweaks #5) mirrors the row's second mode.
       return [
         NavSection(id: 'controls', cells: [
           NavCell(
@@ -639,6 +656,18 @@ class _BoardScreenState extends State<BoardScreen> {
             row: 0,
             col: 1,
             activate: () => _openAdjust(context),
+          ),
+          NavCell(
+            id: 'btn-list',
+            row: 0,
+            col: 2,
+            activate: () => _showListOverlay(context),
+          ),
+          NavCell(
+            id: 'btn-reset',
+            row: 0,
+            col: 3,
+            activate: () => _showResetDialog(context),
           ),
         ]),
       ];

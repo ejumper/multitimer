@@ -810,6 +810,29 @@ void main() {
     expect(s.snapshot(clock.current).remaining, secs(120));
     expect(s.snapshot(clock.current).state, SessionState.running);
   });
+  // Tweaks #7 bugfix: adjustments are per-RUN — reset (and a completed
+  // run's next start) replays the SAVED durations, never the adjusted
+  // ones.
+  test('reset_clears_run_adjustments', () {
+    final s = session([inst(0, seconds: 5), inst(1, seconds: 5)]);
+    s.start();
+    s.adjustCurrent(10); // +10s on the 5s instance
+    expect(s.snapshot(clock.current).remaining, secs(15));
+    s.reset();
+    s.start();
+    expect(s.snapshot(clock.current).remaining, secs(5));
+    expect(s.snapshot(clock.current).totalPlanned, secs(10));
+  });
+
+  test('fresh_run_after_completion_replays_planned', () {
+    final s = session([inst(0, seconds: 5)]);
+    s.start();
+    s.adjustCurrent(10);
+    s.adjustCurrent(-3600); // clamp ends the run (last auto -> fresh)
+    expect(s.snapshot(clock.current).state, SessionState.notStarted);
+    s.start();
+    expect(s.snapshot(clock.current).remaining, secs(5));
+  });
 }
 
 /// Mutable test clock: virtual time is free — assign [current] directly.
@@ -829,4 +852,5 @@ class RecordingSink implements EventSink<InstanceEnded> {
 
   @override
   void emit(InstanceEnded event) => events.add(event);
+
 }

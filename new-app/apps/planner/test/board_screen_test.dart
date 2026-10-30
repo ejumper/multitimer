@@ -654,9 +654,9 @@ void main() {
     expect(controller.snapshot.state, SessionState.awaitingAdvance);
     expect(find.byKey(const Key('btn-silence')), findsOneWidget);
     expect(find.byKey(const Key('btn-adjust')), findsOneWidget);
-    expect(find.byKey(const Key('btn-list')), findsNothing);
-    expect(find.byKey(const Key('btn-reset')), findsNothing);
-    expect(find.byKey(const Key('btn-skip')), findsNothing);
+    expect(find.byKey(const Key('btn-list')), findsOneWidget); // kept
+    expect(find.byKey(const Key('btn-reset')), findsOneWidget); // kept
+    expect(find.byKey(const Key('btn-skip')), findsNothing); // the dial
     controller.dispose();
   });
 

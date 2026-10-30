@@ -587,4 +587,19 @@ void main() {
     expect(controller.snapshot.state, SessionState.awaitingAdvance);
     expect(notifier.closes, closesBefore);
   });
+
+  // Tweaks #7 bugfix (user report): a 5s interval given +10s must be
+  // 5s again after reset — the adjustment is per-RUN, never per-
+  // definition.
+  test('reset_replays_planned_durations', () async {
+    await controller.init();
+    await saveDefs([def('a', seconds: 5), def('b')]);
+    await controller.reload();
+    controller.start();
+    expect(controller.adjustTime(10), isTrue);
+    expect(controller.snapshot.remaining, const Duration(seconds: 15));
+    controller.reset();
+    controller.start();
+    expect(controller.snapshot.remaining, const Duration(seconds: 5));
+  });
 }

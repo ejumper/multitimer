@@ -133,6 +133,7 @@ class TimerSession {
     if (_cursor.state != SessionState.notStarted || instances.isEmpty) {
       return false;
     }
+    _adjustMs.clear(); // a fresh run replays the plan (tweaks #7 bugfix)
     _cursor = _Cursor(SessionState.running, 0, 0, nowMs);
     return true;
   }
@@ -279,6 +280,9 @@ class TimerSession {
       return false;
     }
     final state = _cursor.state;
+    if (state == SessionState.notStarted) {
+      _adjustMs.clear(); // choose-interval on a fresh session = a new run
+    }
     final midRun =
         state == SessionState.running ||
         state == SessionState.paused ||
@@ -308,6 +312,7 @@ class TimerSession {
   /// [TerminalState.skipped] for it; a zeroed/awaitingAdvance current already
   /// logged `done`. From notStarted: no-op, no events.
   void reset() {
+    _adjustMs.clear(); // the run is over — the next one is unadjusted
     final nowMs = _settleAtClock();
     if (_cursor.state == SessionState.notStarted) return;
     if (_cursor.state != SessionState.awaitingAdvance) {
