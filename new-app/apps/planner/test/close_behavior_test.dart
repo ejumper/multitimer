@@ -12,4 +12,14 @@ void main() {
     expect(closeHidesToTray(SessionState.paused), isTrue);
     expect(closeHidesToTray(SessionState.awaitingAdvance), isTrue);
   });
+
+  // Tweaks #10: the notification's Continue advances ONLY while the run
+  // is held at zero — a click racing an in-app advance is a no-op instead
+  // of skipping another interval.
+  test('continue_advances_only_while_awaiting', () {
+    expect(continueAdvances(SessionState.awaitingAdvance), isTrue);
+    expect(continueAdvances(SessionState.notStarted), isFalse);
+    expect(continueAdvances(SessionState.running), isFalse);
+    expect(continueAdvances(SessionState.paused), isFalse);
+  });
 }

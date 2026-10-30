@@ -18,6 +18,11 @@ abstract interface class Notifier {
     String? actionKey,
     String? actionLabel,
   });
+
+  /// Dismisses every visible notification from this app — called when the
+  /// run moves on in-app (tweaks #9): a held/complete notification must
+  /// not linger with a stale Continue action.
+  Future<void> closeVisible();
 }
 
 /// Alert-sound playback.

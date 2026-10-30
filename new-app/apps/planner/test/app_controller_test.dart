@@ -533,4 +533,22 @@ void main() {
 
     expect(controller.timer.color, '#ff00b1');
   });
+
+  // Tweaks #9: moving on in-app dismisses visible notifications (their
+  // stale Continue goes with them); pause/resume leave them alone.
+  test('advance_dismisses_notifications_pause_does_not', () async {
+    await controller.init();
+    await saveDefs([def('a'), def('b')]);
+    await controller.reload();
+    controller.start();
+    controller.pause();
+    controller.resume();
+    expect(notifier.closes, 0);
+    expect(controller.skipNext(), isTrue);
+    expect(notifier.closes, 1);
+    expect(controller.jumpTo(0), isTrue);
+    expect(notifier.closes, 2);
+    controller.reset();
+    expect(notifier.closes, 3);
+  });
 }

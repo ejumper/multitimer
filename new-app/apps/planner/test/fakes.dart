@@ -21,6 +21,13 @@ class RecordingNotifier implements Notifier {
   final List<({String title, String body, String? actionKey, String? actionLabel})>
   shows = [];
 
+  int closes = 0;
+
+  @override
+  Future<void> closeVisible() async {
+    closes += 1;
+  }
+
   @override
   Future<void> show({
     required String title,

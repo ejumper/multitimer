@@ -62,7 +62,12 @@ Future<void> main() async {
   final notifier = KdeNotifier(
     onNotificationClick: _showWindow,
     onAction: (key) {
-      if (key == 'continue') controller?.skipNext();
+      if (key == 'continue') {
+        // Tweaks #10: only advance while the run is actually held — a
+        // click that races an in-app advance must not skip ANOTHER one.
+        final c = controller;
+        if (c != null && continueAdvances(c.snapshot.state)) c.skipNext();
+      }
     },
   );
   await notifier.init();
@@ -114,6 +119,12 @@ Future<void> _smoke() async {
 void quitPlanner() {
   exit(0);
 }
+
+/// Whether the notification's Continue action may advance (tweaks #10):
+/// only while the run is held at zero. If the user already advanced
+/// in-app, a late click is a no-op instead of skipping another interval.
+bool continueAdvances(SessionState state) =>
+    state == SessionState.awaitingAdvance;
 
 /// Whether a close request should hide to tray (true) or quit (false):
 /// a live run is worth protecting — closing must not kill its alerts.

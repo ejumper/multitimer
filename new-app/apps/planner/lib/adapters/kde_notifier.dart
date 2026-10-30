@@ -21,6 +21,11 @@ class KdeNotifier implements Notifier {
   /// BUTTON (e.g. 'continue'); null for body clicks.
   final void Function(String actionKey)? onAction;
 
+  /// Tweak #9: the plugin's Linux cancelAll issues the freedesktop
+  /// CloseNotification call per id — KDE drops the banners immediately.
+  @override
+  Future<void> closeVisible() => _plugin.cancelAll();
+
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
 

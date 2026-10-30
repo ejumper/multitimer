@@ -147,15 +147,22 @@ class AppController extends ChangeNotifier {
   bool skipNext() {
     final skipped = session.skipNext();
     // Advancing completes a held-at-zero interval — its looping alert is
-    // cut immediately (sound policy in AlertHandler).
-    if (skipped) alerts.stopAlerts();
+    // cut immediately (sound policy in AlertHandler), and any visible
+    // notification goes with it (tweaks #9: no stale Continue).
+    if (skipped) {
+      alerts.stopAlerts();
+      unawaited(notifier.closeVisible());
+    }
     notifyListeners();
     return skipped;
   }
 
   bool jumpTo(int ordinal) {
     final jumped = session.jumpTo(ordinal);
-    if (jumped) alerts.stopAlerts();
+    if (jumped) {
+      alerts.stopAlerts();
+      unawaited(notifier.closeVisible());
+    }
     notifyListeners();
     return jumped;
   }
@@ -163,6 +170,7 @@ class AppController extends ChangeNotifier {
   void reset() {
     session.reset();
     alerts.stopAlerts(); // abandoning the run cuts any alert sound
+    unawaited(notifier.closeVisible());
     notifyListeners();
   }
 
