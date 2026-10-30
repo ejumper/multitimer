@@ -11,6 +11,7 @@ import 'editor_screen.dart';
 import 'format.dart';
 import 'keyboard_nav.dart';
 import 'theme.dart';
+import 'time_adjust_modal.dart';
 
 /// The main board screen: header, state-driven dial with the readout in its
 /// center, the control row (interval list, reset, skip), and the
@@ -236,10 +237,47 @@ class _BoardScreenState extends State<BoardScreen> {
   /// (running, paused, awaitingAdvance) skips.
   Widget _controlRow(BuildContext context, TimerSnapshot snapshot) {
     final canSkip = snapshot.state != SessionState.notStarted;
+    final inLimbo = snapshot.state == SessionState.awaitingAdvance;
+    const gap = SizedBox(width: 8);
+    // Tweaks #5: while a manually-complete interval holds at zero, the
+    // row switches to the limbo actions — silence the looping alarm and
+    // add time (the play button completes; choose/reset/skip are the
+    // abandon-run paths and step aside).
+    if (inLimbo) {
+      return Row(
+        key: const Key('control-row'),
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _HoverIconButton(
+            circularRing: true,
+            buttonKey: const Key('btn-silence'),
+            icon: Icons.alarm_off,
+            focused: _nav.isFocused('btn-silence'),
+            onPressed: () => controller.silenceAlarm(),
+          ),
+          gap,
+          _HoverIconButton(
+            circularRing: true,
+            buttonKey: const Key('btn-adjust'),
+            icon: Icons.schedule,
+            focused: _nav.isFocused('btn-adjust'),
+            onPressed: () => _openAdjust(context),
+          ),
+        ],
+      );
+    }
     return Row(
       key: const Key('control-row'),
       mainAxisSize: MainAxisSize.min,
       children: [
+        _HoverIconButton(
+          circularRing: true,
+          buttonKey: const Key('btn-adjust'),
+          icon: Icons.schedule,
+          focused: _nav.isFocused('btn-adjust'),
+          onPressed: canSkip ? () => _openAdjust(context) : null,
+        ),
+        gap,
         _HoverIconButton(
           circularRing: true,
           buttonKey: const Key('btn-list'),
@@ -247,7 +285,7 @@ class _BoardScreenState extends State<BoardScreen> {
           focused: _nav.isFocused('btn-list'),
           onPressed: () => _showListOverlay(context),
         ),
-        const SizedBox(width: 8),
+        gap,
         _HoverIconButton(
           circularRing: true,
           buttonKey: const Key('btn-reset'),
@@ -256,7 +294,7 @@ class _BoardScreenState extends State<BoardScreen> {
           focused: _nav.isFocused('btn-reset'),
           onPressed: () => _showResetDialog(context),
         ),
-        const SizedBox(width: 8),
+        gap,
         _HoverIconButton(
           circularRing: true,
           buttonKey: const Key('btn-skip'),
@@ -266,6 +304,15 @@ class _BoardScreenState extends State<BoardScreen> {
         ),
       ],
     );
+  }
+
+  /// Tweaks #7: the "+/- time" menu — the signed delta lands on the
+  /// current instance's remaining for this run only.
+  Future<void> _openAdjust(BuildContext context) async {
+    final deltaSeconds = await showTimeAdjustModal(context);
+    if (deltaSeconds != null && deltaSeconds != 0) {
+      controller.adjustTime(deltaSeconds);
+    }
   }
 
   /// Opens the timer editor over a freshly loaded tree; Done in the
@@ -575,25 +622,52 @@ class _BoardScreenState extends State<BoardScreen> {
 
   /// The control buttons as keyboard cells (one row).
   List<NavSection> _sections() {
-    final canSkip = controller.snapshot.state != SessionState.notStarted;
+    final state = controller.snapshot.state;
+    final canSkip = state != SessionState.notStarted;
+    if (state == SessionState.awaitingAdvance) {
+      // The limbo actions (tweaks #5) mirror the row's second mode.
+      return [
+        NavSection(id: 'controls', cells: [
+          NavCell(
+            id: 'btn-silence',
+            row: 0,
+            col: 0,
+            activate: () => controller.silenceAlarm(),
+          ),
+          NavCell(
+            id: 'btn-adjust',
+            row: 0,
+            col: 1,
+            activate: () => _openAdjust(context),
+          ),
+        ]),
+      ];
+    }
     return [
       NavSection(id: 'controls', cells: [
         NavCell(
-          id: 'btn-list',
+          id: 'btn-adjust',
           row: 0,
           col: 0,
+          enabled: canSkip,
+          activate: () => _openAdjust(context),
+        ),
+        NavCell(
+          id: 'btn-list',
+          row: 0,
+          col: 1,
           activate: () => _showListOverlay(context),
         ),
         NavCell(
           id: 'btn-reset',
           row: 0,
-          col: 1,
+          col: 2,
           activate: () => _showResetDialog(context),
         ),
         NavCell(
           id: 'btn-skip',
           row: 0,
-          col: 2,
+          col: 3,
           enabled: canSkip,
           activate: () => controller.skipNext(),
         ),

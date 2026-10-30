@@ -115,6 +115,16 @@ class TimerSession {
 
   _Cursor _cursor = _fresh;
 
+  /// Per-run ephemeral duration adjustments (tweaks #7): ordinal → added
+  /// milliseconds. NOT part of the saved definition — they live on this
+  /// session only, and an instance plays at its ADJUSTED length however
+  /// the run reaches it (including jumpTo's fresh restart).
+  final Map<int, int> _adjustMs = <int, int>{};
+
+  /// The instance's length for THIS run: planned + the ephemeral adjust.
+  int _effectiveMs(int ordinal) =>
+      instances[ordinal].durationSeconds * 1000 + (_adjustMs[ordinal] ?? 0);
+
   /// Starts the run on instance 0 (accumulated=0, anchor=now). Returns true
   /// only from [SessionState.notStarted] with a non-empty schedule; an empty
   /// schedule stays notStarted and returns false.
@@ -157,6 +167,84 @@ class TimerSession {
       _cursor.accumulatedMs,
       nowMs,
     );
+    return true;
+  }
+
+  /// Tweaks #7 — ephemeral time adjustment of the CURRENT instance's
+  /// remaining (never touches the saved definition; lives on this run's
+  /// cursor only). [deltaSeconds] is signed; legal while running, paused,
+  /// or awaitingAdvance (else false). A zero delta is a no-op (false).
+  ///
+  /// Clamp rule (TWEAKS.md): an adjustment that would take the remaining
+  /// below zero clamps AT zero — the instance ends exactly now with
+  /// `done` (not `skipped`): a manually-complete instance lands in
+  /// [SessionState.awaitingAdvance] (limbo — alarm + notification fire
+  /// through the normal event path), an auto-finish one flows into the
+  /// next instance with FULL remaining (the excess is discarded, never
+  /// cascaded), and a paused run stays paused (the next instance parks
+  /// full remaining — the [jumpTo] rule).
+  ///
+  /// Adding time to a held (awaitingAdvance) instance pulls it out of
+  /// limbo back to running with EXACTLY that much remaining (the instance
+  /// already consumed its planned duration — the delta is all it gets).
+  bool adjustCurrent(int deltaSeconds) {
+    final nowMs = _settleAtClock();
+    final state = _cursor.state;
+    if (state == SessionState.notStarted) return false;
+    final i = _cursor.ordinal!;
+    final deltaMs = deltaSeconds * 1000;
+    if (deltaMs == 0) return false;
+
+    if (state == SessionState.awaitingAdvance) {
+      if (deltaMs < 0) return false; // already at zero — nothing to remove
+      _adjustMs[i] = (_adjustMs[i] ?? 0) + deltaMs;
+      _cursor = _Cursor(
+        SessionState.running,
+        i,
+        _effectiveMs(i) - deltaMs,
+        nowMs,
+      );
+      return true;
+    }
+
+    // running / paused remaining at this instant (a paused cursor is
+    // frozen at its accumulated elapsed).
+    final sinceAnchor =
+        state == SessionState.running && nowMs > _cursor.anchorMs
+        ? nowMs - _cursor.anchorMs
+        : 0;
+    final remainingMs = _effectiveMs(i) - _cursor.accumulatedMs - sinceAnchor;
+    if (remainingMs + deltaMs <= 0) {
+      // Clamp at zero: the instance ends exactly now as `done` and the
+      // normal zero-crossing rules decide what follows.
+      sink.emit(
+        InstanceEnded(
+          ordinal: i,
+          defId: instances[i].defId,
+          terminal: TerminalState.done,
+          endedAt: DateTime.fromMillisecondsSinceEpoch(nowMs, isUtc: true),
+        ),
+      );
+      _adjustMs.remove(i); // absorbed by the completion
+      if (!instances[i].autoFinish) {
+        _cursor = _Cursor(SessionState.awaitingAdvance, i, 0, nowMs);
+      } else if (i == instances.length - 1) {
+        _cursor = _fresh;
+      } else {
+        _cursor = _Cursor(
+          state == SessionState.paused
+              ? SessionState.paused
+              : SessionState.running,
+          i + 1,
+          0,
+          nowMs,
+        );
+      }
+      return true;
+    }
+    // Plain adjustment: the instance's length for this run changes — the
+    // cursor (anchor, paused/running semantics) is untouched.
+    _adjustMs[i] = (_adjustMs[i] ?? 0) + deltaMs;
     return true;
   }
 
@@ -285,7 +373,7 @@ class TimerSession {
     final events = <InstanceEnded>[];
     while (current.state == SessionState.running) {
       final i = current.ordinal!;
-      final durationMs = instances[i].durationSeconds * 1000;
+      final durationMs = _effectiveMs(i);
       final sinceAnchor = nowMs - current.anchorMs;
       // Backwards clock: clamp, elapsed = accumulated only.
       final elapsed =
@@ -346,7 +434,7 @@ class TimerSession {
       case SessionState.running:
       case SessionState.paused:
         final i = cursor.ordinal!;
-        final durationMs = instances[i].durationSeconds * 1000;
+        final durationMs = _effectiveMs(i);
         final sinceAnchor = nowMs - cursor.anchorMs;
         // Paused freezes at accumulated; only running consumes wall time.
         final elapsed = cursor.state == SessionState.running
@@ -365,11 +453,13 @@ class TimerSession {
     }
   }
 
-  Duration _futureRemaining(int fromOrdinal) => Duration(
-    seconds: instances
-        .skip(fromOrdinal)
-        .fold<int>(0, (sum, i) => sum + i.durationSeconds),
-  );
+  Duration _futureRemaining(int fromOrdinal) {
+    var ms = 0;
+    for (var j = fromOrdinal; j < instances.length; j++) {
+      ms += _effectiveMs(j);
+    }
+    return Duration(milliseconds: ms);
+  }
 }
 
 /// Internal cursor: which instance the run is on and how its elapsed time is

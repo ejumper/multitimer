@@ -551,4 +551,40 @@ void main() {
     controller.reset();
     expect(notifier.closes, 3);
   });
+
+  // Tweaks #7: adjustTime is ephemeral — promoting a held instance back
+  // to running cuts the loop and drops its stale notification; a plain
+  // nudge mid-run dismisses nothing.
+  test('adjust_time_promotion_cuts_alerts_and_notifications', () async {
+    await controller.init();
+    await saveDefs([def('a', seconds: 30, autoFinish: false), def('b')]);
+    await controller.reload();
+    controller.start();
+    clock.current = clock.current.add(const Duration(seconds: 35));
+    await controller.tick(); // manual instance holds at zero
+    expect(controller.snapshot.state, SessionState.awaitingAdvance);
+    final closesBefore = notifier.closes;
+    expect(controller.adjustTime(20), isTrue);
+    expect(controller.snapshot.state, SessionState.running);
+    expect(controller.snapshot.remaining, const Duration(seconds: 20));
+    expect(notifier.closes, closesBefore + 1);
+    expect(controller.adjustTime(5), isTrue); // plain nudge
+    expect(notifier.closes, closesBefore + 1);
+  });
+
+  // Tweaks #5: silenceAlarm stops the sound but keeps the hold — the
+  // notification stays (its Continue still completes).
+  test('silence_alarm_keeps_the_hold', () async {
+    await controller.init();
+    await saveDefs([def('a', seconds: 30, autoFinish: false), def('b')]);
+    await controller.reload();
+    controller.start();
+    clock.current = clock.current.add(const Duration(seconds: 35));
+    await controller.tick();
+    expect(controller.snapshot.state, SessionState.awaitingAdvance);
+    final closesBefore = notifier.closes;
+    controller.silenceAlarm();
+    expect(controller.snapshot.state, SessionState.awaitingAdvance);
+    expect(notifier.closes, closesBefore);
+  });
 }

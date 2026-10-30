@@ -167,6 +167,37 @@ class AppController extends ChangeNotifier {
     return jumped;
   }
 
+  /// Tweaks #7: ephemeral +/- seconds on the CURRENT instance's length
+  /// for this run (never touches the saved definition). Clamping at zero
+  /// ends the instance — manual → limbo, auto → next — through the normal
+  /// event path (end alert + notification fire). Adding time to a held
+  /// instance pulls it back to running. Returns whether it applied.
+  bool adjustTime(int deltaSeconds) {
+    final before = snapshot;
+    final applied = session.adjustCurrent(deltaSeconds);
+    if (applied) {
+      final after = snapshot;
+      final leftHold = before.state == SessionState.awaitingAdvance &&
+          after.state != SessionState.awaitingAdvance;
+      final moved = after.ordinal != before.ordinal;
+      if (leftHold || moved) {
+        // The run moved on: cut any loop and drop stale notifications
+        // (the skipNext rule).
+        alerts.stopAlerts();
+        unawaited(notifier.closeVisible());
+      }
+    }
+    notifyListeners();
+    return applied;
+  }
+
+  /// Tweaks #5: silences the looping limbo alert WITHOUT advancing — the
+  /// held instance keeps waiting (its notification stays clickable).
+  void silenceAlarm() {
+    alerts.stopAlerts();
+    notifyListeners();
+  }
+
   void reset() {
     session.reset();
     alerts.stopAlerts(); // abandoning the run cuts any alert sound

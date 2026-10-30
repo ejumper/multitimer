@@ -687,6 +687,129 @@ void main() {
     expect(e.endedAt, clock.current);
     expect(s.snapshot(clock.current).state, SessionState.notStarted);
   });
+  // ── Tweaks #7: adjustCurrent — ephemeral +/- on the current instance ──
+
+  // Running: a positive delta extends the remaining, a negative shrinks
+  // it; the definition is untouched (only the cursor shifts).
+  test('adjust_running_extends_and_shrinks_remaining', () {
+    final s = session([inst(0, seconds: 60), inst(1, seconds: 60)]);
+    s.start();
+    warpBy(secs(10)); // 50s left
+    expect(s.adjustCurrent(20), isTrue);
+    expect(s.snapshot(clock.current).remaining, secs(70));
+    expect(s.adjustCurrent(-30), isTrue);
+    expect(s.snapshot(clock.current).remaining, secs(40));
+    expect(s.snapshot(clock.current).state, SessionState.running);
+  });
+
+  // Paused: the adjustment lands on the frozen remaining; still paused.
+  test('adjust_paused_keeps_paused', () {
+    final s = session([inst(0, seconds: 60), inst(1, seconds: 60)]);
+    s.start();
+    warpBy(secs(10));
+    s.pause();
+    expect(s.adjustCurrent(5), isTrue);
+    expect(s.snapshot(clock.current).remaining, secs(55));
+    expect(s.snapshot(clock.current).state, SessionState.paused);
+  });
+
+  // Clamp on a running MANUAL instance: exactly one `done` at now,
+  // limbo (awaitingAdvance), remaining zero. The excess is discarded.
+  test('adjust_clamp_manual_lands_in_limbo', () {
+    final s = session([inst(0, seconds: 60, autoFinish: false), inst(1, seconds: 60)]);
+    s.start();
+    warpBy(secs(10)); // 50s left
+    expect(s.adjustCurrent(-3600), isTrue); // way more than remains
+    final snap = s.snapshot(clock.current);
+    expect(snap.state, SessionState.awaitingAdvance);
+    expect(snap.remaining, secs(0));
+    expect(sink.events.length, 1);
+    expect(sink.events.single.terminal, TerminalState.done);
+    expect(sink.events.single.endedAt, clock.current);
+  });
+
+  // Clamp on a running AUTO instance: `done` at now, the next instance
+  // runs with FULL remaining — the overshoot never cascades.
+  test('adjust_clamp_auto_advances_with_full_remaining', () {
+    final s = session([inst(0, seconds: 60), inst(1, seconds: 45)]);
+    s.start();
+    warpBy(secs(10));
+    expect(s.adjustCurrent(-3600), isTrue);
+    final snap = s.snapshot(clock.current);
+    expect(snap.state, SessionState.running);
+    expect(snap.ordinal, 1);
+    expect(snap.remaining, secs(45));
+    expect(sink.events.length, 1);
+  });
+
+  // Clamp while PAUSED: the run stays paused — the next instance parks
+  // full remaining (the jumpTo rule), never silently resumes.
+  test('adjust_clamp_while_paused_stays_paused', () {
+    final s = session([inst(0, seconds: 60), inst(1, seconds: 45)]);
+    s.start();
+    warpBy(secs(10));
+    s.pause();
+    expect(s.adjustCurrent(-3600), isTrue);
+    final snap = s.snapshot(clock.current);
+    expect(snap.state, SessionState.paused);
+    expect(snap.ordinal, 1);
+    expect(snap.remaining, secs(45));
+  });
+
+  // Clamp on the LAST auto instance: the run resets to fresh.
+  test('adjust_clamp_last_auto_resets_run', () {
+    final s = session([inst(0, seconds: 60)]);
+    s.start();
+    expect(s.adjustCurrent(-3600), isTrue);
+    expect(s.snapshot(clock.current).state, SessionState.notStarted);
+    expect(sink.events.length, 1);
+  });
+
+  // Limbo promotion: adding time pulls the held instance back to running
+  // with EXACTLY that much remaining (its planned duration is spent).
+  test('adjust_adding_time_promotes_limbo_to_running', () {
+    final s = session([inst(0, seconds: 60, autoFinish: false), inst(1, seconds: 60)]);
+    s.start();
+    warpBy(secs(70)); // manual instance holds at zero
+    expect(s.snapshot(clock.current).state, SessionState.awaitingAdvance);
+    expect(s.adjustCurrent(30), isTrue);
+    final snap = s.snapshot(clock.current);
+    expect(snap.state, SessionState.running);
+    expect(snap.ordinal, 0);
+    expect(snap.remaining, secs(30));
+  });
+
+  // Limbo + removal is a no-op — there is nothing left to take.
+  test('adjust_removing_from_limbo_is_noop', () {
+    final s = session([inst(0, seconds: 60, autoFinish: false), inst(1, seconds: 60)]);
+    s.start();
+    warpBy(secs(70));
+    expect(s.adjustCurrent(-30), isFalse);
+    expect(s.snapshot(clock.current).state, SessionState.awaitingAdvance);
+  });
+
+  // notStarted and zero deltas are no-ops.
+  test('adjust_requires_a_live_instance', () {
+    final s = session([inst(0, seconds: 60)]);
+    expect(s.adjustCurrent(10), isFalse);
+    s.start();
+    expect(s.adjustCurrent(0), isFalse);
+    expect(s.snapshot(clock.current).remaining, secs(60));
+  });
+
+  // The adjustment survives pause/resume and jump-away-and-back (it lives
+  // on the run's cursor — ephemeral, but for THIS run).
+  test('adjust_survives_pause_resume_and_jump', () {
+    final s = session([inst(0, seconds: 60), inst(1, seconds: 60)]);
+    s.start();
+    s.adjustCurrent(60); // +1 min on instance 0
+    s.pause();
+    s.resume();
+    s.jumpTo(1);
+    s.jumpTo(0);
+    expect(s.snapshot(clock.current).remaining, secs(120));
+    expect(s.snapshot(clock.current).state, SessionState.running);
+  });
 }
 
 /// Mutable test clock: virtual time is free — assign [current] directly.
@@ -697,6 +820,7 @@ class FixedClock implements Clock {
 
   @override
   DateTime now() => current;
+
 }
 
 /// Collects every [InstanceEnded] the session emits, in order.

@@ -147,8 +147,10 @@ void main() {
     expect(controller.start(), isTrue);
     await tester.pump();
 
-    // Focus starts on the first cell (interval selector): Right x2 lands on
-    // the skip button — Enter advances the run (same as the button).
+    // Focus starts on the first cell (adjust time, tweaks #7): Right x3
+    // lands on the skip button — Enter advances the run (same as the
+    // button).
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pump();
@@ -156,12 +158,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(controller.snapshot.ordinal, 1); // skip advanced the run
 
-    // Home jumps back to the first button; Enter opens the list overlay.
+    // Home jumps back to the first button; Enter opens the +/− time menu.
     await tester.sendKeyEvent(LogicalKeyboardKey.home);
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('list-overlay')), findsOneWidget);
+    expect(find.byKey(const Key('adjust-modal')), findsOneWidget);
   });
 
   testWidgets('keyboard_interval_list_navigation', (tester) async {
@@ -481,7 +483,10 @@ void main() {
     await controller.tick();
     await tester.pump();
     expect(controller.snapshot.state, SessionState.awaitingAdvance);
-    await tester.tap(find.byKey(const Key('btn-skip')));
+    // Tweaks #5: in limbo the skip button steps aside (the row shows the
+    // limbo actions) — the DIAL completes the held interval instead.
+    expect(find.byKey(const Key('btn-skip')), findsNothing);
+    await tester.tap(find.byKey(const Key('dial')));
     await tester.pump();
     expect(controller.snapshot.state, SessionState.running);
     expect(controller.snapshot.ordinal, 1);
@@ -625,5 +630,66 @@ void main() {
 
     controller.dispose();
     await store.close();
+  });
+
+  // Tweaks #5/#7: the control row is state-driven — adjust (+/- time) is
+  // first on a live run; a manual hold switches the row to the limbo
+  // actions (silence + adjust) and the abandon-run buttons step aside.
+  testWidgets('tweaks_control_row_state_driven', (tester) async {
+    await pumpBoard(tester);
+    // notStarted: the adjust button is disabled (nothing to adjust).
+    expect(tester.widget<IconButton>(find.byKey(const Key('btn-adjust'))).onPressed, isNull);
+    controller.start();
+    await tester.pump();
+    expect(tester.widget<IconButton>(find.byKey(const Key('btn-adjust'))).onPressed, isNotNull);
+    expect(find.byKey(const Key('btn-list')), findsOneWidget);
+    expect(find.byKey(const Key('btn-reset')), findsOneWidget);
+    expect(find.byKey(const Key('btn-skip')), findsOneWidget);
+
+    // The fixture's intervals are manually complete: the run lands in
+    // limbo and the row switches.
+    clock.current = clock.current.add(const Duration(seconds: 65));
+    await controller.tick();
+    await tester.pump();
+    expect(controller.snapshot.state, SessionState.awaitingAdvance);
+    expect(find.byKey(const Key('btn-silence')), findsOneWidget);
+    expect(find.byKey(const Key('btn-adjust')), findsOneWidget);
+    expect(find.byKey(const Key('btn-list')), findsNothing);
+    expect(find.byKey(const Key('btn-reset')), findsNothing);
+    expect(find.byKey(const Key('btn-skip')), findsNothing);
+    controller.dispose();
+  });
+
+  // Tweaks #7: the menu applies a signed delta to the current instance's
+  // remaining for this run only.
+  testWidgets('tweaks_adjust_menu_applies_delta', (tester) async {
+    await pumpBoard(tester);
+    controller.start();
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('btn-adjust')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300)); // the route in
+    expect(find.byKey(const Key('adjust-modal')), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('adjust-min')), '05');
+    await tester.tap(find.byKey(const Key('adjust-apply')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300)); // the route out
+    // +5 min on the 60s first instance.
+    expect(controller.snapshot.remaining, const Duration(seconds: 360));
+    controller.dispose();
+  });
+
+  // Tweaks #5: silence keeps the hold; the play button is what completes.
+  testWidgets('tweaks_silence_keeps_limbo', (tester) async {
+    await pumpBoard(tester);
+    controller.start();
+    clock.current = clock.current.add(const Duration(seconds: 65));
+    await controller.tick();
+    await tester.pump();
+    expect(controller.snapshot.state, SessionState.awaitingAdvance);
+    await tester.tap(find.byKey(const Key('btn-silence')));
+    await tester.pump();
+    expect(controller.snapshot.state, SessionState.awaitingAdvance);
+    controller.dispose();
   });
 }

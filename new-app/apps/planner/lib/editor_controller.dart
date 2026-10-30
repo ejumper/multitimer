@@ -207,8 +207,7 @@ class EditorController extends ChangeNotifier {
     members.sort((a, b) => idxOf[a]!.compareTo(idxOf[b]!));
     final moving = <String>{};
     for (final id in members) {
-      final n = tree.nodeById(id);
-      if (n != null) _collectIds(n, moving);
+      _collectIds(tree.nodeById(id), moving);
     }
     // The first row beyond the block that is not moving = the row the
     // block steps past.
