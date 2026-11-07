@@ -1,6 +1,14 @@
 import 'package:flutter/foundation.dart';
 import 'package:planner_engine/planner_engine.dart';
 
+/// Authoring-rule reasons (v2 dated/repeat exclusivity, P1.5) shown at the
+/// blocked interaction: the drag-drop path and the Time toggle share the
+/// first, the repeat modal the second.
+const String kDatedInRepeatingGroupReason =
+    "A dated interval can't be added to a repeating group.";
+const String kRepeatingGroupWithDatedReason =
+    "This group contains a dated interval, so it can't repeat.";
+
 /// Working-copy controller for the interval-timer editor (P4.1).
 ///
 /// Edits mutate an in-memory copy only: [name], [color], and [tree] start
@@ -124,12 +132,17 @@ class EditorController extends ChangeNotifier {
   /// timer). Exists for the empty-state add affordance and tests — the "+"
   /// toolbar button routes to the interval editor (P4.3) instead.
   /// [name] is nullable: a blank label is stored as an unnamed interval.
+  /// [durationSeconds] is nullable too (v2 P1.2): null = **Open** (no
+  /// duration); [triggerTimeSeconds] non-null = **dated** (a wall at that
+  /// time-of-day, seconds since midnight) — both flow straight into the
+  /// def the editor commits.
   void addInterval({
     required String? name,
     required String color,
-    required int durationSeconds,
+    required int? durationSeconds,
     required bool autoFinish,
     String? endAlertSoundFile,
+    int? triggerTimeSeconds,
   }) {
     _pushUndo();
     if (endAlertSoundFile != null) lastSound = endAlertSoundFile;
@@ -142,6 +155,7 @@ class EditorController extends ChangeNotifier {
         durationSeconds: durationSeconds,
         autoFinish: autoFinish,
         endAlertSoundFile: endAlertSoundFile,
+        triggerTimeSeconds: triggerTimeSeconds,
       ),
     );
     tree = IntervalTree([...tree.roots, node]);
@@ -241,6 +255,14 @@ class EditorController extends ChangeNotifier {
       anchorSibling = wRow.id;
       after = dir > 0;
     }
+    // v2 exclusivity (P1.5): a block containing a dated interval may not
+    // land inside a repeating group — checked BEFORE the undo push, so a
+    // blocked move is a no-op like a blocked edge.
+    if (parent != null &&
+        insideRepeatingGroup(parent) &&
+        members.any(subtreeContainsDated)) {
+      return false;
+    }
     _pushUndo();
     var anchor = anchorSibling;
     for (final id in members) {
@@ -337,12 +359,22 @@ class EditorController extends ChangeNotifier {
   }
 
   /// Repositions a subtree (P1.1 semantics; the engine rejects invalid
-  /// targets such as a group moved into its own subtree).
+  /// targets such as a group moved into its own subtree). v2 exclusivity
+  /// (P1.5): a subtree containing a dated interval may not enter a group
+  /// chain that repeats — [StateError] BEFORE the undo push (the screen
+  /// guards the drag path itself and shows the reason instead).
   void moveNode(
     String nodeId, {
     required String? newParentGroupId,
     required int newIndex,
   }) {
+    if (newParentGroupId != null &&
+        insideRepeatingGroup(newParentGroupId) &&
+        subtreeContainsDated(nodeId)) {
+      throw StateError(
+        'moveNode: a dated interval cannot enter a repeating group',
+      );
+    }
     _pushUndo();
     tree = tree.moved(
       nodeId,
@@ -409,15 +441,53 @@ class EditorController extends ChangeNotifier {
 
   /// Replaces [groupId]'s def with one carrying [repeat] total passes
   /// (>= 1), keeping its children. One undo step; [repeat] < 1 throws
-  /// [ArgumentError] BEFORE anything is pushed.
+  /// [ArgumentError] BEFORE anything is pushed. v2 exclusivity (P1.5):
+  /// a group whose subtree contains a dated interval cannot repeat above
+  /// 1 — [StateError] BEFORE the undo push (the repeat modal blocks the
+  /// interaction inline instead).
   void setGroupRepeat(String groupId, int repeat) {
     if (repeat < 1) {
       throw ArgumentError.value(repeat, 'repeat', 'must be >= 1');
+    }
+    if (repeat > 1 && subtreeContainsDated(groupId)) {
+      throw StateError(
+        'setGroupRepeat: a group containing a dated interval cannot repeat',
+      );
     }
     _pushUndo();
     tree = _treeWithRepeat(tree, groupId, repeat);
     selection.clear(); // action rule: nothing stays selected
     notifyListeners();
+  }
+
+  // ── v2 dated/repeat exclusivity (P1.5) ─────────────────────────────
+  //
+  // A dated interval (triggerTimeSeconds != null) never lives inside a
+  // repeating group: the authoring interactions enforce it (drag-drop,
+  // the Time toggle, the repeat modal) and the mutation guards below are
+  // the defense in depth.
+
+  /// True when the subtree rooted at [nodeId] contains a dated interval
+  /// anywhere (the node itself included).
+  bool subtreeContainsDated(String nodeId) =>
+      _subtreeContainsDated(tree.nodeById(nodeId));
+
+  bool _subtreeContainsDated(IntervalNode node) => switch (node) {
+    DefNode(:final def) => def.isDated,
+    GroupNode(:final children) => children.any(_subtreeContainsDated),
+  };
+
+  /// True when [groupId] itself or any of its ancestor groups repeats
+  /// (repeatCount > 1) — i.e. anything placed there runs more than once.
+  /// Null (the roots) is never repeating.
+  bool insideRepeatingGroup(String? groupId) {
+    String? cursor = groupId;
+    while (cursor != null) {
+      final node = tree.nodeById(cursor);
+      if (node is GroupNode && node.group.repeatCount > 1) return true;
+      cursor = tree.parentOf(cursor);
+    }
+    return false;
   }
 
   /// The selected ids NOT nested inside another selected id — the

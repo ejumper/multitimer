@@ -521,4 +521,132 @@ void main() {
     final g = controller.tree.nodeById('g') as GroupNode;
     expect(g.children.map((n) => n.id), ['b', 'c']);
   });
+
+  // ── v2 P1.5: dated ↔ repeat-group exclusivity ─────────────────────
+
+  /// A dated def: trigger 55800 (15:30), timed, manual.
+  DefNode dated(String id) => DefNode(
+    IntervalDef(
+      id: id,
+      timerId: timer.id,
+      name: 'Wall',
+      color: '#0055ff',
+      durationSeconds: 60,
+      autoFinish: false,
+      triggerTimeSeconds: 55800,
+    ),
+  );
+
+  // The authoring guards: repeat > 1 is refused while a dated def lives
+  // anywhere in the subtree, a dated subtree can't move into a repeating
+  // group, and BOTH refused paths validate before the undo push — the
+  // allowed directions (dated into a plain group, repeat > 1 without a
+  // dated) still land.
+  test('dated_repeat_exclusivity_guards', () async {
+    controller.dispose();
+    controller = await buildEditor(
+      IntervalTree([
+        dated('w'),
+        groupOf('g', [def('a')], repeat: 3), // repeating, no dated inside
+        groupOf('p', [def('c')], repeat: 1), // plain group
+        groupOf('gd', [dated('gw')]), // dated inside, repeat 1
+        groupOf('outer', [
+          groupOf('inner', [dated('w2')]), // dated nested two levels deep
+        ]),
+      ]),
+    );
+
+    expect(controller.subtreeContainsDated('w'), isTrue);
+    expect(controller.subtreeContainsDated('g'), isFalse);
+    expect(controller.subtreeContainsDated('gd'), isTrue);
+    expect(controller.subtreeContainsDated('outer'), isTrue);
+    expect(controller.insideRepeatingGroup('g'), isTrue);
+    expect(controller.insideRepeatingGroup('p'), isFalse);
+    expect(controller.insideRepeatingGroup(null), isFalse);
+
+    // A dated descendant pins the repeat count at 1 — before any push.
+    expect(() => controller.setGroupRepeat('gd', 2), throwsStateError);
+    expect(controller.canUndo, isFalse);
+
+    // A dated subtree can't be moved INTO a repeating group either.
+    expect(
+      () => controller.moveNode('w', newParentGroupId: 'g', newIndex: 0),
+      throwsStateError,
+    );
+    expect(controller.canUndo, isFalse);
+    expect(
+      controller.tree.toDebugString(),
+      'def:w | group:g[3]{def:a} | group:p[1]{def:c} | '
+      'group:gd[1]{def:gw} | group:outer[1]{group:inner[1]{def:w2}}',
+    );
+
+    // Allowed: dated into the PLAIN group; repeat > 1 with no dated.
+    // (The move canonicalizes the tree: outer{inner{w2}} collapses to
+    // outer{w2}, repeat product 1 — engine invariant, unrelated here.)
+    controller.moveNode('w', newParentGroupId: 'p', newIndex: 0);
+    controller.setGroupRepeat('g', 5);
+    expect(
+      controller.tree.toDebugString(),
+      'group:g[5]{def:a} | group:p[1]{def:w | def:c} | '
+      'group:gd[1]{def:gw} | group:outer[1]{def:w2}',
+    );
+  });
+
+  // Alt+Down past a repeating group's header would drop a dated block
+  // INTO it — refused as a whole-block no-op before the undo push.
+  test('block_move_dated_into_repeating_is_blocked', () async {
+    controller.dispose();
+    controller = await buildEditor(
+      IntervalTree([
+        dated('w'),
+        groupOf('g', [def('a'), def('b')], repeat: 2),
+      ]),
+    );
+
+    expect(controller.moveBlockBy(1, 'w'), isFalse);
+    expect(
+      controller.tree.toDebugString(),
+      'def:w | group:g[2]{def:a | def:b}',
+    );
+    expect(controller.canUndo, isFalse);
+  });
+
+  // addInterval carries the nullable duration and the trigger through the
+  // save path: Open + dated and timed + order shapes both round-trip
+  // through the store's P1.1 columns.
+  test('add_interval_open_and_trigger_roundtrip', () async {
+    controller.addInterval(
+      name: 'Wall',
+      color: '#00ad6b',
+      durationSeconds: null, // Open
+      autoFinish: false,
+      triggerTimeSeconds: 55800,
+    );
+    final open = controller.tree.roots.last as DefNode;
+    expect(open.def.durationSeconds, isNull);
+    expect(open.def.triggerTimeSeconds, 55800);
+    expect(open.def.autoFinish, isFalse);
+
+    controller.addInterval(
+      name: 'Lap',
+      color: '#00ad6b',
+      durationSeconds: 45,
+      autoFinish: true,
+    );
+    final timed = controller.tree.roots.last as DefNode;
+    expect(timed.def.durationSeconds, 45);
+    expect(timed.def.triggerTimeSeconds, isNull);
+    expect(timed.def.autoFinish, isTrue);
+
+    await controller.commit();
+    final stored = await store.loadTree(timer.id);
+    IntervalDef storedDef(String name) =>
+        (stored.roots.cast<DefNode>().firstWhere((n) => n.def.name == name))
+            .def;
+    expect(storedDef('Wall').durationSeconds, isNull);
+    expect(storedDef('Wall').triggerTimeSeconds, 55800);
+    expect(storedDef('Lap').durationSeconds, 45);
+    expect(storedDef('Lap').triggerTimeSeconds, isNull);
+    expect(storedDef('Lap').autoFinish, isTrue);
+  });
 }

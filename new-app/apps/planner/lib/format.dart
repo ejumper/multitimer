@@ -42,6 +42,16 @@ String formatDuration(Duration d) {
   return parts.isEmpty ? '0s' : parts.join(' ');
 }
 
+/// `HH:MM` 24-hour wall time for a trigger's seconds-since-midnight —
+/// `55800` → `15:30`, `0` → `00:00`. Clamped into the 0..86399 day range
+/// (a value outside renders at the nearest edge, never wraps).
+String formatWallTime(int secondsSinceMidnight) {
+  final total = secondsSinceMidnight.clamp(0, 24 * 60 * 60 - 1);
+  final hours = (total ~/ 3600).toString().padLeft(2, '0');
+  final minutes = ((total ~/ 60) % 60).toString().padLeft(2, '0');
+  return '$hours:$minutes';
+}
+
 /// The not-started planned readout as three zero-padded two-digit parts
 /// `(hours, minutes, seconds)` for the `03H : 00M / 00` dial layout
 /// (3h → `('03','00','00')`, 1h5m9s → `('01','05','09')`). Hours are

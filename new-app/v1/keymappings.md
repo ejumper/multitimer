@@ -90,24 +90,34 @@ row · intervals**.
 
 ## Interval editor
 
-Sections (Tab order): **back · color picker · name · auto-finish ·
-duration · End Alert**.
+Sections (Tab order): **back · color picker · name · toggles (auto-finish ·
+Duration · Time) · duration boxes · time boxes · End Alert** — the box
+sections exist only while their toggle is ON (Duration ON shows `hr · min
+· sec`, Time ON shows `hh · mm`).
 
 | Key | Action |
 | --- | --- |
 | Escape | back (commit + close) |
-| Enter (auto-finish) | toggle |
-| Space (auto-finish) | toggle |
-| ← (auto-finish) | auto-finish OFF |
-| → (auto-finish) | auto-finish ON |
+| Enter / Space (toggles) | toggle the focused toggle (auto-finish / Duration / Time) |
+| ← / → (toggles) | focused toggle OFF / ON |
+| ↑ ↓ (toggles) | move between auto-finish → Duration → Time |
 | ↑ ↓ (duration) | ±1 unit (Ctrl: ±10) |
 | Enter / Shift+Enter (duration) | cycle hr → min → sec (wraps) — the ONLY cycling keys |
 | ← → (duration) | move the TEXT CURSOR inside the box (they belong to the field) |
+| ↑ ↓ (time) | ±1 unit (Ctrl: ±10), clamped to 0–23 / 0–59 |
+| Enter / Shift+Enter (time) | cycle hh → mm (wraps) |
+| ← → (time) | move the TEXT CURSOR inside the box |
 | Enter (End Alert) | open the End Alert selector |
 
-Duration boxes are **always editable** — the active box holds the caret
-(select-all on arrival, typing replaces) and the focus ring follows it;
-there is no separate "enter the box" step.
+Auto-finish is **grayed out and forced OFF while Duration is OFF** (the
+engine contract: auto-finish requires a duration). Turning **Time** ON
+inside a repeating group is refused with the exclusivity reason (dated
+intervals never repeat).
+
+Duration boxes are **editable while Duration is ON** — the active box
+holds the caret (select-all on arrival, typing replaces) and the focus
+ring follows it; there is no separate "enter the box" step. The time
+boxes work the same way (no seconds box — 24-hour wall time).
 
 ## End Alert selector
 

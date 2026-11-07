@@ -694,11 +694,19 @@ class _EditorScreenState extends State<EditorScreen> {
 
   /// Toolbar "Group": wrap the topmost selection in a fresh group (repeat
   /// 1), then open the repeat stepper for it (UI-REFERENCE item 8) and
-  /// apply the confirmed pass count.
+  /// apply the confirmed pass count. A group whose subtree contains a
+  /// dated interval can't repeat above 1 (P1.5 exclusivity) — the modal
+  /// opens with the reason and the stepper pinned at 1.
   Future<void> _groupTapped(BuildContext context) async {
     final groupId = controller.groupSelection();
     if (!context.mounted) return;
-    final repeat = await showRepeatModal(context, initial: 1);
+    final repeat = await showRepeatModal(
+      context,
+      initial: 1,
+      blockedAboveOneReason: controller.subtreeContainsDated(groupId)
+          ? kRepeatingGroupWithDatedReason
+          : null,
+    );
     if (repeat != null && context.mounted) {
       controller.setGroupRepeat(groupId, repeat);
     }
@@ -708,9 +716,17 @@ class _EditorScreenState extends State<EditorScreen> {
   /// current count. ALL groups respond, nested ones included (acceptance:
   /// the earlier outermost-only rule was a misreading — a nested group
   /// that repeats 2× inside a parent that repeats 3× is exactly the point).
+  /// Same exclusivity rule as [_groupTapped]: a dated descendant pins the
+  /// stepper at 1 with the reason on screen.
   Future<void> _bracketTapped(BuildContext context, GroupDef group) async {
     controller.selectOnly(group.id);
-    final repeat = await showRepeatModal(context, initial: group.repeatCount);
+    final repeat = await showRepeatModal(
+      context,
+      initial: group.repeatCount,
+      blockedAboveOneReason: controller.subtreeContainsDated(group.id)
+          ? kRepeatingGroupWithDatedReason
+          : null,
+    );
     if (repeat != null && context.mounted) {
       controller.setGroupRepeat(group.id, repeat);
     }
@@ -868,13 +884,22 @@ class _EditorScreenState extends State<EditorScreen> {
 
   /// Drop: apply the slot as one move + clear the selection. A null slot or
   /// a rejected move snaps back with no change. Foreign/stale recognizers
-  /// (see [_dragUpdate]) may not commit the live drag.
+  /// (see [_dragUpdate]) may not commit the live drag. v2 exclusivity
+  /// (P1.5): a subtree containing a dated interval never lands inside a
+  /// repeating group — the drop is blocked with the reason shown, before
+  /// the controller is touched.
   void _dragEnd(String nodeId) {
     if (_drag?.node.id != nodeId) return;
     final drag = _drag!;
     final slot = _target;
     _cleanupDrag();
     if (slot == null) return;
+    if (slot.parentId != null &&
+        controller.insideRepeatingGroup(slot.parentId) &&
+        controller.subtreeContainsDated(drag.node.id)) {
+      _showReason(kDatedInRepeatingGroupReason);
+      return;
+    }
     try {
       var index = slot.index;
       if (controller.tree.parentOf(drag.node.id) == slot.parentId &&
@@ -890,6 +915,13 @@ class _EditorScreenState extends State<EditorScreen> {
     } on TreeOpException {
       // Engine rejected the move — snap back with no change.
     }
+  }
+
+  /// A brief on-screen reason (the v2 authoring-rule SnackBar, P1.5).
+  void _showReason(String message) {
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   /// Cancel (recognizer lost the arena, pointer cancelled): no change.
@@ -1079,11 +1111,22 @@ class _EditorScreenState extends State<EditorScreen> {
 
   // ── row widgets ───────────────────────────────────────────────────────
 
+  /// The chip's right-hand shape (P1.5): the trigger time when dated
+  /// (`15:30`), else the duration when present, else `open` for an Open
+  /// interval — the three v2 shapes (dated / timed / open) at a glance.
+  String _rowShape(IntervalDef def) {
+    final trigger = def.triggerTimeSeconds;
+    if (trigger != null) return formatWallTime(trigger);
+    final duration = def.durationSeconds;
+    if (duration != null) return formatDuration(Duration(seconds: duration));
+    return 'open';
+  }
+
   /// One interval: selection circle (ROOT-level rows only — inside a group
   /// the rows are one unit and not individually selectable, acceptance
   /// "group selection semantics"; tapping the card still edits) | chip card
-  /// (interval-color tinted background, bordered, label left, duration
-  /// right, alert subtitle below).
+  /// (interval-color tinted background, bordered, label left, shape
+  /// right — time / duration / `open` — alert subtitle below).
   Widget _chipRow(IntervalDef def, {bool showSelection = true}) {
     return Row(
       key: Key('chip-${def.id}'),
@@ -1145,7 +1188,7 @@ class _EditorScreenState extends State<EditorScreen> {
               ),
               const SizedBox(width: 8),
               Text(
-                formatDuration(Duration(seconds: def.durationSeconds ?? 0)),
+                _rowShape(def),
                 style: const TextStyle(
                   fontFamily: AppFonts.digits,
                   fontSize: 14,

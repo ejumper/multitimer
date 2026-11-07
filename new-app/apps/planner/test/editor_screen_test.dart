@@ -1243,4 +1243,303 @@ void main() {
     final g1 = controller.tree.nodeById('g1') as GroupNode;
     expect(g1.children.map((n) => n.id), ['a', 'b']);
   });
+
+  // ── P1.5: row shapes + dated/repeat exclusivity ──────────────────
+
+  /// A dated def: trigger 55800 (15:30), timed, manual.
+  DefNode datedDef(String id, {String? name}) => DefNode(
+    IntervalDef(
+      id: id,
+      timerId: timer.id,
+      name: name,
+      color: '#0055ff',
+      durationSeconds: 60,
+      autoFinish: false,
+      triggerTimeSeconds: 55800,
+    ),
+  );
+
+  // Row shapes (P1.5): dated shows the trigger time (winning over its
+  // duration), timed shows the duration, Open shows `open`.
+  testWidgets('row_shapes_time_duration_open', (tester) async {
+    controller.dispose();
+    controller = await buildEditor(
+      IntervalTree([
+        DefNode(
+          IntervalDef(
+            id: 'w',
+            timerId: timer.id,
+            name: 'Wall',
+            color: '#0055ff',
+            durationSeconds: 90,
+            autoFinish: false,
+            triggerTimeSeconds: 55800,
+          ),
+        ),
+        DefNode(
+          IntervalDef(
+            id: 't',
+            timerId: timer.id,
+            name: 'Timed',
+            color: '#0055ff',
+            durationSeconds: 60,
+            autoFinish: false,
+          ),
+        ),
+        DefNode(
+          IntervalDef(
+            id: 'o',
+            timerId: timer.id,
+            name: 'Task',
+            color: '#0055ff',
+            autoFinish: false,
+          ),
+        ),
+      ]),
+    );
+    await pumpEditor(tester);
+
+    // Dated wins: the trigger IS the row's shape even with a duration.
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('chip-w')),
+        matching: find.text('15:30'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('chip-w')),
+        matching: find.text('1m 30s'),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('chip-t')),
+        matching: find.text('1m'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('chip-o')),
+        matching: find.text('open'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  // Duration OFF end-to-end: the editor hides the setter, the commit
+  // saves Open (null duration, auto-finish false), and the row flips
+  // from the duration to `open`.
+  testWidgets('duration_off_flow_saves_open_and_row_shows_open',
+      (tester) async {
+    await pumpEditor(tester);
+    await tester.tap(find.byKey(const Key('chip-tap-a')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('ie-duration-toggle')));
+    await tester.pump();
+    expect(find.byKey(const Key('ie-hr')), findsNothing); // setter hidden
+
+    await tester.tap(find.byKey(const Key('ie-back')));
+    await tester.pumpAndSettle();
+
+    final a = (controller.tree.nodeById('a') as DefNode).def;
+    expect(a.durationSeconds, isNull); // Open
+    expect(a.autoFinish, isFalse);
+    expect(a.name, 'break'); // the label survived
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('chip-a')),
+        matching: find.text('open'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('chip-a')),
+        matching: find.text('1m'),
+      ),
+      findsNothing,
+    );
+  });
+
+  // Time ON end-to-end: the HH|MM setter writes triggerTimeSeconds and
+  // the row flips from the duration to the wall time.
+  testWidgets('time_on_flow_shows_time_in_row', (tester) async {
+    useTallSurface(tester); // Time ON outgrows the default window
+    await pumpEditor(tester);
+    await tester.tap(find.byKey(const Key('chip-tap-a')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('ie-time-toggle')));
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('ie-time-hh')), '15');
+    await tester.enterText(find.byKey(const Key('ie-time-mm')), '30');
+
+    await tester.tap(find.byKey(const Key('ie-back')));
+    await tester.pumpAndSettle();
+
+    final a = (controller.tree.nodeById('a') as DefNode).def;
+    expect(a.triggerTimeSeconds, 55800);
+    expect(a.durationSeconds, 60); // kept — the row just prefers the time
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('chip-a')),
+        matching: find.text('15:30'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('chip-a')),
+        matching: find.text('1m'),
+      ),
+      findsNothing,
+    );
+  });
+
+  // Dated/repeat exclusivity at the drop: a dated subtree never lands
+  // inside a repeating group — the drop is refused with the reason on
+  // screen and the tree stays put.
+  testWidgets('drag_dated_into_repeating_group_is_blocked', (tester) async {
+    controller.dispose();
+    controller = await buildEditor(
+      IntervalTree([
+        datedDef('w', name: 'Wall'),
+        GroupNode(
+          GroupDef(id: 'g1', timerId: timer.id, repeatCount: 3),
+          [def('b')],
+        ),
+      ]),
+    );
+    await pumpEditor(tester);
+
+    final bTop = tester.getTopLeft(find.byKey(const Key('chip-b'))).dy;
+    await dragRowTo(
+      tester,
+      'chip-w',
+      Offset(tester.getCenter(find.byKey(const Key('chip-w'))).dx, bTop + 8),
+    );
+
+    expect(controller.tree.toDebugString(), 'def:w | group:g1[3]{def:b}');
+    await tester.pump(const Duration(milliseconds: 300)); // SnackBar in
+    expect(find.text(kDatedInRepeatingGroupReason), findsOneWidget);
+
+    // Drain the SnackBar's display timer so the test ends clean.
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('drag-slot')), findsNothing);
+  });
+
+  // The allowed side: a dated interval drops into a NON-repeating group
+  // — the move lands and no reason is shown.
+  testWidgets('drag_dated_into_plain_group_is_allowed', (tester) async {
+    controller.dispose();
+    controller = await buildEditor(
+      IntervalTree([
+        datedDef('w', name: 'Wall'),
+        GroupNode(
+          GroupDef(id: 'g1', timerId: timer.id, repeatCount: 1),
+          [def('b')],
+        ),
+      ]),
+    );
+    await pumpEditor(tester);
+
+    final bTop = tester.getTopLeft(find.byKey(const Key('chip-b'))).dy;
+    await dragRowTo(
+      tester,
+      'chip-w',
+      Offset(tester.getCenter(find.byKey(const Key('chip-w'))).dx, bTop + 8),
+    );
+
+    expect(controller.tree.toDebugString(), 'group:g1[1]{def:w | def:b}');
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text(kDatedInRepeatingGroupReason), findsNothing);
+  });
+
+  // Dated/repeat exclusivity at the repeat modal: a dated descendant
+  // pins the stepper at 1 with the reason inline — OK keeps repeat 1.
+  testWidgets('repeat_modal_blocks_group_with_dated_descendant',
+      (tester) async {
+    controller.dispose();
+    controller = await buildEditor(
+      IntervalTree([
+        GroupNode(
+          GroupDef(id: 'g1', timerId: timer.id, repeatCount: 1),
+          [datedDef('w', name: 'Wall'), def('b')],
+        ),
+      ]),
+    );
+    await pumpEditor(tester);
+
+    await tester.tap(find.byKey(const Key('bracket-g1')));
+    await tester.pumpAndSettle();
+
+    final modal = find.byKey(const Key('repeat-modal'));
+    expect(modal, findsOneWidget);
+    expect(
+      find.descendant(
+        of: modal,
+        matching: find.byKey(const Key('repeat-blocked-reason')),
+      ),
+      findsOneWidget,
+      reason: 'the reason shows inline at the stepper',
+    );
+    expect(
+      find.descendant(
+        of: modal,
+        matching: find.text(kRepeatingGroupWithDatedReason),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      tester.widget<IconButton>(find.byKey(const Key('repeat-plus'))).onPressed,
+      isNull,
+      reason: 'counts above 1 are refused while a dated def lives here',
+    );
+    expect(
+      tester.widget<Text>(find.byKey(const Key('repeat-value'))).data,
+      '1',
+    );
+
+    await tester.tap(find.byKey(const Key('repeat-ok')));
+    await tester.pumpAndSettle();
+    expect(modal, findsNothing);
+    expect(
+      (controller.tree.nodeById('g1') as GroupNode).group.repeatCount,
+      1,
+    );
+  });
+
+  // The allowed side: a group with NO dated interval repeats freely —
+  // no reason, + enabled, the count lands on confirm.
+  testWidgets('repeat_modal_allows_group_without_dated', (tester) async {
+    await pumpEditor(tester); // fixture: g1 repeat 3 {b}, undated
+
+    await tester.tap(find.byKey(const Key('bracket-g1')));
+    await tester.pumpAndSettle();
+
+    final modal = find.byKey(const Key('repeat-modal'));
+    expect(modal, findsOneWidget);
+    expect(find.byKey(const Key('repeat-blocked-reason')), findsNothing);
+    expect(
+      tester.widget<IconButton>(find.byKey(const Key('repeat-plus'))).onPressed,
+      isNotNull,
+    );
+
+    await tester.tap(find.byKey(const Key('repeat-plus')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('repeat-ok')));
+    await tester.pumpAndSettle();
+
+    expect(modal, findsNothing);
+    expect(
+      (controller.tree.nodeById('g1') as GroupNode).group.repeatCount,
+      4,
+    );
+  });
 }

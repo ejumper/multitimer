@@ -54,4 +54,15 @@ void main() {
     expect(formatPlannedParts(const Duration(hours: 100)), ('100', '00', '00'));
     expect(formatPlannedParts(Duration.zero), ('00', '00', '00'));
   });
+
+  // 7. Wall time — HH:MM zero-padded from seconds-since-midnight, clamped
+  //    into the 0..86399 day range (never wraps, never negative).
+  test('format_wall_time_pads_and_clamps', () {
+    expect(formatWallTime(55800), '15:30'); // 15:30 exactly
+    expect(formatWallTime(0), '00:00');
+    expect(formatWallTime(65), '00:01'); // sub-minute truncates
+    expect(formatWallTime(86399), '23:59'); // last second of the day
+    expect(formatWallTime(-5), '00:00');
+    expect(formatWallTime(90000), '23:59'); // past midnight → clamped
+  });
 }

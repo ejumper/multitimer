@@ -9,20 +9,38 @@ import 'theme.dart';
 /// divider and a full-width OK — N = total passes, floored at 1 (1 = play
 /// once). Returns the confirmed count, or null when dismissed without OK
 /// (barrier tap / back) — the caller then leaves the group untouched.
-Future<int?> showRepeatModal(BuildContext context, {required int initial}) {
+///
+/// [blockedAboveOneReason] (P1.5 exclusivity): non-null when the group
+/// contains a dated interval — counts above 1 are not offered (the +
+/// button is disabled) and the reason shows inline, so the v2 rule
+/// "dated intervals never repeat" is enforced AT the stepper.
+Future<int?> showRepeatModal(
+  BuildContext context, {
+  required int initial,
+  String? blockedAboveOneReason,
+}) {
   return showDialog<int>(
     context: context,
     barrierColor: Colors.transparent, // effect only behind the menu
-    builder: (context) => _RepeatModal(initial: initial),
+    builder: (context) => _RepeatModal(
+      initial: initial,
+      blockedAboveOneReason: blockedAboveOneReason,
+    ),
   );
 }
 
 /// The dialog body — a small stateful widget owning the live count, so the
 /// stepper survives its own setState rebuilds.
 class _RepeatModal extends StatefulWidget {
-  const _RepeatModal({required this.initial});
+  const _RepeatModal({
+    required this.initial,
+    required this.blockedAboveOneReason,
+  });
 
   final int initial;
+
+  /// See [showRepeatModal] — null = repeats allowed (the normal stepper).
+  final String? blockedAboveOneReason;
 
   @override
   State<_RepeatModal> createState() => _RepeatModalState();
@@ -51,14 +69,23 @@ class _RepeatModalState extends State<_RepeatModal> {
     if (key == LogicalKeyboardKey.arrowLeft ||
         key == LogicalKeyboardKey.arrowRight) {
       final step = (ctrl ? 10 : 1) * (key == LogicalKeyboardKey.arrowRight ? 1 : -1);
-      setState(() => _count = (_count + step).clamp(1, 9999));
+      // Blocked (P1.5): counts above 1 are never offered — the arrows
+      // match the disabled + button.
+      setState(() {
+        final next = (_count + step).clamp(1, 9999);
+        if (!_blocked || next <= 1) _count = next;
+      });
       return KeyEventResult.handled;
     }
     return null; // Enter -> shared model (OK); Escape -> DismissIntent
   }
 
   /// Live pass count; never drops below 1.
-  late int _count = widget.initial < 1 ? 1 : widget.initial;
+  late int _count =
+      _blocked && widget.initial > 1 ? 1 : (widget.initial < 1 ? 1 : widget.initial);
+
+  /// Whether above-1 counts are refused (a dated interval lives here).
+  bool get _blocked => widget.blockedAboveOneReason != null;
 
   @override
   Widget build(BuildContext context) {
@@ -101,10 +128,26 @@ class _RepeatModalState extends State<_RepeatModal> {
                   IconButton(
                     key: const Key('repeat-plus'),
                     icon: const Icon(Icons.add),
-                    onPressed: () => setState(() => _count++),
+                    // Disabled while blocked (P1.5): the reason below
+                    // explains why the count stays at 1.
+                    onPressed: _blocked
+                        ? null
+                        : () => setState(() => _count++),
                   ),
                 ],
               ),
+              if (_blocked) ...[
+                const SizedBox(height: 4),
+                Text(
+                  widget.blockedAboveOneReason!,
+                  key: const Key('repeat-blocked-reason'),
+                  style: const TextStyle(
+                    fontFamily: AppFonts.ui,
+                    fontSize: 12,
+                    color: AppColors.danger,
+                  ),
+                ),
+              ],
               const Divider(),
               FocusRing(
                 focused: _nav.isFocused('repeat-ok'),

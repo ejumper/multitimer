@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:planner/editor_controller.dart';
 import 'package:planner/interval_editor.dart';
+import 'package:planner/theme.dart';
 import 'package:planner_engine/planner_engine.dart';
 
 import 'fakes.dart';
@@ -191,7 +192,9 @@ void main() {
     await tester.tap(find.byKey(const Key('ie-autofinish')));
     await tester.pump();
 
-    // Swap the end alert through the selector and come back.
+    // Swap the end alert through the selector and come back. The editor
+    // is taller now (P1.5 toggles) — scroll the alert row into view.
+    await tester.ensureVisible(find.byKey(const Key('ie-alert-row')));
     await tester.tap(find.byKey(const Key('ie-alert-row')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('as-row-alpha.mp3')));
@@ -199,6 +202,8 @@ void main() {
     await tester.tap(find.byKey(const Key('as-back')));
     await tester.pumpAndSettle();
 
+    // The alert row was scrolled into view above — bring the header back.
+    await tester.ensureVisible(find.byKey(const Key('ie-back')));
     await tester.tap(find.byKey(const Key('ie-back')));
     await tester.pumpAndSettle();
 
@@ -264,5 +269,236 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
     expect(defOf('a').name, 'Focus');
+  });
+
+  // ── P1.5: Duration / Time toggles ─────────────────────────────────
+
+  /// With Time ON the editor's content runs past the default 600px test
+  /// window: focusing a low HH|MM box starts a caret-reveal scroll
+  /// activity that stays live across the test's bounded pumps, leaving
+  /// the scroll view ignoring pointers (the back tap then misses). A
+  /// taller surface keeps the content in range — same accommodation as
+  /// editor_screen_test's `useTallSurface`.
+  void useTallSurface(WidgetTester tester) {
+    tester.view.physicalSize = const Size(800, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+  }
+
+  // The two new toggles sit below Auto-finish in order, with the
+  // hard-coded defaults: Duration ON (its setter visible), Time OFF (its
+  // setter hidden), Auto-finish OFF.
+  testWidgets('toggles_below_auto_finish_with_p15_defaults', (tester) async {
+    await pumpEditor(tester, defId: 'a');
+
+    final autoFinishY =
+        tester.getTopLeft(find.byKey(const Key('ie-autofinish'))).dy;
+    final durationY =
+        tester.getTopLeft(find.byKey(const Key('ie-duration-toggle'))).dy;
+    final timeY =
+        tester.getTopLeft(find.byKey(const Key('ie-time-toggle'))).dy;
+    expect(
+      durationY,
+      greaterThan(autoFinishY),
+      reason: 'Duration toggle below Auto-finish',
+    );
+    expect(
+      timeY,
+      greaterThan(durationY),
+      reason: 'Time toggle below Duration',
+    );
+
+    Switch toggleOf(String key) =>
+        tester.widget<Switch>(find.byKey(Key(key)));
+    expect(toggleOf('ie-duration-toggle').value, isTrue); // ON default
+    expect(toggleOf('ie-time-toggle').value, isFalse); // OFF default
+    expect(toggleOf('ie-autofinish').value, isFalse);
+
+    // Duration ON shows the hr/min/sec setter; Time OFF shows no HH|MM.
+    expect(find.byKey(const Key('ie-hr')), findsOneWidget);
+    expect(find.byKey(const Key('ie-time-hh')), findsNothing);
+  });
+
+  // Duration OFF hides the duration editor and the commit writes Open:
+  // null duration, auto-finish false, order-triggered (no trigger).
+  testWidgets('duration_off_hides_editor_and_saves_open', (tester) async {
+    controller.dispose();
+    controller = await buildEditor(const IntervalTree([]));
+    await pumpEditor(tester);
+
+    await tester.tap(find.byKey(const Key('ie-duration-toggle')));
+    await tester.pump();
+    expect(find.byKey(const Key('ie-hr')), findsNothing);
+    expect(find.byKey(const Key('ie-duration-hint')), findsNothing);
+    expect(
+      find.byKey(const Key('ie-time-toggle')),
+      findsOneWidget,
+      reason: 'the Time toggle is independent of Duration',
+    );
+
+    await tester.enterText(find.byKey(const Key('ie-label')), 'Read');
+    await tester.tap(find.byKey(const Key('ie-back')));
+    await tester.pumpAndSettle();
+
+    expect(controller.tree.allIds.length, 1);
+    final def = (controller.tree.roots.single as DefNode).def;
+    expect(def.name, 'Read');
+    expect(def.durationSeconds, isNull); // Open
+    expect(def.autoFinish, isFalse);
+    expect(def.triggerTimeSeconds, isNull); // order-triggered
+  });
+
+  // Auto-finish grays out and is FORCED OFF when Duration goes OFF (the
+  // engine contract); re-enabling Duration leaves it off — the user
+  // re-enables.
+  testWidgets('duration_off_grays_and_forces_auto_finish_off',
+      (tester) async {
+    await pumpEditor(tester, defId: 'a'); // break / 60s / manual
+
+    await tester.tap(find.byKey(const Key('ie-autofinish')));
+    await tester.pump();
+    expect(
+      tester.widget<Switch>(find.byKey(const Key('ie-autofinish'))).value,
+      isTrue,
+    );
+
+    await tester.tap(find.byKey(const Key('ie-duration-toggle')));
+    await tester.pump();
+
+    final af = tester.widget<Switch>(find.byKey(const Key('ie-autofinish')));
+    expect(af.value, isFalse); // forced off
+    expect(af.onChanged, isNull); // disabled (grayed out)
+    final title = tester.widget<Text>(find.text('Auto-finish'));
+    expect(title.style!.color, AppColors.dimmed); // grayed title
+    expect(find.byKey(const Key('ie-hr')), findsNothing); // setter hidden
+
+    await tester.tap(find.byKey(const Key('ie-duration-toggle')));
+    await tester.pump();
+    final restored =
+        tester.widget<Switch>(find.byKey(const Key('ie-autofinish')));
+    expect(restored.value, isFalse); // NOT resurrected
+    expect(restored.onChanged, isNotNull); // interactive again
+  });
+
+  // The HH|MM setter writes seconds since midnight — 15:30 → 55800 —
+  // with NO seconds box; the live hint shows the wall time.
+  testWidgets('time_toggle_writes_trigger_seconds', (tester) async {
+    useTallSurface(tester);
+    await pumpEditor(tester, defId: 'a'); // order-triggered
+
+    expect(find.byKey(const Key('ie-time-hh')), findsNothing);
+    await tester.tap(find.byKey(const Key('ie-time-toggle')));
+    await tester.pump();
+    expect(find.byKey(const Key('ie-time-hh')), findsOneWidget);
+    expect(find.byKey(const Key('ie-time-mm')), findsOneWidget);
+    expect(
+      find.byKey(const Key('ie-time-sec')),
+      findsNothing,
+      reason: 'wall times have no seconds box (decided default)',
+    );
+
+    await tester.enterText(find.byKey(const Key('ie-time-hh')), '15');
+    await tester.enterText(find.byKey(const Key('ie-time-mm')), '30');
+    await tester.pump();
+    expect(find.text('15:30'), findsOneWidget); // the live hint
+
+    await tester.tap(find.byKey(const Key('ie-back')));
+    await tester.pumpAndSettle();
+
+    final def = defOf('a');
+    expect(def.triggerTimeSeconds, 55800);
+    expect(def.durationSeconds, 60); // untouched
+    expect(def.name, 'break');
+  });
+
+  // Dated/repeat exclusivity at the Time toggle: turning Time ON inside
+  // a repeating group is refused with the reason on screen — the toggle
+  // stays OFF and the def stays order-triggered.
+  testWidgets('time_on_blocked_inside_repeating_group', (tester) async {
+    controller.dispose();
+    controller = await buildEditor(
+      IntervalTree([
+        GroupNode(
+          GroupDef(id: 'g1', timerId: timer.id, repeatCount: 3),
+          [
+            DefNode(
+              IntervalDef(
+                id: 'a',
+                timerId: timer.id,
+                name: 'break',
+                color: '#4800ff',
+                durationSeconds: 60,
+                autoFinish: false,
+                endAlertSoundFile: 'ding.mp3',
+              ),
+            ),
+          ],
+        ),
+      ]),
+    );
+    await pumpEditor(tester, defId: 'a');
+
+    await tester.tap(find.byKey(const Key('ie-time-toggle')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300)); // SnackBar in
+    expect(find.text(kDatedInRepeatingGroupReason), findsOneWidget);
+    expect(
+      tester.widget<Switch>(find.byKey(const Key('ie-time-toggle'))).value,
+      isFalse,
+    );
+    expect(find.byKey(const Key('ie-time-hh')), findsNothing);
+
+    await tester.ensureVisible(find.byKey(const Key('ie-back')));
+    await tester.tap(find.byKey(const Key('ie-back')));
+    await tester.pumpAndSettle();
+    expect(defOf('a').triggerTimeSeconds, isNull);
+
+    // Drain the SnackBar's display timer so the test ends clean.
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+  });
+
+  // The allowed side: a dated interval in a NON-repeating group is fine
+  // — Time toggles ON there and the commit saves the trigger.
+  testWidgets('time_on_allowed_in_plain_group', (tester) async {
+    useTallSurface(tester);
+    controller.dispose();
+    controller = await buildEditor(
+      IntervalTree([
+        GroupNode(
+          GroupDef(id: 'g1', timerId: timer.id, repeatCount: 1),
+          [
+            DefNode(
+              IntervalDef(
+                id: 'a',
+                timerId: timer.id,
+                name: 'break',
+                color: '#4800ff',
+                durationSeconds: 60,
+                autoFinish: false,
+                endAlertSoundFile: 'ding.mp3',
+              ),
+            ),
+          ],
+        ),
+      ]),
+    );
+    await pumpEditor(tester, defId: 'a');
+
+    await tester.tap(find.byKey(const Key('ie-time-toggle')));
+    await tester.pump();
+    expect(find.byKey(const Key('ie-time-hh')), findsOneWidget);
+    expect(find.text(kDatedInRepeatingGroupReason), findsNothing);
+
+    await tester.enterText(find.byKey(const Key('ie-time-hh')), '07');
+    await tester.enterText(find.byKey(const Key('ie-time-mm')), '45');
+    await tester.tap(find.byKey(const Key('ie-back')));
+    await tester.pumpAndSettle();
+
+    expect(defOf('a').triggerTimeSeconds, 27900); // 07:45
+    expect(
+      (controller.tree.nodeById('g1') as GroupNode).group.repeatCount,
+      1,
+    );
   });
 }
