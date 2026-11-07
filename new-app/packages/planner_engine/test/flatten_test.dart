@@ -223,4 +223,19 @@ void main() {
     expect(totalPlanned(const []), Duration.zero);
   });
 
+
+  // v2 P1.4: dated intervals never live in repeating groups (v2 rule) —
+  // the engine refuses to flatten them.
+  test('dated_in_repeating_group_refuses_to_flatten', () {
+    final t = tree([
+      groupOf('g', [def('a', triggerTime: 9 * 3600)], repeat: 2),
+    ]);
+    expect(() => flatten(t), throwsStateError);
+    // ...but a dated interval in a NON-repeating group is fine.
+    final ok = tree([
+      groupOf('g2', [def('b', triggerTime: 9 * 3600)], repeat: 1),
+    ]);
+    expect(flatten(ok), hasLength(1));
+  });
+
 }

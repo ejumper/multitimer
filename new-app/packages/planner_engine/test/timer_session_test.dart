@@ -29,6 +29,7 @@ void main() {
     String defId = 'd',
     String color = '#0055ff',
     String? alert,
+    int? triggerTime,
   }) => IntervalInstance(
     ordinal: ordinal,
     defId: defId,
@@ -37,6 +38,7 @@ void main() {
     durationSeconds: seconds,
     autoFinish: autoFinish,
     endAlertSoundFile: alert,
+    triggerTimeSeconds: triggerTime,
   );
 
   Duration secs(int n) => Duration(seconds: n);
@@ -1347,6 +1349,242 @@ void main() {
     expect(s.toggleMark(-1), isNull);
     expect(s.toggleMark(1), isNull);
     expect(s.completedDefIds, isEmpty);
+  });
+
+
+  // ── v2 P1.4: walls — interrupt & resume (the matrix) ──────────────
+  // t0 is 08:00 UTC; wall day = t0's day; a wall at 9*3600 fires at 09:00.
+
+  test('wall_interrupts_mid_flight_and_resumes_where_it_left_off', () {
+    final s = session([
+      inst(0, seconds: 3600, triggerTime: 9 * 3600, defId: 'm', name: 'meet'),
+      inst(1, seconds: 7200, defId: 's', name: 'study'),
+    ]);
+    s.start(); // study runs (the chain never lands on walls)
+    expect(s.snapshot(clock.current).ordinal, 1);
+    warpBy(secs(3600)); // 09:00 — the wall's time
+    s.settle(clock.current);
+    var snap = s.snapshot(clock.current);
+    expect(snap.state, SessionState.running);
+    expect(snap.ordinal, 0); // the meeting took over
+    expect(snap.suspendedOrdinal, 1); // study is suspended, not ended
+    expect(snap.suspendedRemaining, secs(3600));
+    expect(sink.events, isEmpty); // suspension is NOT logged
+
+    warpBy(secs(3600)); // 10:00 — the meeting's hour is up
+    s.settle(clock.current);
+    snap = s.snapshot(clock.current);
+    expect(snap.state, SessionState.running);
+    expect(snap.ordinal, 1); // back to study...
+    expect(snap.remaining, secs(3600)); // ...with exactly what was left
+    expect(snap.suspendedOrdinal, isNull);
+  });
+
+  test('wall_resumes_a_paused_item_paused', () {
+    final s = session([
+      inst(0, seconds: 3600, triggerTime: 9 * 3600, defId: 'm'),
+      inst(1, seconds: 7200, autoFinish: false, defId: 's'),
+    ]);
+    s.start();
+    warpBy(secs(1800)); // 08:30 — paused mid-study
+    s.pause();
+    warpBy(secs(1800)); // 09:00 — the wall pulls the chain in
+    s.settle(clock.current);
+    expect(s.snapshot(clock.current).ordinal, 0);
+    warpBy(secs(3600));
+    s.settle(clock.current);
+    final snap = s.snapshot(clock.current);
+    expect(snap.state, SessionState.paused); // your pause was not overridden
+    expect(snap.ordinal, 1);
+    expect(snap.remaining, secs(5400)); // frozen at 1h30m
+  });
+
+  test('wall_takeover_resolves_a_held_item_completed', () {
+    final s = session([
+      inst(0, seconds: 3600, triggerTime: 9 * 3600, defId: 'm'),
+      inst(1, seconds: 60, autoFinish: false, defId: 'x'),
+    ]);
+    s.start(); // x runs first (the wall is not "next work")
+    warpBy(secs(60));
+    s.settle(clock.current); // x holds at zero
+    expect(s.snapshot(clock.current).state, SessionState.awaitingAdvance);
+    warpBy(secs(3540)); // 09:00
+    s.settle(clock.current);
+    expect(s.snapshot(clock.current).ordinal, 0); // the wall took over
+    expect(s.isCompleted('x'), isTrue); // the hold auto-resolved completed
+    warpBy(secs(3600));
+    s.settle(clock.current);
+    expect(s.snapshot(clock.current).state, SessionState.notStarted);
+  });
+
+  test('later_wall_cuts_a_running_wall', () {
+    final s = session([
+      inst(0, seconds: 7200, triggerTime: 9 * 3600, defId: 'a'),
+      inst(1, seconds: 1800, triggerTime: 10 * 3600, defId: 'b'),
+      inst(2, seconds: 60, defId: 'p'),
+    ]);
+    s.start(); // p runs, then the run waits (only walls remain)
+    warpBy(secs(60));
+    s.settle(clock.current);
+    expect(s.snapshot(clock.current).state, SessionState.awaitingWall);
+    warpBy(secs(3540)); // 09:00 — wall a fires
+    s.settle(clock.current);
+    expect(s.snapshot(clock.current).ordinal, 0);
+    warpBy(secs(3600)); // 10:00 — wall b's time arrives live
+    s.settle(clock.current);
+    final cut = sink.events.firstWhere((e) => e.defId == 'a');
+    expect(cut.terminal, TerminalState.cut); // later cuts earlier
+    expect(cut.completed, isFalse);
+    expect(s.snapshot(clock.current).ordinal, 1); // b runs
+    warpBy(secs(1800));
+    s.settle(clock.current);
+    expect(s.snapshot(clock.current).state, SessionState.notStarted);
+  });
+
+  test('catch_up_queued_walls_fire_in_time_order', () {
+    final s = session([
+      inst(0, seconds: 3600, triggerTime: 9 * 3600, defId: 'a'),
+      inst(1, seconds: 1800, triggerTime: 9 * 3600 + 1800, defId: 'b'),
+      inst(2, seconds: 60, defId: 'p'),
+    ]);
+    warpBy(secs(2 * 3600)); // it is 10:00 — both walls are already past
+    s.start();
+    s.settle(clock.current);
+    // Wall a (the earlier) runs first; wall b QUEUES (its time passed
+    // before a began) instead of cutting it.
+    expect(s.snapshot(clock.current).ordinal, 0);
+    expect(s.snapshot(clock.current).late, isTrue); // flagged late
+    warpBy(secs(3600)); // a ends at 11:00
+    s.settle(clock.current);
+    expect(s.snapshot(clock.current).ordinal, 1); // b's turn now
+    warpBy(secs(1800));
+    s.settle(clock.current);
+    expect(s.snapshot(clock.current).ordinal, 2); // then the plan
+    expect(s.snapshot(clock.current).remaining, secs(60));
+  });
+
+  test('pending_wall_waits_with_a_countdown_at_run_end', () {
+    final s = session([
+      inst(0, seconds: 1800, triggerTime: 9 * 3600, defId: 'm', name: 'meet'),
+      inst(1, seconds: 60, defId: 'p'),
+    ]);
+    s.start();
+    warpBy(secs(60));
+    s.settle(clock.current); // p done at 08:01 — only the wall is left
+    final waiting = s.snapshot(clock.current);
+    expect(waiting.state, SessionState.awaitingWall);
+    expect(waiting.ordinal, 0);
+    expect(waiting.currentLabel, 'meet');
+    expect(waiting.remaining, secs(59 * 60)); // the countdown TO 09:00
+
+    warpBy(secs(59 * 60)); // 09:00 — the wall fires on its own
+    s.settle(clock.current);
+    expect(s.snapshot(clock.current).state, SessionState.running);
+    warpBy(secs(1800));
+    s.settle(clock.current);
+    expect(s.snapshot(clock.current).state, SessionState.notStarted);
+  });
+
+  test('open_wall_alarms_and_holds_at_its_trigger', () {
+    final s = session([
+      inst(0, seconds: null, autoFinish: false,
+          triggerTime: 9 * 3600, defId: 'go'),
+      inst(1, seconds: 60, defId: 'p'),
+    ]);
+    s.start();
+    warpBy(secs(60));
+    s.settle(clock.current); // p done -> waiting on the wall
+    warpBy(secs(59 * 60)); // 09:00
+    s.settle(clock.current);
+    // "Leaving at 15:00": the wall's time = alarm + hold.
+    expect(s.snapshot(clock.current).state, SessionState.awaitingAdvance);
+    expect(s.snapshot(clock.current).ordinal, 0);
+    expect(sink.events.last.defId, 'go');
+    expect(sink.events.last.terminal, TerminalState.done);
+  });
+
+  test('sleep_past_the_trigger_fires_late_on_the_next_settle', () {
+    final s = session([
+      inst(0, seconds: 1800, triggerTime: 9 * 3600, defId: 'm'),
+      inst(1, seconds: 7200, defId: 'p'),
+    ]);
+    s.start(); // p: 08:00 -> 10:00
+    warpBy(secs(3 * 3600)); // the laptop slept until 11:00
+    s.settle(clock.current); // one settle sees everything
+    final snap = s.snapshot(clock.current);
+    expect(snap.ordinal, 0); // the wall fires (it cut nothing — p was
+    expect(snap.late, isTrue); // already due before p would end)
+    expect(snap.remaining, secs(1800)); // full remaining, from NOW
+    expect(snap.suspendedOrdinal, 1);
+    expect(snap.suspendedRemaining, secs(3600)); // p froze 1h in
+  });
+
+  test('checking_the_detour_wall_returns_early', () {
+    final s = session([
+      inst(0, seconds: 3600, triggerTime: 9 * 3600, defId: 'm'),
+      inst(1, seconds: 7200, defId: 's'),
+    ]);
+    s.start();
+    warpBy(secs(3600)); // 09:00 — the meeting took over
+    s.settle(clock.current);
+    expect(s.snapshot(clock.current).ordinal, 0);
+    expect(s.toggleMark(0), isTrue); // "the meeting is done" — back to study
+    final snap = s.snapshot(clock.current);
+    expect(snap.ordinal, 1);
+    expect(snap.remaining, secs(3600));
+  });
+
+  test('reset_during_a_detour_logs_both_halves_exactly_once', () {
+    final s = session([
+      inst(0, seconds: 3600, triggerTime: 9 * 3600, defId: 'm'),
+      inst(1, seconds: 7200, defId: 's'),
+    ]);
+    s.start();
+    warpBy(secs(3600));
+    s.settle(clock.current); // the detour is live
+    s.reset();
+    // The wall (never finished) and the suspended study both close as
+    // skipped — exactly-once holds even for abandoned detours.
+    expect(sink.events.length, 2);
+    expect(
+      sink.events.map((e) => e.terminal).toSet(),
+      {TerminalState.skipped},
+    );
+    expect(s.snapshot(clock.current).state, SessionState.notStarted);
+  });
+
+  test('checking_the_waiting_wall_moves_the_wait_along', () {
+    final s = session([
+      inst(0, seconds: 1800, triggerTime: 9 * 3600, defId: 'a'),
+      inst(1, seconds: 1800, triggerTime: 10 * 3600, defId: 'b'),
+      inst(2, seconds: 60, defId: 'p'),
+    ]);
+    s.start();
+    warpBy(secs(60));
+    s.settle(clock.current); // waiting on a
+    expect(s.snapshot(clock.current).ordinal, 0);
+    s.toggleMark(0); // check a off while waiting
+    final snap = s.snapshot(clock.current);
+    expect(snap.state, SessionState.awaitingWall);
+    expect(snap.ordinal, 1); // the wait moved to b
+    expect(snap.remaining, secs(119 * 60)); // countdown to 10:00
+  });
+
+  test('jump_never_skips_pending_walls', () {
+    final s = session([
+      inst(0, seconds: 60, defId: 'p1'),
+      inst(1, seconds: 1800, triggerTime: 9 * 3600, defId: 'm'),
+      inst(2, seconds: 60, defId: 'p2'),
+    ]);
+    s.start();
+    s.jumpTo(2); // jump over the wall's POSITION
+    expect(
+      sink.events.where((e) => e.defId == 'm'),
+      isEmpty, // the wall is still pending — not skipped work
+    );
+    warpBy(secs(3600)); // 09:00 — it still fires (it cuts p2 short)
+    s.settle(clock.current);
+    expect(s.snapshot(clock.current).ordinal, 1);
   });
 
 }

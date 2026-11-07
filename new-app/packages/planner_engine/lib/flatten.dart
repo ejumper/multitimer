@@ -127,6 +127,18 @@ List<IntervalInstance> flatten(IntervalTree tree) {
             ),
           );
         case GroupNode(:final group, :final children):
+          // v2 P1.4: walls (dated intervals) inside a REPEATING group are
+          // authoring-forbidden (P1.5 enforces it); the engine refuses to
+          // flatten them rather than produce wall semantics that cannot
+          // mean anything ("which pass does the wall cut?").
+          if (group.repeatCount > 1 &&
+              IntervalTree(children)
+                  .allNodes
+                  .any((n) => n is DefNode && n.def.isDated)) {
+            throw StateError(
+              'flatten: dated interval inside repeating group ${group.id}',
+            );
+          }
           for (var pass = 0; pass < group.repeatCount; pass++) {
             walk(children);
           }

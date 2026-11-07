@@ -196,6 +196,7 @@ class _BoardScreenState extends State<BoardScreen> {
       case SessionState.running:
       case SessionState.paused:
       case SessionState.awaitingAdvance:
+      case SessionState.awaitingWall: // v2 P1.4: the countdown to the wall
         return _RunReadout(snapshot: snapshot);
     }
   }
@@ -595,6 +596,8 @@ class _BoardScreenState extends State<BoardScreen> {
       case SessionState.paused:
         controller.resume();
       case SessionState.awaitingAdvance:
+        controller.skipNext();
+      case SessionState.awaitingWall: // v2 P1.4: skip the waited wall
         controller.skipNext();
     }
   }

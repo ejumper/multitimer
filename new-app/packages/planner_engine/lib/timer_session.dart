@@ -34,6 +34,12 @@ enum SessionState {
   /// reached zero and holds AT ZERO until the user advances. Overshoot is
   /// absorbed here — the chain never cascades past a manual instance.
   awaitingAdvance,
+
+  /// v2 P1.4: the run's plan is complete but a wall (dated interval) is
+  /// still pending — the run waits, counting down to its trigger. The wall
+  /// fires on its own; after it, the run is finished. (The North Star's
+  /// "chain finished early before a wall → paused, counting down to it".)
+  awaitingWall,
 }
 
 /// Immutable projection of the session cursor at one instant.
@@ -45,6 +51,9 @@ class TimerSnapshot {
     required this.remaining,
     required this.totalRemaining,
     required this.totalPlanned,
+    this.late = false,
+    this.suspendedOrdinal,
+    this.suspendedRemaining,
   });
 
   /// Lifecycle state at the projected instant.
@@ -68,6 +77,17 @@ class TimerSnapshot {
   /// Sum of all instances' planned durations — always shown, even fresh.
   final Duration totalPlanned;
 
+  /// v2 P1.4: the current wall fired after its trigger (late flag for the
+  /// UI badge — "you're late to this").
+  final bool late;
+
+  /// v2 P1.4: the occurrence a wall interrupted (suspended, not ended —
+  /// it resumes when the wall completes); null when nothing is suspended.
+  final int? suspendedOrdinal;
+
+  /// The suspended occurrence's frozen remaining; null with [suspendedOrdinal].
+  final Duration? suspendedRemaining;
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -77,7 +97,10 @@ class TimerSnapshot {
           other.currentLabel == currentLabel &&
           other.remaining == remaining &&
           other.totalRemaining == totalRemaining &&
-          other.totalPlanned == totalPlanned;
+          other.totalPlanned == totalPlanned &&
+          other.late == late &&
+          other.suspendedOrdinal == suspendedOrdinal &&
+          other.suspendedRemaining == suspendedRemaining;
 
   @override
   int get hashCode => Object.hash(
@@ -87,13 +110,17 @@ class TimerSnapshot {
     remaining,
     totalRemaining,
     totalPlanned,
+    late,
+    suspendedOrdinal,
+    suspendedRemaining,
   );
 
   @override
   String toString() =>
       'TimerSnapshot($state, ordinal=${ordinal ?? '-'}, '
       '${currentLabel ?? '<unnamed>'}, remaining=$remaining, '
-      'totalRemaining=$totalRemaining, totalPlanned=$totalPlanned)';
+      'totalRemaining=$totalRemaining, totalPlanned=$totalPlanned, '
+      'late=$late, suspended=$suspendedOrdinal/$suspendedRemaining)';
 }
 
 /// The timer execution engine: plays a flattened schedule as a run with
@@ -104,7 +131,11 @@ class TimerSession {
     List<IntervalInstance> instances, {
     required this.clock,
     required EventSink<InstanceEnded> sink,
-  }) : _instances = instances,
+    DateTime? wallDay,
+  })  :
+        // ignore: prefer_initializing_formals
+        _wallDay = wallDay,
+        _instances = instances,
        // ignore: prefer_initializing_formals
        _sink = sink {
     // v2 P1.3: seed the live marks from the items (the def is the durable
@@ -117,6 +148,67 @@ class TimerSession {
 
   List<IntervalInstance> _instances;
   EventSink<InstanceEnded> _sink;
+
+  // ── v2 P1.4: walls (dated intervals, interrupt & resume) ──────────
+
+  /// The LOCAL calendar day the walls belong to (its date fields define
+  /// the day start). Null = the run's start day (resolved at [start]).
+  /// Passed explicitly by day boards (P4); frame-preserving math keeps
+  /// the engine timezone-free.
+  final DateTime? _wallDay;
+  DateTime? _runWallDay;
+
+  /// Walls that have fired OR otherwise played/ended this run — never
+  /// re-fired. Cleared by [reset]/fresh [start].
+  final Set<int> _firedWalls = {};
+
+  /// Walls that fired after their trigger (the late badge).
+  final Set<int> _lateWalls = {};
+
+  /// The wall-detour suspension (the item the active wall interrupted);
+  /// non-null iff [_activeWall] is. NOT logged at suspension — the item
+  /// is paused-in-time, not ended.
+  _Suspend? _suspended;
+  int? _activeWall;
+
+  bool _isWall(int i) => instances[i].triggerTimeSeconds != null;
+
+  /// The wall's absolute fire instant (day start + time-of-day), or null
+  /// for order-triggered instances.
+  int? _wallMs(int i) {
+    final t = instances[i].triggerTimeSeconds;
+    if (t == null) return null;
+    final d = _wallDay ?? _runWallDay;
+    if (d == null) return null;
+    final dayStart = d.isUtc
+        ? DateTime.utc(d.year, d.month, d.day)
+        : DateTime(d.year, d.month, d.day);
+    return dayStart.millisecondsSinceEpoch + t * 1000;
+  }
+
+  /// The next non-wall ordinal at or after [from] (the chain's flow never
+  /// LANDS on walls — they run only as time-fired detours; jumping may).
+  int? _nextRunnable(int from) {
+    for (var j = from; j < instances.length; j++) {
+      if (!_isWall(j)) return j;
+    }
+    return null;
+  }
+
+  /// The earliest wall that is pending (not fired, not completed).
+  int? _earliestPending(Set<int> fired, Set<int> marked) {
+    var best = -1;
+    var bestMs = 0;
+    for (var j = 0; j < instances.length; j++) {
+      final wms = _wallMs(j);
+      if (wms == null || fired.contains(j) || marked.contains(j)) continue;
+      if (best == -1 || wms < bestMs) {
+        best = j;
+        bestMs = wms;
+      }
+    }
+    return best == -1 ? null : best;
+  }
 
   /// The flattened schedule to play; [IntervalInstance.ordinal] == index.
   List<IntervalInstance> get instances => _instances;
@@ -150,7 +242,24 @@ class TimerSession {
       return false;
     }
     _adjustMs.clear(); // a fresh run replays the plan (tweaks #7 bugfix)
-    _cursor = _Cursor(SessionState.running, 0, 0, nowMs);
+    // v2 P1.4: walls belong to the run's day unless pinned (day boards);
+    // a fresh run re-fires nothing that already played (the fired set is
+    // per-run).
+    _runWallDay ??= clock.now();
+    _firedWalls.clear();
+    _lateWalls.clear();
+    _suspended = null;
+    _activeWall = null;
+    // The chain's flow starts at the first RUNNABLE instance (walls at
+    // the top don't stall the day — they fire at their times as detours).
+    final first = _nextRunnable(0);
+    if (first == null) {
+      final w = _earliestPending(_firedWalls, _completedOrdinals);
+      if (w == null) return false;
+      _cursor = _Cursor(SessionState.awaitingWall, w, 0, nowMs);
+    } else {
+      _cursor = _Cursor(SessionState.running, first, 0, nowMs);
+    }
     return true;
   }
 
@@ -251,12 +360,43 @@ class TimerSession {
       final j = map(e.key);
       if (j != null) newAdjust[j] = (newAdjust[j] ?? 0) + e.value;
     }
+    // v2 P1.3/1.4: the marks and wall state are ordinal-keyed too — they
+    // re-key by the same identity (dropped when their item is gone).
+    Set<int> rekey(Set<int> ordinals) => {
+      for (final o in ordinals)
+        if (map(o) != null) map(o)!,
+    };
+    final newMarked = rekey(_completedOrdinals);
+    final newFired = rekey(_firedWalls);
+    final newLate = rekey(_lateWalls);
+    final oldSuspended = _suspended;
+    final newSuspended = (oldSuspended == null || oldSuspended.finished)
+        ? oldSuspended
+        : (map(oldSuspended.ordinal!) == null
+              ? const _Suspend.finished()
+              : _Suspend.item(
+                  map(oldSuspended.ordinal!)!,
+                  oldSuspended.remainingMs,
+                  oldSuspended.state,
+                ));
+    final newActiveWall = _activeWall == null ? null : map(_activeWall!);
 
     final state = _cursor.state;
     _instances = next;
     _adjustMs
       ..clear()
       ..addAll(newAdjust);
+    _completedOrdinals
+      ..clear()
+      ..addAll(newMarked);
+    _firedWalls
+      ..clear()
+      ..addAll(newFired);
+    _lateWalls
+      ..clear()
+      ..addAll(newLate);
+    _suspended = newSuspended;
+    _activeWall = newActiveWall;
 
     if (state == SessionState.notStarted || next.isEmpty) {
       _cursor = _fresh;
@@ -408,17 +548,12 @@ class TimerSession {
       _adjustMs.remove(i); // absorbed by the completion
       if (_isManual(i)) {
         _cursor = _Cursor(SessionState.awaitingAdvance, i, 0, nowMs);
-      } else if (i == instances.length - 1) {
-        _cursor = _fresh;
       } else {
-        _cursor = _Cursor(
-          state == SessionState.paused
-              ? SessionState.paused
-              : SessionState.running,
-          i + 1,
-          0,
+        _advanceFrom(
+          i,
           nowMs,
-        );
+          pausedCarry: state == SessionState.paused,
+        ); // v2 P1.4: wall-aware (detour return / pending wait)
       }
       return true;
     }
@@ -465,7 +600,8 @@ class TimerSession {
     final midRun =
         state == SessionState.running ||
         state == SessionState.paused ||
-        state == SessionState.awaitingAdvance;
+        state == SessionState.awaitingAdvance ||
+        state == SessionState.awaitingWall;
     if (midRun) {
       final current = _cursor.ordinal!;
       if (state != SessionState.awaitingAdvance) {
@@ -473,12 +609,23 @@ class TimerSession {
       }
       if (ordinal > current) {
         for (var j = current + 1; j < ordinal; j++) {
-          _emitSkipped(j, nowMs);
+          // v2 P1.4: walls are never "jumped over" — they stay pending
+          // and fire at their times. Only real work is logged as skipped.
+          if (!_isWall(j)) _emitSkipped(j, nowMs);
         }
       }
     }
+    // v2 P1.4: navigation abandons a wall detour — the suspended item
+    // was mid-flight and never logged, so it closes here (exactly-once).
+    final save = _suspended;
+    _suspended = null;
+    _activeWall = null;
+    if (save != null && !save.finished) _emitSkipped(save.ordinal!, nowMs);
+    if (_isWall(ordinal)) _firedWalls.add(ordinal); // landed = played
     _cursor = _Cursor(
-      state == SessionState.running ? SessionState.running : SessionState.paused,
+      state == SessionState.running || state == SessionState.awaitingWall
+          ? SessionState.running
+          : SessionState.paused,
       ordinal,
       0,
       nowMs,
@@ -494,10 +641,25 @@ class TimerSession {
     _adjustMs.clear(); // the run is over — the next one is unadjusted
     _completedOrdinals.clear(); // v2 P1.3: reset un-completes every item
     final nowMs = _settleAtClock();
-    if (_cursor.state == SessionState.notStarted) return;
-    if (_cursor.state != SessionState.awaitingAdvance) {
+    // v2 P1.4: an abandoned detour logs its suspended item (exactly-once
+    // holds — it never ended otherwise) and the wall state goes with it.
+    final save = _suspended;
+    _suspended = null;
+    _activeWall = null;
+    _firedWalls.clear();
+    _lateWalls.clear();
+    if (_cursor.state == SessionState.notStarted) {
+      if (save != null && !save.finished) _emitSkipped(save.ordinal!, nowMs);
+      return;
+    }
+    if (_cursor.state == SessionState.awaitingAdvance) {
+      // its `done` already stands
+    } else if (_cursor.state == SessionState.awaitingWall) {
+      _emitSkipped(_cursor.ordinal!, nowMs); // the wait is abandoned
+    } else {
       _emitSkipped(_cursor.ordinal!, nowMs);
     }
+    if (save != null && !save.finished) _emitSkipped(save.ordinal!, nowMs);
     _cursor = _fresh;
   }
 
@@ -507,7 +669,12 @@ class TimerSession {
   TimerSnapshot snapshot(DateTime now) {
     final nowMs = now.millisecondsSinceEpoch;
     final projection = _project(_cursor, nowMs);
-    return _toSnapshot(projection.cursor, nowMs);
+    return _toSnapshot(
+      projection.cursor,
+      nowMs,
+      slot: projection.slot,
+      late: projection.lateWalls.contains(projection.cursor.ordinal),
+    );
   }
 
   /// Applies the projection at [now] to the internal cursor and emits every
@@ -529,7 +696,12 @@ class TimerSession {
     for (final event in projection.events) {
       sink.emit(event);
     }
-    _completedOrdinals.addAll(projection.marked); // P1.3: only settles mark
+    // P1.3/1.4: only a settle applies simulated state (purity rule).
+    _completedOrdinals.addAll(projection.marked);
+    _firedWalls.addAll(projection.fired);
+    _lateWalls.addAll(projection.lateWalls);
+    _suspended = projection.slot;
+    _activeWall = projection.activeWall;
   }
 
   /// v2 P1.3 — the run's live completion marks, keyed by OCCURRENCE
@@ -581,6 +753,7 @@ class TimerSession {
     final atCurrent =
         marking &&
         _cursor.state != SessionState.notStarted &&
+        _cursor.state != SessionState.awaitingWall &&
         instances[_cursor.ordinal!].defId == defId;
     if (atCurrent) {
       if (_cursor.state != SessionState.awaitingAdvance) {
@@ -639,32 +812,108 @@ class TimerSession {
     );
   }
 
-  void _advanceFrom(int lastOrdinal, int nowMs) {
-    if (lastOrdinal + 1 >= instances.length) {
-      _cursor = _fresh;
+  /// The mutator-side end transition — mirrors the projection's: a wall
+  /// detour RETURNS to its suspension, otherwise the chain continues at
+  /// the next runnable instance (walls are never landed on), or waits
+  /// ([SessionState.awaitingWall]) for a pending wall, or ends fresh.
+  /// An ended wall is recorded as played (never re-fires).
+  void _advanceFrom(int lastOrdinal, int nowMs, {bool pausedCarry = false}) {
+    if (instances[lastOrdinal].isDated) _firedWalls.add(lastOrdinal);
+    if (_activeWall == lastOrdinal) {
+      final save = _suspended;
+      _suspended = null;
+      _activeWall = null;
+      if (save == null || save.finished) {
+        _cursor = _fresh;
+      } else {
+        _cursor = _Cursor(
+          save.state,
+          save.ordinal!,
+          _effectiveMs(save.ordinal!) - save.remainingMs,
+          nowMs,
+        );
+      }
+      return;
+    }
+    final next = _nextRunnable(lastOrdinal + 1);
+    if (next == null) {
+      final w = _earliestPending(_firedWalls, _completedOrdinals);
+      _cursor = w == null
+          ? _fresh
+          : _Cursor(SessionState.awaitingWall, w, 0, nowMs);
     } else {
-      _cursor = _Cursor(SessionState.running, lastOrdinal + 1, 0, nowMs);
+      _cursor = _Cursor(
+        pausedCarry ? SessionState.paused : SessionState.running,
+        next,
+        0,
+        nowMs,
+      );
     }
   }
 
   /// The projection algorithm. Derives the cursor forward from wall-clock
   /// anchors; cascades auto-finish crossings in one pass; collects the
   /// `done` events the crossings produced.
-  _Projection _project(_Cursor cursor, int nowMs) {
-    var current = cursor;
+  /// The projection algorithm — a MERGED timeline simulation (v2 P1.4):
+  /// wall firings and zero-crossings interleave in TRUE instant order,
+  /// with the wall-detour returns folded in. PURE: it copies the mutable
+  /// run state (cursor, suspension, fired/marked sets), simulates, and
+  /// returns the result — only _settleAt applies it (snapshot must not
+  /// mutate anything).
+  _Projection _project(_Cursor cursor0, int nowMs) {
+    var current = cursor0;
+    var slot = _suspended;
+    var activeWall = _activeWall;
+    final fired = {..._firedWalls};
+    final lateWalls = {..._lateWalls};
+    final marked = {..._completedOrdinals};
     final events = <InstanceEnded>[];
-    final marked = <int>{};
-    while (current.state == SessionState.running) {
-      final i = current.ordinal!;
-      if (_completedOrdinals.contains(i)) {
-        // v2 P1.3: pre-completed work flies past when reached — it already
-        // happened; the chain never waits on it. Terminal `skipped` (it did
-        // not run THIS pass) with the mark standing (completed: true).
+
+    // The shared end transition: the wall-detour return, the next
+    // runnable instance, or the pending-wall wait / fresh end.
+    void endTransition(int i, int endMs) {
+      if (instances[i].isDated) fired.add(i); // played — never re-fires
+      if (activeWall == i) {
+        // The detour completes: back to the suspended item (or a run
+        // that was already complete).
+        final save = slot;
+        slot = null;
+        activeWall = null;
+        if (save == null || save.finished) {
+          current = _fresh;
+        } else {
+          current = _Cursor(
+            save.state,
+            save.ordinal!,
+            _effectiveMs(save.ordinal!) - save.remainingMs,
+            endMs,
+          );
+        }
+        return;
+      }
+      final next = _nextRunnable(i + 1);
+      if (next == null) {
+        final w = _earliestPending(fired, marked);
+        current = w == null
+            ? _fresh
+            : _Cursor(SessionState.awaitingWall, w, 0, endMs);
+      } else {
+        current = _Cursor(SessionState.running, next, 0, endMs);
+      }
+    }
+
+    while (true) {
+      // A REACHED, pre-completed occurrence flies past instantly (P1.3):
+      // it already happened — the chain never runs or holds on it. (Only
+      // running cursors: a jump that lands paused on completed work sits
+      // until resumed.)
+      if (current.state == SessionState.running &&
+          marked.contains(current.ordinal!)) {
         final reachedMs = current.anchorMs - current.accumulatedMs;
         events.add(
           InstanceEnded(
-            ordinal: i,
-            defId: instances[i].defId,
+            ordinal: current.ordinal!,
+            defId: instances[current.ordinal!].defId,
             terminal: TerminalState.skipped,
             endedAt: DateTime.fromMillisecondsSinceEpoch(
               reachedMs,
@@ -673,58 +922,162 @@ class TimerSession {
             completed: true,
           ),
         );
-        if (i == instances.length - 1) {
-          current = _fresh;
-          break;
-        }
-        current = _Cursor(SessionState.running, i + 1, 0, reachedMs);
+        endTransition(current.ordinal!, reachedMs);
         continue;
       }
-      final durationMs = _effectiveMs(i);
-      final sinceAnchor = nowMs - current.anchorMs;
-      // Backwards clock: clamp, elapsed = accumulated only.
-      final elapsed =
-          current.accumulatedMs + (sinceAnchor > 0 ? sinceAnchor : 0);
-      final remainingMs = durationMs - elapsed;
-      if (remainingMs > 0) break; // still running — nothing crosses
-      // Zero crossing: the instance ended at this absolute instant...
-      final endedAtMs = current.anchorMs + (durationMs - current.accumulatedMs);
-      // v2 P1.3: an auto-finish occurrence that ran its course auto-
-      // completes ITS pass (a repeated item's passes complete one by one).
-      // Collected, not applied — projection is pure (see _Projection).
-      final completes = !_isManual(i) || _completedOrdinals.contains(i);
-      if (!_isManual(i)) marked.add(i);
-      events.add(
-        InstanceEnded(
-          ordinal: i,
-          defId: instances[i].defId,
-          terminal: TerminalState.done,
-          endedAt: DateTime.fromMillisecondsSinceEpoch(endedAtMs, isUtc: true),
-          completed: completes,
-        ),
-      );
-      if (_isManual(i)) {
-        // Manually complete: hold at exactly zero — the overshoot is
-        // ABSORBED; the chain waits for the user to resolve the hold (the
-        // mark is still undecided — `completed: false` at emission).
-        current = _Cursor(SessionState.awaitingAdvance, i, 0, endedAtMs);
-        break;
+      // Normalize a wait whose wall is gone (checked while waiting — a
+      // completed wall never runs; or already fired): move the wait to the
+      // next pending wall, else the run is finished.
+      if (current.state == SessionState.awaitingWall) {
+        final w = current.ordinal!;
+        if (fired.contains(w) || marked.contains(w) || _wallMs(w) == null) {
+          final nextW = _earliestPending(fired, marked);
+          current = nextW == null
+              ? _fresh
+              : _Cursor(SessionState.awaitingWall, nextW, 0, nowMs);
+          continue;
+        }
+        // The wall is still pending: a due wall fires below; a future one
+        // keeps counting down (nothing left to simulate this settle).
       }
-      if (i == instances.length - 1) {
-        // End of the list: reset immediately; leftover overshoot is
-        // discarded (the fresh session shows totalPlanned again).
-        current = _fresh;
-        break;
+
+      // (a) the earliest DUE wall. A running detour wall whose own start
+      // is at/after a candidate's time holds it back (catch-up: the wall
+      // fires when the running one ends); a candidate whose time arrived
+      // LIVE during the running wall cuts it (later cuts earlier).
+      final wallStart =
+          (activeWall != null && activeWall == current.ordinal)
+          ? current.anchorMs - current.accumulatedMs
+          : null;
+      var fireOrdinal = -1;
+      var fireMs = 0;
+      for (var j = 0; j < instances.length; j++) {
+        final wms = _wallMs(j);
+        if (wms == null || wms > nowMs) continue;
+        if (fired.contains(j) || marked.contains(j)) continue;
+        if (wallStart != null && wms <= wallStart) continue; // queued
+        if (fireOrdinal == -1 || wms < fireMs) {
+          fireOrdinal = j;
+          fireMs = wms;
+        }
       }
-      // Auto-finish flows into the next instance anchored at the end time;
-      // the loop carries the overshoot across as already-elapsed time.
-      current = _Cursor(SessionState.running, i + 1, 0, endedAtMs);
+
+      // (b) the running cursor's next zero-crossing instant.
+      var crossMs = 0;
+      if (current.state == SessionState.running) {
+        crossMs =
+            current.anchorMs +
+            (_effectiveMs(current.ordinal!) - current.accumulatedMs);
+      }
+
+      if (fireOrdinal != -1 &&
+          current.state != SessionState.notStarted &&
+          (crossMs == 0 || fireMs <= crossMs)) {
+        // (walls fire only into a LIVE run — an idle timer is never
+        // interrupted by the clock)
+        // FIRE (interrupt & resume). The wall runs with full remaining
+        // anchored at the settle now — a wall is never "partly played"
+        // just because the system slept past its trigger.
+        fired.add(fireOrdinal);
+        if (nowMs - fireMs > 2000) lateWalls.add(fireOrdinal);
+        final st = current.state;
+        if (st == SessionState.awaitingWall) {
+          // The plan was already complete — the wall is the finale.
+          slot = const _Suspend.finished();
+        } else if (st == SessionState.awaitingAdvance) {
+          // A held item auto-resolves COMPLETED when a wall takes over
+          // (its done already stands); the chain continues after it.
+          marked.add(current.ordinal!);
+          final nextOrd = _nextRunnable(current.ordinal! + 1);
+          slot = nextOrd == null
+              ? const _Suspend.finished()
+              : _Suspend.item(nextOrd, _effectiveMs(nextOrd), SessionState.running);
+        } else if (activeWall != null && activeWall == current.ordinal) {
+          // Wall-vs-wall: the running wall is CUT (actual < planned,
+          // not completed) — the ORIGINAL suspension beneath survives.
+          events.add(
+            InstanceEnded(
+              ordinal: current.ordinal!,
+              defId: instances[current.ordinal!].defId,
+              terminal: TerminalState.cut,
+              endedAt: DateTime.fromMillisecondsSinceEpoch(
+                fireMs,
+                isUtc: true,
+              ),
+              completed: marked.contains(current.ordinal!),
+            ),
+          );
+        } else {
+          // Mid-flight item: suspend (position + remaining + state). A
+          // paused item is FROZEN — it consumes nothing while suspended.
+          final elapsed = st == SessionState.paused
+              ? current.accumulatedMs
+              : current.accumulatedMs +
+                    (fireMs > current.anchorMs
+                        ? fireMs - current.anchorMs
+                        : 0);
+          slot = _Suspend.item(
+            current.ordinal!,
+            _effectiveMs(current.ordinal!) - elapsed,
+            st,
+          );
+        }
+        activeWall = fireOrdinal;
+        current = _Cursor(SessionState.running, fireOrdinal, 0, nowMs);
+        continue;
+      }
+
+      if (crossMs != 0 && crossMs <= nowMs) {
+        final i = current.ordinal!;
+        final endedAtMs = crossMs;
+        final completes = !_isManual(i) || marked.contains(i);
+        if (!_isManual(i)) marked.add(i);
+        events.add(
+          InstanceEnded(
+            ordinal: i,
+            defId: instances[i].defId,
+            terminal: TerminalState.done,
+            endedAt: DateTime.fromMillisecondsSinceEpoch(
+              endedAtMs,
+              isUtc: true,
+            ),
+            completed: completes,
+          ),
+        );
+        if (_isManual(i)) {
+          // Hold at exactly zero — the mark stays undecided until the
+          // user resolves it.
+          current = _Cursor(SessionState.awaitingAdvance, i, 0, endedAtMs);
+          break;
+        }
+        endTransition(i, endedAtMs);
+        continue;
+      }
+      break;
     }
-    return _Projection(current, events, marked);
+    return _Projection(
+      current,
+      events,
+      marked,
+      fired,
+      lateWalls,
+      slot,
+      activeWall,
+    );
   }
 
-  TimerSnapshot _toSnapshot(_Cursor cursor, int nowMs) {
+  TimerSnapshot _toSnapshot(
+    _Cursor cursor,
+    int nowMs, {
+    _Suspend? slot,
+    bool late = false,
+  }) {
     final planned = totalPlanned(instances);
+    // The wall-detour view: what the interruption froze.
+    final suspendedOrdinal = (slot != null && !slot.finished) ? slot.ordinal : null;
+    final suspendedRemaining = suspendedOrdinal == null
+        ? null
+        : Duration(milliseconds: slot!.remainingMs);
     switch (cursor.state) {
       case SessionState.notStarted:
         return TimerSnapshot(
@@ -742,8 +1095,24 @@ class TimerSession {
           ordinal: i,
           currentLabel: instances[i].name,
           remaining: Duration.zero, // holds at zero regardless of overshoot
-          totalRemaining: _futureRemaining(i + 1),
+          totalRemaining: _detourRemaining(_futureRemaining(i + 1), slot),
           totalPlanned: planned,
+          late: late,
+          suspendedOrdinal: suspendedOrdinal,
+          suspendedRemaining: suspendedRemaining,
+        );
+      case SessionState.awaitingWall:
+        final i = cursor.ordinal!;
+        final waitMs = (_wallMs(i) ?? nowMs) - nowMs;
+        return TimerSnapshot(
+          state: SessionState.awaitingWall,
+          ordinal: i,
+          currentLabel: instances[i].name,
+          // The countdown TO the wall is the meaningful clock here.
+          remaining: Duration(milliseconds: waitMs > 0 ? waitMs : 0),
+          totalRemaining: Duration(milliseconds: _effectiveMs(i)),
+          totalPlanned: planned,
+          late: late,
         );
       case SessionState.running:
       case SessionState.paused:
@@ -761,10 +1130,26 @@ class TimerSession {
           currentLabel: instances[i].name,
           // Invariant: a projected running/paused remaining is > zero.
           remaining: remaining,
-          totalRemaining: remaining + _futureRemaining(i + 1),
+          totalRemaining: remaining +
+              _detourRemaining(_futureRemaining(i + 1), slot),
           totalPlanned: planned,
+          late: late,
+          suspendedOrdinal: suspendedOrdinal,
+          suspendedRemaining: suspendedRemaining,
         );
     }
+  }
+
+  /// Total-remaining under a wall detour: the wall's own remainder plus
+  /// what it interrupted (and the plan behind it) — the honest "how much
+  /// is left" while a detour runs.
+  Duration _detourRemaining(Duration behind, _Suspend? slot) {
+    if (_activeWall == null && slot == null) return behind;
+    final wallMs = _activeWall == null ? 0 : _effectiveMs(_activeWall!);
+    final saveMs = (slot == null || slot.finished)
+        ? 0
+        : slot.remainingMs + _futureRemaining(slot.ordinal! + 1).inMilliseconds;
+    return behind + Duration(milliseconds: wallMs + saveMs);
   }
 
   Duration _futureRemaining(int fromOrdinal) {
@@ -791,12 +1176,43 @@ class _Cursor {
 /// Result of projecting a cursor: the new cursor plus the `done` events the
 /// projection's zero-crossings produced (empty for non-running states).
 class _Projection {
-  const _Projection(this.cursor, this.events, this.marked);
+  const _Projection(
+    this.cursor,
+    this.events,
+    this.marked,
+    this.fired,
+    this.lateWalls,
+    this.slot,
+    this.activeWall,
+  );
 
   final _Cursor cursor;
   final List<InstanceEnded> events;
 
-  /// v2 P1.3 — occurrences the crossings auto-completed. PROJECTION IS
-  /// PURE (snapshot must not mutate); only _settleAt applies these.
+  /// v2 P1.3/1.4 — the run state as the simulation left it. PROJECTION
+  /// IS PURE (snapshot must not mutate); only _settleAt applies these.
   final Set<int> marked;
+  final Set<int> fired;
+  final Set<int> lateWalls;
+  final _Suspend? slot;
+  final int? activeWall;
+}
+
+/// v2 P1.4 — a wall-detour suspension: what the wall interrupted. A
+/// mid-flight item freezes at [remainingMs] in [state] and RESUMES at
+/// those values when the wall completes; [finished] means the run was
+/// already complete when the wall took over (resume → fresh).
+class _Suspend {
+  const _Suspend.item(this.ordinal, this.remainingMs, this.state)
+    : finished = false;
+  const _Suspend.finished()
+    : ordinal = null,
+      remainingMs = 0,
+      state = SessionState.notStarted,
+      finished = true;
+
+  final int? ordinal;
+  final int remainingMs;
+  final SessionState state;
+  final bool finished;
 }
