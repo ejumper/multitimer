@@ -830,8 +830,24 @@ void main() {
     s.adjustCurrent(10);
     s.adjustCurrent(-3600); // clamp ends the run (last auto -> fresh)
     expect(s.snapshot(clock.current).state, SessionState.notStarted);
+    // v2 P1.3: replaying is Reset + start — Reset un-completes the work
+    // (the user rule), so the re-run actually re-runs.
+    s.reset();
     s.start();
     expect(s.snapshot(clock.current).remaining, secs(5));
+    expect(s.isCompleted('d'), isFalse);
+  });
+
+  test('start_without_reset_keeps_marks_and_fly_pasts', () {
+    // The task-list rule: checks ARE the list's state — playing a done
+    // list must not silently un-check it.
+    final s = session([inst(0, seconds: 5), inst(1, seconds: 5)]);
+    s.start();
+    warpBy(secs(10));
+    s.settle(clock.current); // both auto-completed their passes
+    expect(s.isCompleted('d'), isTrue);
+    s.start();
+    expect(s.snapshot(clock.current).state, SessionState.notStarted);
   });
 
   // ── Tweaks #8: adopt — live tree edit (the TWEAKS.md matrix) ──────
@@ -1114,6 +1130,223 @@ void main() {
     expect(snap.state, SessionState.running);
     expect(snap.ordinal, 1);
     expect(snap.remaining, secs(45));
+  });
+
+
+  // ── v2 P1.3: completion semantics (the matrix) ────────────────────
+
+  test('mark_current_mid_run_finishes_and_completes', () {
+    final s = session([
+      inst(0, seconds: 60, autoFinish: false, defId: 'a'),
+      inst(1, seconds: 30, defId: 'b'),
+    ]);
+    s.start();
+    warpBy(secs(10));
+    expect(s.toggleMark(0), isTrue);
+    final snap = s.snapshot(clock.current);
+    expect(snap.state, SessionState.running);
+    expect(snap.ordinal, 1);
+    expect(snap.remaining, secs(30));
+    expect(s.isCompleted('a'), isTrue);
+    expect(sink.events.single.terminal, TerminalState.done);
+    expect(sink.events.single.completed, isTrue); // "user moved past it"
+  });
+
+  test('mark_current_at_hold_resolves_without_duplicate_done', () {
+    final s = session([inst(0, seconds: 60, autoFinish: false, defId: 'a')]);
+    s.start();
+    warpBy(secs(70));
+    s.settle(clock.current); // the hold logs its one done
+    expect(sink.events.length, 1);
+    expect(s.toggleMark(0), isTrue);
+    expect(s.isCompleted('a'), isTrue);
+    expect(sink.events.length, 1); // still just the one
+    expect(s.snapshot(clock.current).state, SessionState.notStarted);
+  });
+
+  test('mark_future_flies_past_when_reached_manual', () {
+    final s = session([
+      inst(0, seconds: 60, defId: 'a'),
+      inst(1, seconds: 60, autoFinish: false, defId: 'b'),
+      inst(2, seconds: 45, defId: 'c'),
+    ]);
+    s.start();
+    expect(s.toggleMark(1), isTrue); // check b early — it never blocks
+    warpBy(secs(60));
+    s.settle(clock.current);
+    // a ends, b flies past (skipped, completed), c runs.
+    final snap = s.snapshot(clock.current);
+    expect(snap.ordinal, 2);
+    expect(snap.remaining, secs(45));
+    final b = sink.events.firstWhere((e) => e.ordinal == 1);
+    expect(b.terminal, TerminalState.skipped);
+    expect(b.completed, isTrue);
+  });
+
+  test('mark_future_flies_past_when_reached_auto', () {
+    final s = session([
+      inst(0, seconds: 60, defId: 'a'),
+      inst(1, seconds: 60, defId: 'b'),
+    ]);
+    s.start();
+    s.toggleMark(1);
+    warpBy(secs(60));
+    s.settle(clock.current);
+    expect(s.snapshot(clock.current).state, SessionState.notStarted);
+  });
+
+  test('pre_completed_open_flies_past_without_holding', () {
+    final s = session([
+      inst(0, seconds: null, autoFinish: false, defId: 'go'),
+      inst(1, seconds: 45, defId: 'a'),
+    ]);
+    s.toggleMark(0); // the store run already happened
+    s.start();
+    final snap = s.snapshot(clock.current);
+    expect(snap.state, SessionState.running);
+    expect(snap.ordinal, 1);
+    expect(snap.remaining, secs(45));
+  });
+
+  test('mark_past_anytime_only_flips_the_mark', () {
+    final s = session([
+      inst(0, seconds: 60, autoFinish: false, defId: 'a'),
+      inst(1, seconds: 60, defId: 'b'),
+    ]);
+    s.start();
+    warpBy(secs(10));
+    s.skipNext(); // a skipped = not completed; b now running
+    expect(s.isCompleted('a'), isFalse);
+    expect(s.toggleMark(0), isTrue); // retroactive: I did do a
+    expect(s.snapshot(clock.current).ordinal, 1); // run untouched
+    expect(s.toggleMark(0), isFalse); // and un-checkable
+  });
+
+  test('auto_complete_marks_the_pass_on_full_course', () {
+    final s = session([inst(0, seconds: 5), inst(1, seconds: 5)]);
+    s.start();
+    warpBy(secs(5));
+    s.settle(clock.current);
+    expect(sink.events.first.completed, isTrue); // auto = auto-completed
+    expect(s.isCompleted('d'), isFalse); // its second pass is pending
+    warpBy(secs(5));
+    s.settle(clock.current);
+    expect(s.isCompleted('d'), isTrue); // both passes done -> the item
+  });
+
+  test('manual_hold_stays_undecided_until_resolved', () {
+    final s = session([inst(0, seconds: 60, autoFinish: false, defId: 'a')]);
+    s.start();
+    warpBy(secs(70));
+    s.settle(clock.current);
+    expect(sink.events.single.completed, isFalse); // undecided at emission
+    expect(s.resolveHold(completed: true), isTrue);
+    expect(s.isCompleted('a'), isTrue);
+  });
+
+  test('resolve_hold_not_completed_marks_nothing', () {
+    final s = session([inst(0, seconds: 60, autoFinish: false, defId: 'a')]);
+    s.start();
+    warpBy(secs(70));
+    s.settle(clock.current);
+    expect(s.resolveHold(completed: false), isTrue);
+    expect(s.isCompleted('a'), isFalse);
+    expect(s.snapshot(clock.current).state, SessionState.notStarted);
+  });
+
+  test('resolve_hold_outside_a_hold_is_illegal', () {
+    final s = session([inst(0, seconds: 60, autoFinish: false, defId: 'a')]);
+    s.start();
+    expect(s.resolveHold(completed: true), isFalse);
+  });
+
+  test('skip_leaves_the_item_not_completed_and_overridable', () {
+    final s = session([
+      inst(0, seconds: 60, defId: 'a'),
+      inst(1, seconds: 60, defId: 'b'),
+    ]);
+    s.start();
+    warpBy(secs(10));
+    s.skipNext(); // a: skipped before zero
+    expect(sink.events.single.terminal, TerminalState.skipped);
+    expect(sink.events.single.completed, isFalse);
+    expect(s.isCompleted('a'), isFalse);
+    expect(s.toggleMark(0), isTrue); // ...but I actually did it
+    expect(s.isCompleted('a'), isTrue);
+  });
+
+  test('reset_un_completes_every_item', () {
+    // THE user rule: hitting Reset clears the completion state.
+    final s = session([
+      inst(0, seconds: 60, defId: 'a'),
+      inst(1, seconds: 60, defId: 'b'),
+    ]);
+    s.toggleMark(0);
+    s.toggleMark(1);
+    expect(s.completedDefIds, {'a', 'b'});
+    s.reset();
+    expect(s.completedDefIds, isEmpty);
+    expect(s.isCompleted('a'), isFalse);
+  });
+
+  test('repeated_item_checks_skip_remaining_passes', () {
+    // One authored item, three passes (a repeated interval).
+    final s = session([
+      inst(0, seconds: 60, defId: 'r'),
+      inst(1, seconds: 60, defId: 'r'),
+      inst(2, seconds: 60, defId: 'r'),
+    ]);
+    s.start();
+    warpBy(secs(10));
+    s.toggleMark(0); // the ITEM is done -> its remaining passes fly
+    final snap = s.snapshot(clock.current);
+    expect(snap.state, SessionState.notStarted);
+    expect(s.isCompleted('r'), isTrue);
+    // Pass 0 force-ended as `done` ("user moved past it"); passes 1-2
+    // flew past as `skipped`.
+    expect(
+      sink.events.where((e) => e.terminal == TerminalState.skipped).length,
+      2,
+    );
+    expect(sink.events.first.terminal, TerminalState.done);
+  });
+
+  test('manual_passes_resolve_one_by_one_on_a_repeated_item', () {
+    final s = session([
+      inst(0, seconds: 60, autoFinish: false, defId: 'r'),
+      inst(1, seconds: 60, autoFinish: false, defId: 'r'),
+    ]);
+    s.start();
+    warpBy(secs(70));
+    s.settle(clock.current); // pass 1 holds
+    expect(s.resolveHold(completed: true), isTrue);
+    expect(s.isCompleted('r'), isFalse); // pass 2 still pending
+    warpBy(secs(70));
+    s.settle(clock.current); // pass 2 holds
+    expect(s.resolveHold(completed: true), isTrue);
+    expect(s.isCompleted('r'), isTrue); // both passes -> the row checks
+  });
+
+  test('marks_survive_pause_resume_and_jump', () {
+    final s = session([
+      inst(0, seconds: 60, defId: 'a'),
+      inst(1, seconds: 60, defId: 'b'),
+    ]);
+    s.start();
+    s.toggleMark(1);
+    s.pause();
+    s.resume();
+    s.jumpTo(1);
+    s.jumpTo(0);
+    expect(s.isCompleted('b'), isTrue);
+    expect(s.completedDefIds, {'b'});
+  });
+
+  test('out_of_range_toggle_returns_null', () {
+    final s = session([inst(0, seconds: 60, defId: 'a')]);
+    expect(s.toggleMark(-1), isNull);
+    expect(s.toggleMark(1), isNull);
+    expect(s.completedDefIds, isEmpty);
   });
 
 }

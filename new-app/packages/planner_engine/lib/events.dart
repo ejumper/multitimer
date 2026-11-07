@@ -31,6 +31,7 @@ class InstanceEnded {
     required this.defId,
     required this.terminal,
     required this.endedAt,
+    this.completed = false,
   });
 
   /// Ordinal of the ended instance.
@@ -44,4 +45,12 @@ class InstanceEnded {
 
   /// The true computed end moment, NOT the settle time.
   final DateTime endedAt;
+
+  /// v2 P1.3: the completion mark AT EMISSION time. The durable mark lives
+  /// on the authored def (it stays toggleable after an instance ends); this
+  /// is the run log's snapshot of what the record said when the instance
+  /// ended. `done` via auto-finish or fly-past carries true; a manually-
+  /// completed hold carries false until the user resolves it (the app logs
+  /// mark changes separately).
+  final bool completed;
 }

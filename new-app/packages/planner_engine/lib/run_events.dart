@@ -46,7 +46,7 @@ class PlayAlert {
   final bool autoFinish;
 
   /// Duration of the NEXT instance in the run (seconds); null when this
-  /// instance is the last. The sound layer uses it to cut a one-shot alert
+  /// instance is the last or the next is Open (no duration). The sound layer uses it to cut a one-shot alert
   /// at 75% of the next interval so consecutive alerts can never overlap.
   final int? nextInstanceDurationSeconds;
 
@@ -164,6 +164,7 @@ class RunEventProcessor implements EventSink<InstanceEnded> {
             'ordinal': batch[i].ordinal,
             'defId': batch[i].defId,
             'terminal': batch[i].terminal.name,
+            'completed': batch[i].completed,
           },
         );
       } catch (_) {

@@ -106,7 +106,14 @@ class TimerSession {
     required EventSink<InstanceEnded> sink,
   }) : _instances = instances,
        // ignore: prefer_initializing_formals
-       _sink = sink;
+       _sink = sink {
+    // v2 P1.3: seed the live marks from the items (the def is the durable
+    // record — its `completed` means the whole item is checked, which
+    // snapshots as completed for every occurrence).
+    for (final i in instances) {
+      if (i.completed) _completedOrdinals.add(i.ordinal);
+    }
+  }
 
   List<IntervalInstance> _instances;
   EventSink<InstanceEnded> _sink;
@@ -303,6 +310,7 @@ class TimerSession {
 
     if (remainingMs <= 0) {
       // Clamp at zero — but a HELD instance already logged its `done`.
+      if (!_isManual(j)) _completedOrdinals.add(j); // auto-completes its pass
       if (state != SessionState.awaitingAdvance) {
         _sink.emit(
           InstanceEnded(
@@ -310,6 +318,7 @@ class TimerSession {
             defId: next[j].defId,
             terminal: TerminalState.done,
             endedAt: DateTime.fromMillisecondsSinceEpoch(nowMs, isUtc: true),
+            completed: _completedOrdinals.contains(j),
           ),
         );
       }
@@ -386,12 +395,14 @@ class TimerSession {
     if (remainingMs + deltaMs <= 0) {
       // Clamp at zero: the instance ends exactly now as `done` and the
       // normal zero-crossing rules decide what follows.
+      if (!_isManual(i)) _completedOrdinals.add(i); // auto-completes its pass
       sink.emit(
         InstanceEnded(
           ordinal: i,
           defId: instances[i].defId,
           terminal: TerminalState.done,
           endedAt: DateTime.fromMillisecondsSinceEpoch(nowMs, isUtc: true),
+          completed: _completedOrdinals.contains(i),
         ),
       );
       _adjustMs.remove(i); // absorbed by the completion
@@ -481,6 +492,7 @@ class TimerSession {
   /// logged `done`. From notStarted: no-op, no events.
   void reset() {
     _adjustMs.clear(); // the run is over — the next one is unadjusted
+    _completedOrdinals.clear(); // v2 P1.3: reset un-completes every item
     final nowMs = _settleAtClock();
     if (_cursor.state == SessionState.notStarted) return;
     if (_cursor.state != SessionState.awaitingAdvance) {
@@ -517,6 +529,95 @@ class TimerSession {
     for (final event in projection.events) {
       sink.emit(event);
     }
+    _completedOrdinals.addAll(projection.marked); // P1.3: only settles mark
+  }
+
+  /// v2 P1.3 — the run's live completion marks, keyed by OCCURRENCE
+  /// (ordinal). Per-occurrence is what the chain needs (a repeated item's
+  /// passes complete one by one); the ITEM view — the row's checkbox — is
+  /// derived: an item is completed when ALL its occurrences are marked.
+  /// Cleared by [reset]; seeded from the instances; toggleable any time.
+  final Set<int> _completedOrdinals = {};
+
+  /// The items (def ids) whose every occurrence is marked — the checkbox
+  /// state, and the durable record the app persists on the def.
+  Set<String> get completedDefIds => {
+    for (final entry in _groupByDef().entries)
+      if (entry.value.every(_completedOrdinals.contains)) entry.key,
+  };
+
+  /// Whether the ITEM behind [defId] is fully marked (all occurrences).
+  bool isCompleted(String defId) =>
+      _groupByDef()[defId]?.every(_completedOrdinals.contains) ?? false;
+
+  Map<String, List<int>> _groupByDef() {
+    final byDef = <String, List<int>>{};
+    for (final i in instances) {
+      (byDef[i.defId] ??= []).add(i.ordinal);
+    }
+    return byDef;
+  }
+
+  /// Toggles the ITEM behind [ordinal]: marking marks every occurrence of
+  /// its def (a checked item's remaining passes fly past when reached);
+  /// unchecking un-marks them all. Toggling an item ON while it is the
+  /// CURRENT one finishes it (the spec sentence: "if it's the current
+  /// interval, it finishes it and marks it complete") — `done` ("user moved
+  /// past it") and the chain advances past any already-completed items.
+  /// The caller persists the new item state ([isCompleted]); the def is the
+  /// durable record. Returns the new item mark, or null if out of range.
+  bool? toggleMark(int ordinal) {
+    final nowMs = _settleAtClock();
+    if (ordinal < 0 || ordinal >= instances.length) return null;
+    final defId = instances[ordinal].defId;
+    final marking = !isCompleted(defId);
+    for (final j in _groupByDef()[defId]!) {
+      if (marking) {
+        _completedOrdinals.add(j);
+      } else {
+        _completedOrdinals.remove(j);
+      }
+    }
+    final atCurrent =
+        marking &&
+        _cursor.state != SessionState.notStarted &&
+        instances[_cursor.ordinal!].defId == defId;
+    if (atCurrent) {
+      if (_cursor.state != SessionState.awaitingAdvance) {
+        // Mid-flight: the user moved past it — `done`, logged once.
+        sink.emit(
+          InstanceEnded(
+            ordinal: _cursor.ordinal!,
+            defId: defId,
+            terminal: TerminalState.done,
+            endedAt: DateTime.fromMillisecondsSinceEpoch(nowMs, isUtc: true),
+            completed: true,
+          ),
+        );
+      } // at a hold its `done` already stands — no duplicate.
+      _advanceFrom(_cursor.ordinal!, nowMs);
+      _settleAt(nowMs); // cascade past any completed items ahead
+    }
+    return marking;
+  }
+
+  /// Resolves a hold ([SessionState.awaitingAdvance]) for the CURRENT
+  /// occurrence: [completed] is the Enter path (✓), `false` is the "not
+  /// completed" button. Advances to the next occurrence. False when not at
+  /// a hold. (For a repeated item the passes resolve one by one — the row's
+  /// checkbox lights when the last pass is done.)
+  bool resolveHold({required bool completed}) {
+    final nowMs = _settleAtClock();
+    if (_cursor.state != SessionState.awaitingAdvance) return false;
+    final i = _cursor.ordinal!;
+    if (completed) {
+      _completedOrdinals.add(i);
+    } else {
+      _completedOrdinals.remove(i);
+    }
+    _advanceFrom(i, nowMs);
+    _settleAt(nowMs);
+    return true;
   }
 
   /// v2 P1.2 — the EFFECTIVE finish method. An Open instance (no duration)
@@ -533,6 +634,7 @@ class TimerSession {
         defId: instances[ordinal].defId,
         terminal: TerminalState.skipped,
         endedAt: DateTime.fromMillisecondsSinceEpoch(atMs, isUtc: true),
+        completed: _completedOrdinals.contains(ordinal),
       ),
     );
   }
@@ -551,8 +653,33 @@ class TimerSession {
   _Projection _project(_Cursor cursor, int nowMs) {
     var current = cursor;
     final events = <InstanceEnded>[];
+    final marked = <int>{};
     while (current.state == SessionState.running) {
       final i = current.ordinal!;
+      if (_completedOrdinals.contains(i)) {
+        // v2 P1.3: pre-completed work flies past when reached — it already
+        // happened; the chain never waits on it. Terminal `skipped` (it did
+        // not run THIS pass) with the mark standing (completed: true).
+        final reachedMs = current.anchorMs - current.accumulatedMs;
+        events.add(
+          InstanceEnded(
+            ordinal: i,
+            defId: instances[i].defId,
+            terminal: TerminalState.skipped,
+            endedAt: DateTime.fromMillisecondsSinceEpoch(
+              reachedMs,
+              isUtc: true,
+            ),
+            completed: true,
+          ),
+        );
+        if (i == instances.length - 1) {
+          current = _fresh;
+          break;
+        }
+        current = _Cursor(SessionState.running, i + 1, 0, reachedMs);
+        continue;
+      }
       final durationMs = _effectiveMs(i);
       final sinceAnchor = nowMs - current.anchorMs;
       // Backwards clock: clamp, elapsed = accumulated only.
@@ -562,17 +689,24 @@ class TimerSession {
       if (remainingMs > 0) break; // still running — nothing crosses
       // Zero crossing: the instance ended at this absolute instant...
       final endedAtMs = current.anchorMs + (durationMs - current.accumulatedMs);
+      // v2 P1.3: an auto-finish occurrence that ran its course auto-
+      // completes ITS pass (a repeated item's passes complete one by one).
+      // Collected, not applied — projection is pure (see _Projection).
+      final completes = !_isManual(i) || _completedOrdinals.contains(i);
+      if (!_isManual(i)) marked.add(i);
       events.add(
         InstanceEnded(
           ordinal: i,
           defId: instances[i].defId,
           terminal: TerminalState.done,
           endedAt: DateTime.fromMillisecondsSinceEpoch(endedAtMs, isUtc: true),
+          completed: completes,
         ),
       );
       if (_isManual(i)) {
         // Manually complete: hold at exactly zero — the overshoot is
-        // ABSORBED; the chain waits for the user to advance.
+        // ABSORBED; the chain waits for the user to resolve the hold (the
+        // mark is still undecided — `completed: false` at emission).
         current = _Cursor(SessionState.awaitingAdvance, i, 0, endedAtMs);
         break;
       }
@@ -586,7 +720,7 @@ class TimerSession {
       // the loop carries the overshoot across as already-elapsed time.
       current = _Cursor(SessionState.running, i + 1, 0, endedAtMs);
     }
-    return _Projection(current, events);
+    return _Projection(current, events, marked);
   }
 
   TimerSnapshot _toSnapshot(_Cursor cursor, int nowMs) {
@@ -657,8 +791,12 @@ class _Cursor {
 /// Result of projecting a cursor: the new cursor plus the `done` events the
 /// projection's zero-crossings produced (empty for non-running states).
 class _Projection {
-  const _Projection(this.cursor, this.events);
+  const _Projection(this.cursor, this.events, this.marked);
 
   final _Cursor cursor;
   final List<InstanceEnded> events;
+
+  /// v2 P1.3 — occurrences the crossings auto-completed. PROJECTION IS
+  /// PURE (snapshot must not mutate); only _settleAt applies these.
+  final Set<int> marked;
 }
