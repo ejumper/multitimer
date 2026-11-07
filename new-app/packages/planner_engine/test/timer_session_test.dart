@@ -23,7 +23,7 @@ void main() {
 
   IntervalInstance inst(
     int ordinal, {
-    int seconds = 60,
+    int? seconds = 60,
     bool autoFinish = true,
     String? name,
     String defId = 'd',
@@ -1037,6 +1037,83 @@ void main() {
     expect(s.adopt([copy(s.instances[0], seconds: 90)]), isFalse);
     expect(s.snapshot(clock.current).totalPlanned, secs(90));
     expect(s.snapshot(clock.current).state, SessionState.notStarted);
+  });
+
+
+  // ── v2 P1.2: Open semantics (no duration = instant → alert → hold) ──
+
+  test('open_reached_mid_run_holds_instantly', () {
+    final s = session([
+      inst(0, seconds: 60, defId: 'a'),
+      inst(1, seconds: null, autoFinish: false, defId: 'go'),
+    ]);
+    s.start();
+    warpBy(secs(60));
+    s.settle(clock.current); // materialize the crossing (snapshot is pure)
+    final snap = s.snapshot(clock.current);
+    // Reached at the crossing and held in the same settle — the alert
+    // (InstanceEnded) fires at exactly the instant it was reached.
+    expect(snap.state, SessionState.awaitingAdvance);
+    expect(snap.ordinal, 1);
+    expect(snap.remaining, Duration.zero);
+    expect(sink.events.length, 2); // a done + the open's done
+    expect(sink.events.last.defId, 'go');
+    expect(sink.events.last.terminal, TerminalState.done);
+  });
+
+  test('open_first_holds_the_moment_the_run_starts', () {
+    final s = session([
+      inst(0, seconds: null, autoFinish: false, defId: 'go'),
+      inst(1, seconds: 60, defId: 'a'),
+    ]);
+    s.start();
+    warpBy(secs(1)); // nothing to consume — the hold happened at start
+    s.settle(clock.current);
+    final snap = s.snapshot(clock.current);
+    expect(snap.state, SessionState.awaitingAdvance);
+    expect(snap.ordinal, 0);
+    expect(sink.events.length, 1);
+    expect(sink.events.single.endedAt, t0); // logged at the start instant
+  });
+
+  test('open_as_last_resolves_to_a_fresh_session', () {
+    final s = session([
+      inst(0, seconds: 60, defId: 'a'),
+      inst(1, seconds: null, autoFinish: false, defId: 'go'),
+    ]);
+    s.start();
+    warpBy(secs(60));
+    expect(s.snapshot(clock.current).state, SessionState.awaitingAdvance);
+    expect(s.skipNext(), isTrue); // the user resolves the hold
+    expect(s.snapshot(clock.current).state, SessionState.notStarted);
+  });
+
+  test('open_ignores_an_authored_auto_finish', () {
+    // Defense in depth: authoring forbids auto-finish without a duration,
+    // but a malformed instance must never auto-advance (that would be an
+    // instant skip).
+    final s = session([
+      inst(0, seconds: null, autoFinish: true, defId: 'go'),
+      inst(1, seconds: 60, defId: 'a'),
+    ]);
+    s.start();
+    warpBy(secs(30));
+    final snap = s.snapshot(clock.current);
+    expect(snap.state, SessionState.awaitingAdvance);
+    expect(snap.ordinal, 0);
+  });
+
+  test('open_hold_advances_manually_into_the_next', () {
+    final s = session([
+      inst(0, seconds: null, autoFinish: false, defId: 'go'),
+      inst(1, seconds: 45, defId: 'a'),
+    ]);
+    s.start();
+    expect(s.skipNext(), isTrue);
+    final snap = s.snapshot(clock.current);
+    expect(snap.state, SessionState.running);
+    expect(snap.ordinal, 1);
+    expect(snap.remaining, secs(45));
   });
 
 }

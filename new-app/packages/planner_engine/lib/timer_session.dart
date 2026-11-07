@@ -314,7 +314,7 @@ class TimerSession {
         );
       }
       _adjustMs.remove(j);
-      if (!next[j].autoFinish) {
+      if (_isManual(j)) {
         _cursor = _Cursor(SessionState.awaitingAdvance, j, 0, nowMs);
       } else if (j == next.length - 1) {
         _cursor = _fresh;
@@ -395,7 +395,7 @@ class TimerSession {
         ),
       );
       _adjustMs.remove(i); // absorbed by the completion
-      if (!instances[i].autoFinish) {
+      if (_isManual(i)) {
         _cursor = _Cursor(SessionState.awaitingAdvance, i, 0, nowMs);
       } else if (i == instances.length - 1) {
         _cursor = _fresh;
@@ -519,6 +519,13 @@ class TimerSession {
     }
   }
 
+  /// v2 P1.2 — the EFFECTIVE finish method. An Open instance (no duration)
+  /// always completes manually: the authored autoFinish flag is ignored
+  /// (authoring requires a duration for auto-finish; this is the engine's
+  /// defense in depth). Everything else honors the authored method.
+  bool _isManual(int i) =>
+      instances[i].durationSeconds == null || !instances[i].autoFinish;
+
   void _emitSkipped(int ordinal, int atMs) {
     sink.emit(
       InstanceEnded(
@@ -563,7 +570,7 @@ class TimerSession {
           endedAt: DateTime.fromMillisecondsSinceEpoch(endedAtMs, isUtc: true),
         ),
       );
-      if (!instances[i].autoFinish) {
+      if (_isManual(i)) {
         // Manually complete: hold at exactly zero — the overshoot is
         // ABSORBED; the chain waits for the user to advance.
         current = _Cursor(SessionState.awaitingAdvance, i, 0, endedAtMs);
