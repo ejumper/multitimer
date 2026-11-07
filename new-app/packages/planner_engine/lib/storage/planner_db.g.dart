@@ -561,9 +561,9 @@ class $IntervalDefsTable extends IntervalDefs
   late final GeneratedColumn<int> durationSeconds = GeneratedColumn<int>(
     'duration_seconds',
     aliasedName,
-    false,
+    true,
     type: DriftSqlType.int,
-    requiredDuringInsert: true,
+    requiredDuringInsert: false,
   );
   static const VerificationMeta _autoFinishMeta = const VerificationMeta(
     'autoFinish',
@@ -613,28 +613,29 @@ class $IntervalDefsTable extends IntervalDefs
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
-  static const VerificationMeta _completionDefaultMeta = const VerificationMeta(
-    'completionDefault',
+  static const VerificationMeta _completedMeta = const VerificationMeta(
+    'completed',
   );
   @override
-  late final GeneratedColumn<String> completionDefault =
-      GeneratedColumn<String>(
-        'completion_default',
-        aliasedName,
-        false,
-        type: DriftSqlType.string,
-        requiredDuringInsert: true,
-      );
-  static const VerificationMeta _triggerMeta = const VerificationMeta(
-    'trigger',
-  );
-  @override
-  late final GeneratedColumn<String> trigger = GeneratedColumn<String>(
-    'trigger',
+  late final GeneratedColumn<bool> completed = GeneratedColumn<bool>(
+    'completed',
     aliasedName,
     false,
-    type: DriftSqlType.string,
+    type: DriftSqlType.bool,
     requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("completed" IN (0, 1))',
+    ),
+  );
+  static const VerificationMeta _triggerTimeSecondsMeta =
+      const VerificationMeta('triggerTimeSeconds');
+  @override
+  late final GeneratedColumn<int> triggerTimeSeconds = GeneratedColumn<int>(
+    'trigger_time_seconds',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
   );
   @override
   List<GeneratedColumn> get $columns => [
@@ -647,8 +648,8 @@ class $IntervalDefsTable extends IntervalDefs
     endAlertSoundFile,
     parentGroupId,
     sortIndex,
-    completionDefault,
-    trigger,
+    completed,
+    triggerTimeSeconds,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -697,8 +698,6 @@ class $IntervalDefsTable extends IntervalDefs
           _durationSecondsMeta,
         ),
       );
-    } else if (isInserting) {
-      context.missing(_durationSecondsMeta);
     }
     if (data.containsKey('auto_finish')) {
       context.handle(
@@ -734,24 +733,22 @@ class $IntervalDefsTable extends IntervalDefs
     } else if (isInserting) {
       context.missing(_sortIndexMeta);
     }
-    if (data.containsKey('completion_default')) {
+    if (data.containsKey('completed')) {
       context.handle(
-        _completionDefaultMeta,
-        completionDefault.isAcceptableOrUnknown(
-          data['completion_default']!,
-          _completionDefaultMeta,
+        _completedMeta,
+        completed.isAcceptableOrUnknown(data['completed']!, _completedMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_completedMeta);
+    }
+    if (data.containsKey('trigger_time_seconds')) {
+      context.handle(
+        _triggerTimeSecondsMeta,
+        triggerTimeSeconds.isAcceptableOrUnknown(
+          data['trigger_time_seconds']!,
+          _triggerTimeSecondsMeta,
         ),
       );
-    } else if (isInserting) {
-      context.missing(_completionDefaultMeta);
-    }
-    if (data.containsKey('trigger')) {
-      context.handle(
-        _triggerMeta,
-        trigger.isAcceptableOrUnknown(data['trigger']!, _triggerMeta),
-      );
-    } else if (isInserting) {
-      context.missing(_triggerMeta);
     }
     return context;
   }
@@ -781,7 +778,7 @@ class $IntervalDefsTable extends IntervalDefs
       durationSeconds: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}duration_seconds'],
-      )!,
+      ),
       autoFinish: attachedDatabase.typeMapping.read(
         DriftSqlType.bool,
         data['${effectivePrefix}auto_finish'],
@@ -798,14 +795,14 @@ class $IntervalDefsTable extends IntervalDefs
         DriftSqlType.int,
         data['${effectivePrefix}sort_index'],
       )!,
-      completionDefault: attachedDatabase.typeMapping.read(
-        DriftSqlType.string,
-        data['${effectivePrefix}completion_default'],
+      completed: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}completed'],
       )!,
-      trigger: attachedDatabase.typeMapping.read(
-        DriftSqlType.string,
-        data['${effectivePrefix}trigger'],
-      )!,
+      triggerTimeSeconds: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}trigger_time_seconds'],
+      ),
     );
   }
 
@@ -820,25 +817,25 @@ class IntervalDefRow extends DataClass implements Insertable<IntervalDefRow> {
   final String timerId;
   final String? name;
   final String color;
-  final int durationSeconds;
+  final int? durationSeconds;
   final bool autoFinish;
   final String? endAlertSoundFile;
   final String? parentGroupId;
   final int sortIndex;
-  final String completionDefault;
-  final String trigger;
+  final bool completed;
+  final int? triggerTimeSeconds;
   const IntervalDefRow({
     required this.id,
     required this.timerId,
     this.name,
     required this.color,
-    required this.durationSeconds,
+    this.durationSeconds,
     required this.autoFinish,
     this.endAlertSoundFile,
     this.parentGroupId,
     required this.sortIndex,
-    required this.completionDefault,
-    required this.trigger,
+    required this.completed,
+    this.triggerTimeSeconds,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -849,7 +846,9 @@ class IntervalDefRow extends DataClass implements Insertable<IntervalDefRow> {
       map['name'] = Variable<String>(name);
     }
     map['color'] = Variable<String>(color);
-    map['duration_seconds'] = Variable<int>(durationSeconds);
+    if (!nullToAbsent || durationSeconds != null) {
+      map['duration_seconds'] = Variable<int>(durationSeconds);
+    }
     map['auto_finish'] = Variable<bool>(autoFinish);
     if (!nullToAbsent || endAlertSoundFile != null) {
       map['end_alert_sound_file'] = Variable<String>(endAlertSoundFile);
@@ -858,8 +857,10 @@ class IntervalDefRow extends DataClass implements Insertable<IntervalDefRow> {
       map['parent_group_id'] = Variable<String>(parentGroupId);
     }
     map['sort_index'] = Variable<int>(sortIndex);
-    map['completion_default'] = Variable<String>(completionDefault);
-    map['trigger'] = Variable<String>(trigger);
+    map['completed'] = Variable<bool>(completed);
+    if (!nullToAbsent || triggerTimeSeconds != null) {
+      map['trigger_time_seconds'] = Variable<int>(triggerTimeSeconds);
+    }
     return map;
   }
 
@@ -869,7 +870,9 @@ class IntervalDefRow extends DataClass implements Insertable<IntervalDefRow> {
       timerId: Value(timerId),
       name: name == null && nullToAbsent ? const Value.absent() : Value(name),
       color: Value(color),
-      durationSeconds: Value(durationSeconds),
+      durationSeconds: durationSeconds == null && nullToAbsent
+          ? const Value.absent()
+          : Value(durationSeconds),
       autoFinish: Value(autoFinish),
       endAlertSoundFile: endAlertSoundFile == null && nullToAbsent
           ? const Value.absent()
@@ -878,8 +881,10 @@ class IntervalDefRow extends DataClass implements Insertable<IntervalDefRow> {
           ? const Value.absent()
           : Value(parentGroupId),
       sortIndex: Value(sortIndex),
-      completionDefault: Value(completionDefault),
-      trigger: Value(trigger),
+      completed: Value(completed),
+      triggerTimeSeconds: triggerTimeSeconds == null && nullToAbsent
+          ? const Value.absent()
+          : Value(triggerTimeSeconds),
     );
   }
 
@@ -893,15 +898,15 @@ class IntervalDefRow extends DataClass implements Insertable<IntervalDefRow> {
       timerId: serializer.fromJson<String>(json['timerId']),
       name: serializer.fromJson<String?>(json['name']),
       color: serializer.fromJson<String>(json['color']),
-      durationSeconds: serializer.fromJson<int>(json['durationSeconds']),
+      durationSeconds: serializer.fromJson<int?>(json['durationSeconds']),
       autoFinish: serializer.fromJson<bool>(json['autoFinish']),
       endAlertSoundFile: serializer.fromJson<String?>(
         json['endAlertSoundFile'],
       ),
       parentGroupId: serializer.fromJson<String?>(json['parentGroupId']),
       sortIndex: serializer.fromJson<int>(json['sortIndex']),
-      completionDefault: serializer.fromJson<String>(json['completionDefault']),
-      trigger: serializer.fromJson<String>(json['trigger']),
+      completed: serializer.fromJson<bool>(json['completed']),
+      triggerTimeSeconds: serializer.fromJson<int?>(json['triggerTimeSeconds']),
     );
   }
   @override
@@ -912,13 +917,13 @@ class IntervalDefRow extends DataClass implements Insertable<IntervalDefRow> {
       'timerId': serializer.toJson<String>(timerId),
       'name': serializer.toJson<String?>(name),
       'color': serializer.toJson<String>(color),
-      'durationSeconds': serializer.toJson<int>(durationSeconds),
+      'durationSeconds': serializer.toJson<int?>(durationSeconds),
       'autoFinish': serializer.toJson<bool>(autoFinish),
       'endAlertSoundFile': serializer.toJson<String?>(endAlertSoundFile),
       'parentGroupId': serializer.toJson<String?>(parentGroupId),
       'sortIndex': serializer.toJson<int>(sortIndex),
-      'completionDefault': serializer.toJson<String>(completionDefault),
-      'trigger': serializer.toJson<String>(trigger),
+      'completed': serializer.toJson<bool>(completed),
+      'triggerTimeSeconds': serializer.toJson<int?>(triggerTimeSeconds),
     };
   }
 
@@ -927,19 +932,21 @@ class IntervalDefRow extends DataClass implements Insertable<IntervalDefRow> {
     String? timerId,
     Value<String?> name = const Value.absent(),
     String? color,
-    int? durationSeconds,
+    Value<int?> durationSeconds = const Value.absent(),
     bool? autoFinish,
     Value<String?> endAlertSoundFile = const Value.absent(),
     Value<String?> parentGroupId = const Value.absent(),
     int? sortIndex,
-    String? completionDefault,
-    String? trigger,
+    bool? completed,
+    Value<int?> triggerTimeSeconds = const Value.absent(),
   }) => IntervalDefRow(
     id: id ?? this.id,
     timerId: timerId ?? this.timerId,
     name: name.present ? name.value : this.name,
     color: color ?? this.color,
-    durationSeconds: durationSeconds ?? this.durationSeconds,
+    durationSeconds: durationSeconds.present
+        ? durationSeconds.value
+        : this.durationSeconds,
     autoFinish: autoFinish ?? this.autoFinish,
     endAlertSoundFile: endAlertSoundFile.present
         ? endAlertSoundFile.value
@@ -948,8 +955,10 @@ class IntervalDefRow extends DataClass implements Insertable<IntervalDefRow> {
         ? parentGroupId.value
         : this.parentGroupId,
     sortIndex: sortIndex ?? this.sortIndex,
-    completionDefault: completionDefault ?? this.completionDefault,
-    trigger: trigger ?? this.trigger,
+    completed: completed ?? this.completed,
+    triggerTimeSeconds: triggerTimeSeconds.present
+        ? triggerTimeSeconds.value
+        : this.triggerTimeSeconds,
   );
   IntervalDefRow copyWithCompanion(IntervalDefsCompanion data) {
     return IntervalDefRow(
@@ -970,10 +979,10 @@ class IntervalDefRow extends DataClass implements Insertable<IntervalDefRow> {
           ? data.parentGroupId.value
           : this.parentGroupId,
       sortIndex: data.sortIndex.present ? data.sortIndex.value : this.sortIndex,
-      completionDefault: data.completionDefault.present
-          ? data.completionDefault.value
-          : this.completionDefault,
-      trigger: data.trigger.present ? data.trigger.value : this.trigger,
+      completed: data.completed.present ? data.completed.value : this.completed,
+      triggerTimeSeconds: data.triggerTimeSeconds.present
+          ? data.triggerTimeSeconds.value
+          : this.triggerTimeSeconds,
     );
   }
 
@@ -989,8 +998,8 @@ class IntervalDefRow extends DataClass implements Insertable<IntervalDefRow> {
           ..write('endAlertSoundFile: $endAlertSoundFile, ')
           ..write('parentGroupId: $parentGroupId, ')
           ..write('sortIndex: $sortIndex, ')
-          ..write('completionDefault: $completionDefault, ')
-          ..write('trigger: $trigger')
+          ..write('completed: $completed, ')
+          ..write('triggerTimeSeconds: $triggerTimeSeconds')
           ..write(')'))
         .toString();
   }
@@ -1006,8 +1015,8 @@ class IntervalDefRow extends DataClass implements Insertable<IntervalDefRow> {
     endAlertSoundFile,
     parentGroupId,
     sortIndex,
-    completionDefault,
-    trigger,
+    completed,
+    triggerTimeSeconds,
   );
   @override
   bool operator ==(Object other) =>
@@ -1022,8 +1031,8 @@ class IntervalDefRow extends DataClass implements Insertable<IntervalDefRow> {
           other.endAlertSoundFile == this.endAlertSoundFile &&
           other.parentGroupId == this.parentGroupId &&
           other.sortIndex == this.sortIndex &&
-          other.completionDefault == this.completionDefault &&
-          other.trigger == this.trigger);
+          other.completed == this.completed &&
+          other.triggerTimeSeconds == this.triggerTimeSeconds);
 }
 
 class IntervalDefsCompanion extends UpdateCompanion<IntervalDefRow> {
@@ -1031,13 +1040,13 @@ class IntervalDefsCompanion extends UpdateCompanion<IntervalDefRow> {
   final Value<String> timerId;
   final Value<String?> name;
   final Value<String> color;
-  final Value<int> durationSeconds;
+  final Value<int?> durationSeconds;
   final Value<bool> autoFinish;
   final Value<String?> endAlertSoundFile;
   final Value<String?> parentGroupId;
   final Value<int> sortIndex;
-  final Value<String> completionDefault;
-  final Value<String> trigger;
+  final Value<bool> completed;
+  final Value<int?> triggerTimeSeconds;
   final Value<int> rowid;
   const IntervalDefsCompanion({
     this.id = const Value.absent(),
@@ -1049,8 +1058,8 @@ class IntervalDefsCompanion extends UpdateCompanion<IntervalDefRow> {
     this.endAlertSoundFile = const Value.absent(),
     this.parentGroupId = const Value.absent(),
     this.sortIndex = const Value.absent(),
-    this.completionDefault = const Value.absent(),
-    this.trigger = const Value.absent(),
+    this.completed = const Value.absent(),
+    this.triggerTimeSeconds = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   IntervalDefsCompanion.insert({
@@ -1058,22 +1067,20 @@ class IntervalDefsCompanion extends UpdateCompanion<IntervalDefRow> {
     required String timerId,
     this.name = const Value.absent(),
     required String color,
-    required int durationSeconds,
+    this.durationSeconds = const Value.absent(),
     required bool autoFinish,
     this.endAlertSoundFile = const Value.absent(),
     this.parentGroupId = const Value.absent(),
     required int sortIndex,
-    required String completionDefault,
-    required String trigger,
+    required bool completed,
+    this.triggerTimeSeconds = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        timerId = Value(timerId),
        color = Value(color),
-       durationSeconds = Value(durationSeconds),
        autoFinish = Value(autoFinish),
        sortIndex = Value(sortIndex),
-       completionDefault = Value(completionDefault),
-       trigger = Value(trigger);
+       completed = Value(completed);
   static Insertable<IntervalDefRow> custom({
     Expression<String>? id,
     Expression<String>? timerId,
@@ -1084,8 +1091,8 @@ class IntervalDefsCompanion extends UpdateCompanion<IntervalDefRow> {
     Expression<String>? endAlertSoundFile,
     Expression<String>? parentGroupId,
     Expression<int>? sortIndex,
-    Expression<String>? completionDefault,
-    Expression<String>? trigger,
+    Expression<bool>? completed,
+    Expression<int>? triggerTimeSeconds,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1098,8 +1105,9 @@ class IntervalDefsCompanion extends UpdateCompanion<IntervalDefRow> {
       if (endAlertSoundFile != null) 'end_alert_sound_file': endAlertSoundFile,
       if (parentGroupId != null) 'parent_group_id': parentGroupId,
       if (sortIndex != null) 'sort_index': sortIndex,
-      if (completionDefault != null) 'completion_default': completionDefault,
-      if (trigger != null) 'trigger': trigger,
+      if (completed != null) 'completed': completed,
+      if (triggerTimeSeconds != null)
+        'trigger_time_seconds': triggerTimeSeconds,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1109,13 +1117,13 @@ class IntervalDefsCompanion extends UpdateCompanion<IntervalDefRow> {
     Value<String>? timerId,
     Value<String?>? name,
     Value<String>? color,
-    Value<int>? durationSeconds,
+    Value<int?>? durationSeconds,
     Value<bool>? autoFinish,
     Value<String?>? endAlertSoundFile,
     Value<String?>? parentGroupId,
     Value<int>? sortIndex,
-    Value<String>? completionDefault,
-    Value<String>? trigger,
+    Value<bool>? completed,
+    Value<int?>? triggerTimeSeconds,
     Value<int>? rowid,
   }) {
     return IntervalDefsCompanion(
@@ -1128,8 +1136,8 @@ class IntervalDefsCompanion extends UpdateCompanion<IntervalDefRow> {
       endAlertSoundFile: endAlertSoundFile ?? this.endAlertSoundFile,
       parentGroupId: parentGroupId ?? this.parentGroupId,
       sortIndex: sortIndex ?? this.sortIndex,
-      completionDefault: completionDefault ?? this.completionDefault,
-      trigger: trigger ?? this.trigger,
+      completed: completed ?? this.completed,
+      triggerTimeSeconds: triggerTimeSeconds ?? this.triggerTimeSeconds,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1164,11 +1172,11 @@ class IntervalDefsCompanion extends UpdateCompanion<IntervalDefRow> {
     if (sortIndex.present) {
       map['sort_index'] = Variable<int>(sortIndex.value);
     }
-    if (completionDefault.present) {
-      map['completion_default'] = Variable<String>(completionDefault.value);
+    if (completed.present) {
+      map['completed'] = Variable<bool>(completed.value);
     }
-    if (trigger.present) {
-      map['trigger'] = Variable<String>(trigger.value);
+    if (triggerTimeSeconds.present) {
+      map['trigger_time_seconds'] = Variable<int>(triggerTimeSeconds.value);
     }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
@@ -1188,8 +1196,8 @@ class IntervalDefsCompanion extends UpdateCompanion<IntervalDefRow> {
           ..write('endAlertSoundFile: $endAlertSoundFile, ')
           ..write('parentGroupId: $parentGroupId, ')
           ..write('sortIndex: $sortIndex, ')
-          ..write('completionDefault: $completionDefault, ')
-          ..write('trigger: $trigger, ')
+          ..write('completed: $completed, ')
+          ..write('triggerTimeSeconds: $triggerTimeSeconds, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2284,13 +2292,13 @@ typedef $$IntervalDefsTableCreateCompanionBuilder =
       required String timerId,
       Value<String?> name,
       required String color,
-      required int durationSeconds,
+      Value<int?> durationSeconds,
       required bool autoFinish,
       Value<String?> endAlertSoundFile,
       Value<String?> parentGroupId,
       required int sortIndex,
-      required String completionDefault,
-      required String trigger,
+      required bool completed,
+      Value<int?> triggerTimeSeconds,
       Value<int> rowid,
     });
 typedef $$IntervalDefsTableUpdateCompanionBuilder =
@@ -2299,13 +2307,13 @@ typedef $$IntervalDefsTableUpdateCompanionBuilder =
       Value<String> timerId,
       Value<String?> name,
       Value<String> color,
-      Value<int> durationSeconds,
+      Value<int?> durationSeconds,
       Value<bool> autoFinish,
       Value<String?> endAlertSoundFile,
       Value<String?> parentGroupId,
       Value<int> sortIndex,
-      Value<String> completionDefault,
-      Value<String> trigger,
+      Value<bool> completed,
+      Value<int?> triggerTimeSeconds,
       Value<int> rowid,
     });
 
@@ -2363,13 +2371,13 @@ class $$IntervalDefsTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnFilters<String> get completionDefault => $composableBuilder(
-    column: $table.completionDefault,
+  ColumnFilters<bool> get completed => $composableBuilder(
+    column: $table.completed,
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnFilters<String> get trigger => $composableBuilder(
-    column: $table.trigger,
+  ColumnFilters<int> get triggerTimeSeconds => $composableBuilder(
+    column: $table.triggerTimeSeconds,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -2428,13 +2436,13 @@ class $$IntervalDefsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
-  ColumnOrderings<String> get completionDefault => $composableBuilder(
-    column: $table.completionDefault,
+  ColumnOrderings<bool> get completed => $composableBuilder(
+    column: $table.completed,
     builder: (column) => ColumnOrderings(column),
   );
 
-  ColumnOrderings<String> get trigger => $composableBuilder(
-    column: $table.trigger,
+  ColumnOrderings<int> get triggerTimeSeconds => $composableBuilder(
+    column: $table.triggerTimeSeconds,
     builder: (column) => ColumnOrderings(column),
   );
 }
@@ -2483,13 +2491,13 @@ class $$IntervalDefsTableAnnotationComposer
   GeneratedColumn<int> get sortIndex =>
       $composableBuilder(column: $table.sortIndex, builder: (column) => column);
 
-  GeneratedColumn<String> get completionDefault => $composableBuilder(
-    column: $table.completionDefault,
+  GeneratedColumn<bool> get completed =>
+      $composableBuilder(column: $table.completed, builder: (column) => column);
+
+  GeneratedColumn<int> get triggerTimeSeconds => $composableBuilder(
+    column: $table.triggerTimeSeconds,
     builder: (column) => column,
   );
-
-  GeneratedColumn<String> get trigger =>
-      $composableBuilder(column: $table.trigger, builder: (column) => column);
 }
 
 class $$IntervalDefsTableTableManager
@@ -2527,13 +2535,13 @@ class $$IntervalDefsTableTableManager
                 Value<String> timerId = const Value.absent(),
                 Value<String?> name = const Value.absent(),
                 Value<String> color = const Value.absent(),
-                Value<int> durationSeconds = const Value.absent(),
+                Value<int?> durationSeconds = const Value.absent(),
                 Value<bool> autoFinish = const Value.absent(),
                 Value<String?> endAlertSoundFile = const Value.absent(),
                 Value<String?> parentGroupId = const Value.absent(),
                 Value<int> sortIndex = const Value.absent(),
-                Value<String> completionDefault = const Value.absent(),
-                Value<String> trigger = const Value.absent(),
+                Value<bool> completed = const Value.absent(),
+                Value<int?> triggerTimeSeconds = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => IntervalDefsCompanion(
                 id: id,
@@ -2545,8 +2553,8 @@ class $$IntervalDefsTableTableManager
                 endAlertSoundFile: endAlertSoundFile,
                 parentGroupId: parentGroupId,
                 sortIndex: sortIndex,
-                completionDefault: completionDefault,
-                trigger: trigger,
+                completed: completed,
+                triggerTimeSeconds: triggerTimeSeconds,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -2555,13 +2563,13 @@ class $$IntervalDefsTableTableManager
                 required String timerId,
                 Value<String?> name = const Value.absent(),
                 required String color,
-                required int durationSeconds,
+                Value<int?> durationSeconds = const Value.absent(),
                 required bool autoFinish,
                 Value<String?> endAlertSoundFile = const Value.absent(),
                 Value<String?> parentGroupId = const Value.absent(),
                 required int sortIndex,
-                required String completionDefault,
-                required String trigger,
+                required bool completed,
+                Value<int?> triggerTimeSeconds = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => IntervalDefsCompanion.insert(
                 id: id,
@@ -2573,8 +2581,8 @@ class $$IntervalDefsTableTableManager
                 endAlertSoundFile: endAlertSoundFile,
                 parentGroupId: parentGroupId,
                 sortIndex: sortIndex,
-                completionDefault: completionDefault,
-                trigger: trigger,
+                completed: completed,
+                triggerTimeSeconds: triggerTimeSeconds,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

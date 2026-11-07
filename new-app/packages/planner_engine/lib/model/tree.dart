@@ -92,6 +92,14 @@ class IntervalTree {
     ],
   ];
 
+  /// All nodes, depth-first (roots first, each group before its children).
+  List<IntervalNode> get allNodes => [
+    for (final n in roots) ...[
+      n,
+      if (n is GroupNode) ...IntervalTree(n.children).allNodes,
+    ],
+  ];
+
   // ── structural ops ──────────────────────────────────────────────────────
 
   /// Wraps the selected sibling nodes in a new group (see library docs).
@@ -359,30 +367,43 @@ class IntervalTree {
     return null;
   }
 
-  static IntervalNode _copyNode(IntervalNode node, String Function() newId) =>
-      switch (node) {
-        DefNode(:final def) => DefNode(
-          IntervalDef(
-            id: newId(),
-            timerId: def.timerId,
-            name: def.name,
-            color: def.color,
-            durationSeconds: def.durationSeconds,
-            autoFinish: def.autoFinish,
-            endAlertSoundFile: def.endAlertSoundFile,
-            completionDefault: def.completionDefault,
-            trigger: def.trigger,
-          ),
-        ),
-        GroupNode(:final group, :final children) => GroupNode(
-          GroupDef(
-            id: newId(),
-            timerId: group.timerId,
-            repeatCount: group.repeatCount,
-          ),
-          [for (final c in children) _copyNode(c, newId)],
-        ),
-      };
+  static IntervalNode _copyNode(
+    IntervalNode node,
+    String Function() newId, {
+    String? timerId,
+  }) => switch (node) {
+    DefNode(:final def) => DefNode(
+      IntervalDef(
+        id: newId(),
+        timerId: timerId ?? def.timerId,
+        name: def.name,
+        color: def.color,
+        durationSeconds: def.durationSeconds,
+        autoFinish: def.autoFinish,
+        endAlertSoundFile: def.endAlertSoundFile,
+        // v2 P1.1: a copy is new work — completion marks never travel.
+        completed: false,
+        triggerTimeSeconds: def.triggerTimeSeconds,
+      ),
+    ),
+    GroupNode(:final group, :final children) => GroupNode(
+      GroupDef(
+        id: newId(),
+        timerId: timerId ?? group.timerId,
+        repeatCount: group.repeatCount,
+      ),
+      [for (final c in children) _copyNode(c, newId, timerId: timerId)],
+    ),
+  };
+
+  /// v2 (P1.1) — the fork/copy rule (OVERVIEW §6): deep-copy this tree as a
+  /// NEW plan: fresh ids throughout, owned by [timerId], completion marks
+  /// cleared. Used by day materialization (P4.1) and save-to-folder (P3.2);
+  /// pinned now so the rule cannot regress later.
+  IntervalTree copiedToTimer(String timerId, String Function() newId) =>
+      IntervalTree([
+        for (final n in roots) _copyNode(n, newId, timerId: timerId),
+      ]);
 }
 
 class _Location {

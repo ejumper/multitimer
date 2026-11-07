@@ -132,7 +132,7 @@ class TimerSession {
 
   /// The instance's length for THIS run: planned + the ephemeral adjust.
   int _effectiveMs(int ordinal) =>
-      instances[ordinal].durationSeconds * 1000 + (_adjustMs[ordinal] ?? 0);
+      (instances[ordinal].durationSeconds ?? 0) * 1000 + (_adjustMs[ordinal] ?? 0);
 
   /// Starts the run on instance 0 (accumulated=0, anchor=now). Returns true
   /// only from [SessionState.notStarted] with a non-empty schedule; an empty
@@ -286,7 +286,7 @@ class TimerSession {
     // against the edited length (the user's delta rule: 5min into a 10min
     // interval edited to 15min → 10min left = 15 − 5).
     final oldEffectiveMs =
-        prev[oldOrdinal].durationSeconds * 1000 + (oldAdjust[oldOrdinal] ?? 0);
+        (prev[oldOrdinal].durationSeconds ?? 0) * 1000 + (oldAdjust[oldOrdinal] ?? 0);
     final int elapsedMs;
     if (state == SessionState.awaitingAdvance) {
       elapsedMs = oldEffectiveMs; // a held instance consumed its length
@@ -298,7 +298,7 @@ class TimerSession {
       elapsedMs = _cursor.accumulatedMs + sinceAnchor;
     }
     final newEffectiveMs =
-        next[j].durationSeconds * 1000 + (_adjustMs[j] ?? 0);
+        (next[j].durationSeconds ?? 0) * 1000 + (_adjustMs[j] ?? 0);
     final remainingMs = newEffectiveMs - elapsedMs;
 
     if (remainingMs <= 0) {

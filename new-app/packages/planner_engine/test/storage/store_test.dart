@@ -1,9 +1,12 @@
+import 'dart:io';
+
 import 'package:drift/native.dart';
 import 'package:planner_engine/planner_engine.dart';
 import 'package:test/test.dart';
 
 /// Storage contract tests (P1.1): round-trip, CRUD, change log. Uses an
-/// in-memory SQLite so no dart:io anywhere in tests either.
+/// in-memory SQLite; the v2-migration test alone needs a real file (close /
+/// reopen across versions), hence dart:io here.
 void main() {
   late FixedClock clock;
   late PlannerDb db;
@@ -119,9 +122,9 @@ void main() {
       expect(node.def.durationSeconds, 450);
       expect(node.def.autoFinish, isFalse);
       expect(node.def.endAlertSoundFile, 'ding.mp3');
-      // Groundwork fields round-trip.
-      expect(node.def.completionDefault, CompletionState.notCompleted);
-      expect(node.def.trigger, TriggerMethod.order);
+      // v2 fields round-trip: mark and trigger-time default sanely.
+      expect(node.def.completed, isFalse);
+      expect(node.def.triggerTimeSeconds, isNull);
 
       // Group repeat counts survive at both depths.
       expect((loaded.nodeById('g1') as GroupNode).group.repeatCount, 8);
@@ -162,8 +165,9 @@ void main() {
       );
     });
 
-    test('groundwork fields can round-trip non-default values', () async {
-      // v1 never surfaces these, but the schema stores them faithfully.
+    test('v2 fields round-trip non-default values', () async {
+      // marks and wall times are load-bearing in v2 — they must survive
+      // storage exactly.
       final b = await store.createBoard('tmp');
       final t = await store.createTimer(
         boardId: b.id,
@@ -178,15 +182,80 @@ void main() {
             color: '#0055ff',
             durationSeconds: 10,
             autoFinish: true,
-            completionDefault: CompletionState.completed,
-            trigger: TriggerMethod.date,
+            completed: true,
+            triggerTimeSeconds: 14 * 3600,
           ),
         ),
       ]);
       await store.saveTree(t.id, tree, eventKind: 'tree.save');
       final node = (await store.loadTree(t.id)).nodeById('a') as DefNode;
-      expect(node.def.completionDefault, CompletionState.completed);
-      expect(node.def.trigger, TriggerMethod.date);
+      expect(node.def.completed, isTrue);
+      expect(node.def.triggerTimeSeconds, 14 * 3600);
+      expect(node.def.durationSeconds, 10);
+    });
+
+    test('Open intervals round-trip a null duration', () async {
+      final b = await store.createBoard('tmp');
+      final t = await store.createTimer(
+        boardId: b.id,
+        name: 'chain',
+        color: '#0055ff',
+      );
+      final tree = IntervalTree([
+        DefNode(
+          IntervalDef(
+            id: 'a',
+            timerId: t.id,
+            color: '#0055ff',
+            durationSeconds: null,
+            autoFinish: false,
+          ),
+        ),
+      ]);
+      await store.saveTree(t.id, tree, eventKind: 'tree.save');
+      final node = (await store.loadTree(t.id)).nodeById('a') as DefNode;
+      expect(node.def.durationSeconds, isNull);
+      expect(node.def.isOpen, isTrue);
+    });
+  });
+
+  group('schema v2 migration (P1.1)', () {
+    test('v1 rows carry over: mark from completion_default, trigger dropped',
+        () async {
+      final dir = Directory.systemTemp.createTempSync('planner_migration');
+      final file = File('${dir.path}/mig.db');
+
+      // Phase 1: a schemaVersion-1 database with one interval whose mark is
+      // stored the v1 way (completion_default TEXT).
+      final v1 = PlannerDb(NativeDatabase(file));
+      await v1.customStatement('DROP TABLE interval_defs');
+      await v1.customStatement(
+        'CREATE TABLE interval_defs ('
+        'id TEXT NOT NULL, timer_id TEXT NOT NULL, name TEXT NULL, '
+        'color TEXT NOT NULL, duration_seconds INTEGER NOT NULL, '
+        'auto_finish INTEGER NOT NULL, end_alert_sound_file TEXT NULL, '
+        'parent_group_id TEXT NULL, sort_index INTEGER NOT NULL, '
+        'completion_default TEXT NOT NULL, trigger TEXT NOT NULL, '
+        'PRIMARY KEY (id))',
+      );
+      await v1.customStatement(
+        "INSERT INTO interval_defs VALUES ('a', 'tim', 'break', '#ff00b1', "
+        "450, 0, 'ding.mp3', NULL, 0, 'completed', 'order')",
+      );
+      await v1.customStatement('PRAGMA user_version = 1');
+      await v1.close();
+
+      // Phase 2: reopening under the v2 schema runs the 1→2 migration.
+      final v2 = PlannerDb(NativeDatabase(file));
+      final rows = await v2.select(v2.intervalDefs).get();
+      expect(rows, hasLength(1));
+      expect(rows.single.id, 'a');
+      expect(rows.single.completed, isTrue); // 'completed' TEXT → true
+      expect(rows.single.durationSeconds, 450);
+      expect(rows.single.triggerTimeSeconds, isNull); // v1 was always order
+      await v2.close();
+
+      dir.deleteSync(recursive: true);
     });
   });
 

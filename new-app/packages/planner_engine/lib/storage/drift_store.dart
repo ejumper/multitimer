@@ -24,10 +24,6 @@ import 'store.dart';
 /// Signature for the engine's id generator (defaults to [newUuidV4]).
 typedef GenerateUuid = String Function();
 
-CompletionState _parseCompletion(String s) => CompletionState.values.byName(s);
-
-TriggerMethod _parseTrigger(String s) => TriggerMethod.values.byName(s);
-
 class DriftStore implements Store {
   // ignore: prefer_initializing_formals, the default is a function tear-off
   // (not const), so an initializing formal is impossible here.
@@ -202,8 +198,8 @@ class DriftStore implements Store {
             durationSeconds: r.durationSeconds,
             autoFinish: r.autoFinish,
             endAlertSoundFile: r.endAlertSoundFile,
-            completionDefault: _parseCompletion(r.completionDefault),
-            trigger: _parseTrigger(r.trigger),
+            completed: r.completed,
+            triggerTimeSeconds: r.triggerTimeSeconds,
           ),
         ),
     };
@@ -262,13 +258,13 @@ class DriftStore implements Store {
                 timerId: def.timerId,
                 name: Value(def.name),
                 color: def.color,
-                durationSeconds: def.durationSeconds,
+                durationSeconds: Value(def.durationSeconds),
                 autoFinish: def.autoFinish,
                 endAlertSoundFile: Value(def.endAlertSoundFile),
                 parentGroupId: Value(parentGroupId),
                 sortIndex: i,
-                completionDefault: def.completionDefault.name,
-                trigger: def.trigger.name,
+                completed: def.completed,
+                triggerTimeSeconds: Value(def.triggerTimeSeconds),
               ),
             );
           case GroupNode(:final group, :final children):

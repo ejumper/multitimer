@@ -9,16 +9,23 @@ void main() {
   var counter = 0;
   String freshId() => 'n${counter++}';
 
-  DefNode def(String id, {int duration = 60, bool autoFinish = true}) =>
-      DefNode(
-        IntervalDef(
-          id: id,
-          timerId: timer,
-          color: '#0055ff',
-          durationSeconds: duration,
-          autoFinish: autoFinish,
-        ),
-      );
+  DefNode def(
+    String id, {
+    int? duration = 60,
+    bool autoFinish = true,
+    bool completed = false,
+    int? triggerTime,
+  }) => DefNode(
+    IntervalDef(
+      id: id,
+      timerId: timer,
+      color: '#0055ff',
+      durationSeconds: duration,
+      autoFinish: autoFinish,
+      completed: completed,
+      triggerTimeSeconds: triggerTime,
+    ),
+  );
 
   GroupNode groupOf(String id, List<IntervalNode> children, {int repeat = 1}) =>
       GroupNode(
@@ -329,4 +336,50 @@ void main() {
       expect(t.allIds, containsAll(['a', 'g1', 'g2', 'b']));
     });
   });
+
+  group('copiedToTimer (v2 P1.1 fork rule)', () {
+    test('fresh ids, new owner, completion marks cleared', () {
+      final t = tree([
+        def('a', completed: true, triggerTime: 5400),
+        groupOf('g1', [def('b', completed: true, duration: null, autoFinish: false)], repeat: 3),
+      ]);
+      final r = t.copiedToTimer('TIM2', freshId);
+
+      // Fresh ids everywhere, the original untouched.
+      expect(r.allIds.toSet().length, 3);
+      expect(t.allIds.toSet(), {'a', 'b', 'g1'});
+
+      // Every node owned by the new timer.
+      for (final n in [...r.roots, ...r.allNodes]) {
+        switch (n) {
+          case DefNode(:final def):
+            expect(def.timerId, 'TIM2');
+          case GroupNode(:final group):
+            expect(group.timerId, 'TIM2');
+        }
+      }
+
+      // Marks cleared, plan shape (incl. the wall time) preserved.
+      final defs = r.allNodes.whereType<DefNode>().toList();
+      expect(defs.every((d) => !d.def.completed), isTrue,
+          reason: 'a copy is new work');
+      expect(
+        defs.map((d) => d.def.triggerTimeSeconds).whereType<int>(),
+        [5400],
+      );
+      expect(defs.any((d) => d.def.isOpen), isTrue);
+      expect((r.roots[1] as GroupNode).group.repeatCount, 3);
+    });
+  });
+
+  group('duplicated copies (v2 P1.1)', () {
+    test('copies start unchecked even when the original is completed', () {
+      final t = tree([def('a', completed: true)]);
+      final r = t.duplicated(['a'], newId: freshId);
+      expect((r.roots.last as DefNode).def.completed, isFalse);
+      expect((r.roots.first as DefNode).def.completed, isTrue,
+          reason: 'the original keeps its mark');
+    });
+  });
+
 }

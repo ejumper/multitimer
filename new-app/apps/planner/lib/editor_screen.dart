@@ -1145,7 +1145,7 @@ class _EditorScreenState extends State<EditorScreen> {
               ),
               const SizedBox(width: 8),
               Text(
-                formatDuration(Duration(seconds: def.durationSeconds)),
+                formatDuration(Duration(seconds: def.durationSeconds ?? 0)),
                 style: const TextStyle(
                   fontFamily: AppFonts.digits,
                   fontSize: 14,

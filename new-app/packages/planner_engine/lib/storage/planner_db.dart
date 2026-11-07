@@ -39,17 +39,22 @@ class IntervalDefs extends Table {
   TextColumn get timerId => text()();
   TextColumn get name => text().nullable()();
   TextColumn get color => text()();
-  IntColumn get durationSeconds => integer()();
+  // v2 (P1.1): nullable — null = Open (no duration).
+  IntColumn get durationSeconds => integer().nullable()();
   BoolColumn get autoFinish => boolean()();
   TextColumn get endAlertSoundFile => text().nullable()();
   TextColumn get parentGroupId => text().nullable()();
   IntColumn get sortIndex => integer()();
 
-  // Groundwork fields (v1: stored, defaulted, inert). Stored as TEXT enum
-  // names — NB: textEnum<>() (drift_dev 2.35.2, Dart 3.13) silently breaks
-  // code generation, so enum mapping is done in DriftStore instead.
-  TextColumn get completionDefault => text()();
-  TextColumn get trigger => text()();
+  // v2 (P1.1): the completion mark (replaces the inert `completionDefault`
+  // groundwork column, migrated in v2). Bool — no enum mapping needed.
+  BoolColumn get completed => boolean()();
+
+  // v2 (P1.1): the trigger method by presence — null = order-triggered,
+  // non-null = date-triggered at this time-of-day (seconds since midnight,
+  // local). Replaces the groundwork `trigger` column (migrated away; every
+  // v1 row was `order`, so every migrated value is null).
+  IntColumn get triggerTimeSeconds => integer().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -89,15 +94,41 @@ class PlannerDb extends _$PlannerDb {
   PlannerDb(super.e);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
-    // v1 has a single schema; upgrades add steps here from v2 on.
     onUpgrade: (m, from, to) async {
       for (var v = from + 1; v <= to; v++) {
-        // Future migrations switch on v.
+        switch (v) {
+          case 2:
+            await _migrate1To2(m);
+        }
       }
     },
   );
+
+  /// v2 (P1.1): interval_defs gains nullable duration + the completion mark
+  /// + the trigger time. SQLite cannot alter a column's nullability, so the
+  /// table is recreated in the v2 shape and v1 rows are carried over:
+  /// `completion_default` TEXT ('completed'/'notCompleted') → `completed`
+  /// bool; the groundwork `trigger` column is dropped (all v1 rows are
+  /// `order` ⇒ trigger_time_seconds stays null).
+  Future<void> _migrate1To2(Migrator m) async {
+    await customStatement(
+      'ALTER TABLE interval_defs RENAME TO interval_defs_v1',
+    );
+    await m.createTable(intervalDefs);
+    await customStatement(
+      'INSERT INTO interval_defs '
+      '(id, timer_id, name, color, duration_seconds, auto_finish, '
+      'end_alert_sound_file, parent_group_id, sort_index, completed, '
+      'trigger_time_seconds) '
+      'SELECT id, timer_id, name, color, duration_seconds, auto_finish, '
+      'end_alert_sound_file, parent_group_id, sort_index, '
+      "CASE WHEN completion_default = 'completed' THEN 1 ELSE 0 END, NULL "
+      'FROM interval_defs_v1',
+    );
+    await customStatement('DROP TABLE interval_defs_v1');
+  }
 }

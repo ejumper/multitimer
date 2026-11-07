@@ -25,6 +25,8 @@ class IntervalInstance {
     required this.durationSeconds,
     required this.autoFinish,
     required this.endAlertSoundFile,
+    this.completed = false,
+    this.triggerTimeSeconds,
   });
 
   /// 0-based position in the flattened list.
@@ -39,8 +41,9 @@ class IntervalInstance {
   /// Snapshot of [IntervalDef.color].
   final String color;
 
-  /// Snapshot of [IntervalDef.durationSeconds].
-  final int durationSeconds;
+  /// Snapshot of [IntervalDef.durationSeconds]; null = Open (no duration —
+  /// plays as a zero-length manual interval: instant, alert, hold).
+  final int? durationSeconds;
 
   /// Snapshot of [IntervalDef.autoFinish] — the finish method: true =
   /// auto-finish, false = manually complete.
@@ -48,6 +51,20 @@ class IntervalInstance {
 
   /// Snapshot of [IntervalDef.endAlertSoundFile]; null = no end alert.
   final String? endAlertSoundFile;
+
+  /// Snapshot of [IntervalDef.completed] (the completion mark at flatten
+  /// time; the session re-keys live marks by defId).
+  final bool completed;
+
+  /// Snapshot of [IntervalDef.triggerTimeSeconds]; null = order-triggered,
+  /// non-null = a wall firing at this time-of-day (seconds since midnight).
+  final int? triggerTimeSeconds;
+
+  /// True for Open instances (no duration).
+  bool get isOpen => durationSeconds == null;
+
+  /// True for date-triggered (wall) instances.
+  bool get isDated => triggerTimeSeconds != null;
 
   @override
   bool operator ==(Object other) =>
@@ -59,7 +76,9 @@ class IntervalInstance {
           other.color == color &&
           other.durationSeconds == durationSeconds &&
           other.autoFinish == autoFinish &&
-          other.endAlertSoundFile == endAlertSoundFile;
+          other.endAlertSoundFile == endAlertSoundFile &&
+          other.completed == completed &&
+          other.triggerTimeSeconds == triggerTimeSeconds;
 
   @override
   int get hashCode => Object.hash(
@@ -70,13 +89,16 @@ class IntervalInstance {
     durationSeconds,
     autoFinish,
     endAlertSoundFile,
+    completed,
+    triggerTimeSeconds,
   );
 
   @override
   String toString() =>
       'IntervalInstance(#$ordinal, def=$defId, ${name ?? '<unnamed>'}, '
-      'color=$color, ${durationSeconds}s, autoFinish=$autoFinish, '
-      'alert=${endAlertSoundFile ?? 'none'})';
+      'color=$color, ${durationSeconds == null ? 'open' : '${durationSeconds}s'}, '
+      'autoFinish=$autoFinish, alert=${endAlertSoundFile ?? 'none'}, '
+      'completed=$completed, at=${triggerTimeSeconds ?? 'order'})';
 }
 
 /// Expands [tree] depth-first into the flat playback schedule. Every
@@ -100,6 +122,8 @@ List<IntervalInstance> flatten(IntervalTree tree) {
               durationSeconds: def.durationSeconds,
               autoFinish: def.autoFinish,
               endAlertSoundFile: def.endAlertSoundFile,
+              completed: def.completed,
+              triggerTimeSeconds: def.triggerTimeSeconds,
             ),
           );
         case GroupNode(:final group, :final children):
@@ -114,8 +138,17 @@ List<IntervalInstance> flatten(IntervalTree tree) {
   return out;
 }
 
-/// Sum of all instances' [IntervalInstance.durationSeconds]; empty input →
-/// [Duration.zero].
+/// Sum of all instances' [IntervalInstance.durationSeconds] (Open intervals
+/// contribute nothing); empty input → [Duration.zero]. With Open items this
+/// total is only the *known* part — pair it with [openCount] for display.
 Duration totalPlanned(List<IntervalInstance> instances) => Duration(
-  seconds: instances.fold<int>(0, (sum, i) => sum + i.durationSeconds),
+  seconds: instances.fold<int>(
+    0,
+    (sum, i) => sum + (i.durationSeconds ?? 0),
+  ),
 );
+
+/// How many instances are Open (no duration) — the "+ open" part a planned
+/// total cannot express.
+int openCount(List<IntervalInstance> instances) =>
+    instances.where((i) => i.durationSeconds == null).length;

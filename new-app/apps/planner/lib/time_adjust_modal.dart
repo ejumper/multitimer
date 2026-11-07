@@ -175,9 +175,9 @@ class _TimeAdjustModalState extends State<_TimeAdjustModal> {
                     _signBox(),
                     const SizedBox(width: 6),
                     _durationBox(1, controller: _hr, unit: 'hr'),
-                    const _colon(),
+                    const _Colon(),
                     _durationBox(2, controller: _min, unit: 'min'),
-                    const _colon(),
+                    const _Colon(),
                     _durationBox(3, controller: _sec, unit: 'sec'),
                   ],
                 ),
@@ -311,8 +311,8 @@ class _TimeAdjustModalState extends State<_TimeAdjustModal> {
   }
 }
 
-class _colon extends StatelessWidget {
-  const _colon();
+class _Colon extends StatelessWidget {
+  const _Colon();
 
   @override
   Widget build(BuildContext context) => const Padding(

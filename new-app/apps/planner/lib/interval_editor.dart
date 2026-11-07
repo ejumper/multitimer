@@ -149,7 +149,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
           (files.isEmpty ? null : files.first);
     } else {
       // EDIT: seed everything from the def; boxes via the split inverse.
-      final parts = splitDuration(Duration(seconds: def.durationSeconds));
+      final parts = splitDuration(Duration(seconds: def.durationSeconds ?? 0));
       _hr = TextEditingController(
         text: parts.hours.toString().padLeft(2, '0'),
       );

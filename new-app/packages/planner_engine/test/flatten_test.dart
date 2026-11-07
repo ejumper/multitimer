@@ -11,9 +11,11 @@ void main() {
     String id, {
     String? name,
     String color = '#0055ff',
-    int duration = 60,
+    int? duration = 60,
     bool autoFinish = true,
     String? endAlertSoundFile,
+    bool completed = false,
+    int? triggerTime,
   }) => DefNode(
     IntervalDef(
       id: id,
@@ -23,6 +25,8 @@ void main() {
       durationSeconds: duration,
       autoFinish: autoFinish,
       endAlertSoundFile: endAlertSoundFile,
+      completed: completed,
+      triggerTimeSeconds: triggerTime,
     ),
   );
 
@@ -192,4 +196,31 @@ void main() {
     );
     expect(totalPlanned(result), const Duration(seconds: 150));
   });
+
+  // v2 P1.1: instances snapshot the four-property fields.
+  test('instances_snapshot_v2_fields', () {
+    final result = flatten(tree([
+      def('a', duration: null, autoFinish: false, completed: true),
+      def('b', triggerTime: 3600),
+    ]));
+    expect(result[0].durationSeconds, isNull);
+    expect(result[0].isOpen, isTrue);
+    expect(result[0].completed, isTrue);
+    expect(result[1].triggerTimeSeconds, 3600);
+    expect(result[1].isDated, isTrue);
+    expect(result[1].completed, isFalse);
+  });
+
+  test('totals_sum_known_durations_and_count_open', () {
+    final result = flatten(tree([
+      def('a', duration: 60),
+      def('b', duration: null, autoFinish: false),
+      def('c', duration: 90),
+    ]));
+    expect(totalPlanned(result), const Duration(seconds: 150));
+    expect(openCount(result), 1);
+    expect(openCount(const []), 0);
+    expect(totalPlanned(const []), Duration.zero);
+  });
+
 }

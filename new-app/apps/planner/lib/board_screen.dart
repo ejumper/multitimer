@@ -139,13 +139,13 @@ class _BoardScreenState extends State<BoardScreen> {
   /// painter falls back to the timer color).
   List<({double start, double end, Color color})> _timelineSegments() {
     final instances = controller.instances;
-    final total = instances.fold<int>(0, (s, i) => s + i.durationSeconds);
+    final total = instances.fold<int>(0, (s, i) => s + (i.durationSeconds ?? 0));
     if (total <= 0) return const [];
     final segments = <({double start, double end, Color color})>[];
     var acc = 0;
     for (final inst in instances) {
       final start = acc / total;
-      acc += inst.durationSeconds;
+      acc += inst.durationSeconds ?? 0;
       segments.add((
         start: start,
         end: acc / total,
@@ -167,13 +167,13 @@ class _BoardScreenState extends State<BoardScreen> {
     }
     final instances = controller.instances;
     final totalMs =
-        instances.fold<int>(0, (s, i) => s + i.durationSeconds) * 1000;
+        instances.fold<int>(0, (s, i) => s + (i.durationSeconds ?? 0)) * 1000;
     if (totalMs <= 0) return 0;
     var doneMs = 0;
     for (var i = 0; i < snapshot.ordinal!; i++) {
-      doneMs += instances[i].durationSeconds * 1000;
+      doneMs += (instances[i].durationSeconds ?? 0) * 1000;
     }
-    final curMs = instances[snapshot.ordinal!].durationSeconds * 1000;
+    final curMs = (instances[snapshot.ordinal!].durationSeconds ?? 0) * 1000;
     final remainingMs = snapshot.remaining?.inMilliseconds ?? curMs;
     doneMs += (curMs - remainingMs).clamp(0, curMs);
     return (doneMs / totalMs).clamp(0.0, 1.0).toDouble();
@@ -220,7 +220,7 @@ class _BoardScreenState extends State<BoardScreen> {
         const SizedBox(width: 4),
         Text(
           '${formatInstanceLabel(next.ordinal, next.name)} - '
-          '${formatDuration(Duration(seconds: next.durationSeconds))}',
+          '${formatDuration(Duration(seconds: next.durationSeconds ?? 0))}',
           style: const TextStyle(
             fontFamily: AppFonts.ui,
             fontSize: 17,
@@ -454,7 +454,7 @@ class _BoardScreenState extends State<BoardScreen> {
                             ),
                             Text(
                               formatDuration(
-                                Duration(seconds: instance.durationSeconds),
+                                Duration(seconds: instance.durationSeconds ?? 0),
                               ),
                               style: const TextStyle(
                                 fontFamily: AppFonts.digits,
