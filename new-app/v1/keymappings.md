@@ -21,22 +21,20 @@ is stale, check the changelog).
 | Key | Action |
 | --- | --- |
 | Space / media play-pause | context action: start / pause / resume; at a held manual zero = completed (✓) |
-| ← → | move between the control buttons (interval selector, reset, next) |
+| ← → | move between the control buttons (adjust, reset, next) |
 | Home / End | first / last control button |
 | Enter | activate the focused button |
-| Tab | open the interval selector |
+| Alt+↑ / Alt+↓ | jump to the previous / next interval (running stays running at the target, a paused run sits paused-ready) |
 | Delete | open the reset confirmation |
 | Ctrl+→ | next interval |
 | Escape | open the timer editor |
 
-## Interval list overlay
-
-| Key | Action |
-| --- | --- |
-| ↑ ↓ | move between intervals |
-| Home / End | first / last interval |
-| Enter | jump to the focused interval (and close) |
-| Escape | close, no change |
+**Right-click an interval row** in the list = jump straight to that
+interval — the target is the first occurrence at or after the current
+one, else the last (jump-to-same restarts it). Direct jump, no
+confirmation step. The old interval-list overlay (Tab / the list button)
+is retired (v2 P2.3); Tab cycles sections like everywhere else and does
+nothing on the board's single section.
 
 ## Reset confirmation
 

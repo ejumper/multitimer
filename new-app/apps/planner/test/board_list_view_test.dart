@@ -19,7 +19,9 @@ import 'fakes.dart';
 /// rows show `15:30`, Open rows show `open` · completed/passed rows render
 /// semi-transparent (the Opacity mechanism) · `wait` + pulsing border at a
 /// hold · the awaitingWall countdown · the `late` badge · the suspended
-/// row's frozen remaining · the checkbox tap · the dial's absence.
+/// row's frozen remaining · the checkbox tap · the dial's absence ·
+/// v2 P2.3: the current row's center-snap (auto-scroll on cursor moves +
+/// the return after a manual scroll gesture).
 ///
 /// Main fixture (saved BEFORE init) — ordinals in parentheses:
 /// `a 'break' 60s manual (0)` · `G(g1 ×2){b 'Cards' 30s auto} (1,2)` ·
@@ -733,8 +735,10 @@ void main() {
     controller.start();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    // Running: the list shortcut holds the second slot, no decision button.
-    expect(find.byKey(const Key('btn-list')), findsOneWidget);
+    // Running: the plain three-button row [adjust][reset][skip] — the
+    // old list shortcut is gone (P2.3).
+    expect(find.byKey(const Key('btn-list')), findsNothing);
+    expect(find.byKey(const Key('btn-skip')), findsOneWidget);
     expect(find.byKey(const Key('btn-not-completed')), findsNothing);
 
     clock.current = clock.current.add(const Duration(seconds: 60));
@@ -766,10 +770,9 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     // The arrow-walk to Reset and Enter activates it (the confirm dialog
-    // appears) — Enter is NOT a completion action while running.
+    // appears) — Enter is NOT a completion action while running. The row
+    // is [adjust][reset][skip] (P2.3): one Right reaches Reset.
     await tester.sendKeyEvent(LogicalKeyboardKey.home);
-    await tester.pump();
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pump();
@@ -861,6 +864,92 @@ void main() {
       reason: 'the mark change is logged',
     );
     controller.dispose();
+  });
+
+  // ── v2 P2.3: center-snap + autoscroll ─────────────────────
+
+  /// The board on a SHORT surface — the main fixture's rows overflow the
+  /// viewport (forced overflow for the scroll tests).
+  Future<void> pumpShortBoard(WidgetTester tester) async {
+    // A genuinely short window — the rows must overflow the viewport.
+    tester.view.physicalSize = const Size(900, 300);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(MaterialApp(home: BoardScreen(controller)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+  }
+
+  testWidgets('auto_scroll_centers_current_row_on_overflow', (tester) async {
+    await pumpShortBoard(tester);
+    final position =
+        tester.state<ScrollableState>(find.byType(Scrollable)).position;
+    expect(position.maxScrollExtent, greaterThan(0)); // forced overflow
+
+    // Start: the current row is the FIRST one — it can only reach the
+    // top edge (the clamp), never a fake center. Measured on the ROW
+    // (the contract), not raw pixels — list padding makes pixels != 0.
+    expect(controller.start(), isTrue);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300));
+    final firstRow = tester.getRect(find.byKey(const Key('row-a')));
+    final listRect = tester.getRect(find.byKey(const Key('interval-list')));
+    expect(firstRow.top, moreOrLessEquals(listRect.top, epsilon: 3.0));
+
+    // Walk to a MIDDLE row (ordinal 3 = 'Wrap'): skip ×3, then one build
+    // — the auto-scroll re-centers it in the viewport.
+    expect(controller.skipNext(), isTrue);
+    expect(controller.skipNext(), isTrue);
+    expect(controller.skipNext(), isTrue);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final row = tester.getRect(find.byKey(const Key('row-d')));
+    final list = tester.getRect(find.byKey(const Key('interval-list')));
+    expect(row.center.dy, moreOrLessEquals(list.center.dy, epsilon: 3.0));
+
+    controller.dispose();
+    await store.close();
+  });
+
+  testWidgets('manual_scroll_returns_to_current_row', (tester) async {
+    await pumpShortBoard(tester);
+    expect(controller.start(), isTrue);
+    expect(controller.skipNext(), isTrue);
+    expect(controller.skipNext(), isTrue);
+    expect(controller.skipNext(), isTrue); // ordinal 3 = 'Wrap'
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final position =
+        tester.state<ScrollableState>(find.byType(Scrollable)).position;
+    final centered = position.pixels;
+    final before = tester.getRect(find.byKey(const Key('row-d'))).center.dy;
+
+    // Browse away: a completed drag gesture (no fling — tester.drag).
+    await tester.drag(
+      find.byKey(const Key('interval-list')),
+      const Offset(0, -80),
+    );
+    expect(position.pixels, greaterThan(centered)); // the scroll happened
+
+    // The gesture ENDED → the list animates back to the current row's
+    // best position (bounded pumps — the ticker hangs pumpAndSettle).
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final after = tester.getRect(find.byKey(const Key('row-d'))).center.dy;
+    final list = tester.getRect(find.byKey(const Key('interval-list')));
+    expect(after, moreOrLessEquals(before, epsilon: 3.0));
+    expect(after, moreOrLessEquals(list.center.dy, epsilon: 3.0));
+
+    controller.dispose();
+    await store.close();
   });
 
 }

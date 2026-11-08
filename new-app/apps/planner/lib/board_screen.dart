@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:planner_engine/planner_engine.dart';
 
@@ -14,14 +17,16 @@ import 'time_adjust_modal.dart';
 /// The main board screen (v2 P2.1): the state-driven readout on top, the
 /// interval LIST as the main area (the editor's row vocabulary over the
 /// authored tree — completion checkboxes, live duration slots, left→right
-/// progress fills), the control row (interval list, reset, skip), and the
+/// progress fills), the control row (adjust, reset, skip), and the
 /// pulsing tap-to-continue affordance while the run holds at a zeroed
 /// manually-complete instance.
 ///
 /// Interaction is a single context action dispatched by snapshot state —
 /// start / pause / resume / skip — reachable both by tapping the readout
 /// and by pressing Space. Right-clicking the readout opens the (P4.1)
-/// editor. The dial is GONE (P2.1): the list is the board.
+/// editor; right-clicking an interval ROW jumps the run to it (P2.3 —
+/// direct, no confirm step; the interval-picker overlay is gone). The
+/// dial is GONE (P2.1): the list is the board.
 ///
 /// No menu/gear buttons in the header: multi-board switching and settings
 /// are out of v1 scope.
@@ -39,6 +44,20 @@ class _BoardScreenState extends State<BoardScreen> {
 
   /// Keyboard model (acceptance): one section — the control buttons.
   late final ScreenNav _nav = ScreenNav(sections: const []);
+
+  /// v2 P2.3 — the list's scroll plumbing: both the center-snap of the
+  /// current row and the return after a manual scroll drive this
+  /// controller.
+  final ScrollController _listScroll = ScrollController();
+
+  /// The list's viewport box and every DEF row's box (GlobalKeys) — the
+  /// centering math measures them wherever the cursor is.
+  final GlobalKey _listKey = GlobalKey(debugLabel: 'interval-list-viewport');
+  final Map<String, GlobalKey> _rowKeys = {};
+
+  /// The cursor the list was last centered for (null = "no current
+  /// instance"); a build whose cursor differs re-centers post-frame.
+  int? _centeredOrdinal;
 
   @override
   Widget build(BuildContext context) {
@@ -144,15 +163,95 @@ class _BoardScreenState extends State<BoardScreen> {
   /// occurrences), each row mapped onto the live run: completion
   /// checkbox, live duration slot, left→right progress fill, and
   /// semi-transparency for completed/passed rows.
+  ///
+  /// v2 P2.3 — scroll behavior: the current row rides as close to the
+  /// viewport's center as the list allows (first row → top, last row →
+  /// bottom, a list that fits → no scrolling), re-centering whenever the
+  /// cursor moves, and animating back after every scroll gesture ends.
   Widget _intervalList(TimerSnapshot snapshot) {
     final occurrences = <String, List<int>>{};
     for (final i in controller.instances) {
       (occurrences[i.defId] ??= []).add(i.ordinal);
     }
-    return ListView(
-      key: const Key('interval-list'),
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      children: _treeRows(controller.tree.roots, occurrences, snapshot),
+    if (_centeredOrdinal != snapshot.ordinal) {
+      _centeredOrdinal = snapshot.ordinal;
+      // Post-frame: the rows must be laid out before they can be
+      // measured against the viewport.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _centerCurrentRow();
+      });
+    }
+    return NotificationListener<ScrollNotification>(
+      key: _listKey,
+      onNotification: _onListScrollNotification,
+      child: ListView(
+        key: const Key('interval-list'),
+        controller: _listScroll,
+        // The interval list is hand-authored and short: a generous cache
+        // keeps every row built so the centering math can always measure
+        // the current row, wherever the user has browsed.
+        scrollCacheExtent: const ScrollCacheExtent.pixels(2000),
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        children: _treeRows(controller.tree.roots, occurrences, snapshot),
+      ),
+    );
+  }
+
+  /// v2 P2.3 — the v2 stand-in for the magnetized scroll: when a scroll
+  /// gesture ENDS, animate back to the current row's best position (the
+  /// fancy scroll physics are v3). The post-frame hop matters twice over:
+  /// the notification fires inside the scroll position's activity swap,
+  /// and the rows' positions are only fresh after the next layout.
+  bool _onListScrollNotification(ScrollNotification notification) {
+    if (notification is ScrollEndNotification) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _centerCurrentRow();
+      });
+    }
+    return false; // keep bubbling — other listeners may care
+  }
+
+  /// v2 P2.3 — scroll so the CURRENT row's center sits at the viewport's
+  /// center, clamped to the scroll extent: the first row can only reach
+  /// the top, the last the bottom, and a list that fits never scrolls.
+  void _centerCurrentRow() {
+    if (!_listScroll.hasClients) return;
+    final position = _listScroll.position;
+    final ordinal = controller.snapshot.ordinal;
+    if (ordinal == null ||
+        ordinal < 0 ||
+        ordinal >= controller.instances.length) {
+      return; // no current instance — nothing to center on
+    }
+    final rowContext =
+        _rowKeys[controller.instances[ordinal].defId]?.currentContext;
+    final listContext = _listKey.currentContext;
+    if (rowContext == null || listContext == null) return;
+    final rowBox = rowContext.findRenderObject();
+    final listBox = listContext.findRenderObject();
+    if (rowBox is! RenderBox || listBox is! RenderBox) return;
+    if (!rowBox.attached ||
+        !listBox.attached ||
+        !rowBox.hasSize ||
+        !listBox.hasSize) {
+      return;
+    }
+    final rowTop = rowBox.localToGlobal(Offset.zero).dy;
+    final listTop = listBox.localToGlobal(Offset.zero).dy;
+    final target = (position.pixels +
+            (rowTop - listTop) +
+            rowBox.size.height / 2 -
+            listBox.size.height / 2)
+        .clamp(position.minScrollExtent, position.maxScrollExtent)
+        .toDouble();
+    // Already there — this also absorbs our own return animations ending.
+    if ((target - position.pixels).abs() < 0.5) return;
+    unawaited(
+      position.animateTo(
+        target,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      ),
     );
   }
 
@@ -203,7 +302,7 @@ class _BoardScreenState extends State<BoardScreen> {
     final hold = isCurrent && snapshot.state == SessionState.awaitingAdvance;
     final color = hexColor(def.color);
 
-    return Opacity(
+    final row = Opacity(
       key: Key('row-${def.id}'),
       opacity: (completed || passed) ? AppColors.dimmed.a : 1.0,
       child: Row(
@@ -256,6 +355,32 @@ class _BoardScreenState extends State<BoardScreen> {
         ],
       ),
     );
+    return GestureDetector(
+      key: _rowKeys.putIfAbsent(
+        def.id,
+        () => GlobalKey(debugLabel: 'row-${def.id}'),
+      ),
+      behavior: HitTestBehavior.opaque,
+      // v2 P2.3: right-click = jump straight to this item's target
+      // occurrence — direct, no confirmation (the interval-picker
+      // overlay is gone).
+      onSecondaryTapDown: (_) => _jumpToRow(ordinals),
+      child: row,
+    );
+  }
+
+  /// v2 P2.3 — right-click jump: a board row is a DEF, so pick its target
+  /// occurrence — the first at or after the cursor, else the last (the
+  /// v1 `jumpTo` semantics the old picker used; jump-to-same restarts the
+  /// instance). Running keeps running at the target, a paused run parks
+  /// paused-ready.
+  void _jumpToRow(List<int> ordinals) {
+    if (ordinals.isEmpty) return;
+    final cursor = controller.snapshot.ordinal;
+    final target = cursor == null
+        ? ordinals.first
+        : ordinals.firstWhere((o) => o >= cursor, orElse: () => ordinals.last);
+    controller.jumpTo(target);
   }
 
   /// The duration slot's LIVE text: `wait` at a hold on the current row,
@@ -543,8 +668,8 @@ class _BoardScreenState extends State<BoardScreen> {
     return missed;
   }
 
-  /// Control row under the list: open the interval list overlay, reset
-  /// (with confirmation), and skip. Skip is disabled ONLY at notStarted —
+  /// Control row under the list: adjust the current time, reset (with
+  /// confirmation), and skip. Skip is disabled ONLY at notStarted —
   /// there is nothing to skip before a run begins; every other state
   /// (running, paused, awaitingAdvance) skips.
   Widget _controlRow(BuildContext context, TimerSnapshot snapshot) {
@@ -610,14 +735,6 @@ class _BoardScreenState extends State<BoardScreen> {
         gap,
         _HoverIconButton(
           circularRing: true,
-          buttonKey: const Key('btn-list'),
-          icon: Icons.menu,
-          focused: _nav.isFocused('btn-list'),
-          onPressed: () => _showListOverlay(context),
-        ),
-        gap,
-        _HoverIconButton(
-          circularRing: true,
           buttonKey: const Key('btn-reset'),
           icon: Icons.close_outlined,
           color: AppColors.danger, // destructive (greyscale-UI rule)
@@ -666,132 +783,6 @@ class _BoardScreenState extends State<BoardScreen> {
         ),
       ),
     );
-  }
-
-  /// The interval-list overlay: every instance in order, the current one
-  /// highlighted, a tap jumps the cursor there AND closes the overlay.
-  void _showListOverlay(BuildContext context) {
-    final instances = controller.instances;
-    final current = controller.snapshot.ordinal;
-    showDialog<void>(
-      context: context,
-      // No full-window dim: the effect lives only behind the menu —
-      // the default black54 barrier darkened the whole page.
-      barrierColor: Colors.transparent,
-      builder: (dialogContext) {
-        final nav = ScreenNav(
-          sections: [
-            NavSection(id: 'rows', cells: [
-              for (var i = 0; i < instances.length; i++)
-                NavCell(
-                  id: 'list-row-$i',
-                  row: i,
-                  col: 0,
-                  activate: () {
-                    controller.jumpTo(i);
-                    Navigator.of(dialogContext).pop();
-                  },
-                ),
-            ]),
-          ],
-        )..focusSection(0);
-        return NavKeyboard(
-          nav: nav,
-          child: ListenableBuilder(
-            listenable: nav,
-            builder: (_, _) => Dialog(
-        key: const Key('list-overlay'),
-        backgroundColor: Colors.black, // opaque menu panel
-        shape: AppDecorations.menuShape,
-        child: SizedBox(
-          height: 420,
-          width: 360,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-                child: Text(
-                  'Intervals',
-                  style: const TextStyle(
-                    fontFamily: AppFonts.ui,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.text,
-                  ),
-                ),
-              ),
-              Expanded(
-                child: ListView.separated(
-                  itemCount: instances.length,
-                  separatorBuilder: (context, index) => const Divider(
-                    height: 1,
-                    color: AppColors.outline,
-                  ),
-                  itemBuilder: (context, index) {
-                    final instance = instances[index];
-                    final isCurrent = index == current;
-                    // Odd rows get a subtle tint; the current row wins it
-                    // with a grey highlight (greyscale-UI rule).
-                    final background = isCurrent
-                        ? AppColors.text.withValues(alpha: 0.25)
-                        : index.isOdd
-                            ? Colors.white.withValues(alpha: 0.03)
-                            : null;
-                    return InkWell(
-                      onTap: () {
-                        controller.jumpTo(index);
-                        Navigator.of(context).pop();
-                      },
-                      child: FocusRing(
-                        focused: nav.isFocused('list-row-$index'),
-                        child: Container(
-                        key: Key('list-row-$index'),
-                        color: background,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 10,
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                formatInstanceLabel(index, instance.name),
-                                style: TextStyle(
-                                  fontFamily: AppFonts.ui,
-                                  fontSize: 15,
-                                  color: isCurrent
-                                      ? AppColors.text
-                                      : AppColors.dimmed,
-                                ),
-                              ),
-                            ),
-                            Text(
-                              formatDuration(
-                                Duration(seconds: instance.durationSeconds ?? 0),
-                              ),
-                              style: const TextStyle(
-                                fontFamily: AppFonts.digits,
-                                fontSize: 15,
-                                color: AppColors.text,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-        ),
-      ),
-    );
-        },
-      );
   }
 
   /// Reset confirmation: nothing happens without an explicit confirm —
@@ -920,8 +911,9 @@ class _BoardScreenState extends State<BoardScreen> {
 
   /// Board keyboard model (acceptance): Space = the context action; the
   /// arrows/Home/End/Enter walk the control buttons (shared model); the
-  /// quick keys hit the buttons directly — Tab = interval selector,
-  /// Delete = reset, Ctrl+Right = next, Escape = the timer editor.
+  /// quick keys hit the buttons directly — Delete = reset, Ctrl+Right =
+  /// next, Escape = the timer editor; v2 P2.3 Alt+↑/↓ jumps between
+  /// intervals (the list owns navigation now — Tab opens nothing).
   KeyEventResult? _onKey(KeyEvent event) {
     if (event is! KeyDownEvent) return null;
     final key = event.logicalKey;
@@ -933,8 +925,13 @@ class _BoardScreenState extends State<BoardScreen> {
       dispatchContextAction();
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.tab) {
-      _showListOverlay(context);
+    // v2 P2.3: Alt+Up/Down walks the RUN — jump to the occurrence
+    // adjacent to the cursor (the right-click jump's keyboard parity;
+    // the interval-picker overlay it replaces is gone).
+    if (HardwareKeyboard.instance.isAltPressed &&
+        (key == LogicalKeyboardKey.arrowUp ||
+            key == LogicalKeyboardKey.arrowDown)) {
+      _jumpToAdjacent(key == LogicalKeyboardKey.arrowDown ? 1 : -1);
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.delete ||
@@ -967,6 +964,24 @@ class _BoardScreenState extends State<BoardScreen> {
       }
     }
     return null; // arrows/Home/End/Enter -> the shared button model
+  }
+
+  /// v2 P2.3 — Alt+↑/↓: jump to the occurrence adjacent to the cursor
+  /// (±1 over the flattened run). No current instance, or a target past
+  /// either end: nothing moves, but the key stays swallowed so the
+  /// button-walk model does not steal it.
+  void _jumpToAdjacent(int delta) {
+    final cursor = controller.snapshot.ordinal;
+    if (cursor == null) return;
+    final target = cursor + delta;
+    if (target < 0 || target >= controller.instances.length) return;
+    controller.jumpTo(target);
+  }
+
+  @override
+  void dispose() {
+    _listScroll.dispose();
+    super.dispose();
   }
 
   /// The control buttons as keyboard cells (one row).
@@ -1014,21 +1029,15 @@ class _BoardScreenState extends State<BoardScreen> {
           activate: () => _openAdjust(context),
         ),
         NavCell(
-          id: 'btn-list',
-          row: 0,
-          col: 1,
-          activate: () => _showListOverlay(context),
-        ),
-        NavCell(
           id: 'btn-reset',
           row: 0,
-          col: 2,
+          col: 1,
           activate: () => _showResetDialog(context),
         ),
         NavCell(
           id: 'btn-skip',
           row: 0,
-          col: 3,
+          col: 2,
           enabled: canSkip,
           activate: () => controller.skipNext(),
         ),

@@ -6,14 +6,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:planner/app_controller.dart';
 import 'package:planner/board_screen.dart';
 import 'package:planner/editor_screen.dart';
-import 'package:planner/theme.dart';
 import 'package:planner_engine/planner_engine.dart';
 
 import 'fakes.dart';
 
-/// Board screen widget tests (P3.1/P3.2): the state-driven readout, the tap
-/// and Space dispatch, caption visibility, the editor route, the control
-/// row (interval list, reset, skip), and the end-of-timer affordances —
+/// Board screen widget tests (P3.1/P3.2 / v2 P2.3): the state-driven
+/// readout, the tap and Space dispatch, caption visibility, the editor
+/// route, the control row (adjust, reset, skip), the right-click jump and
+/// Alt+↑/↓ jumps, and the end-of-timer affordances —
 /// over a real AppController on an in-memory drift store with recording
 /// adapters.
 ///
@@ -104,14 +104,6 @@ void main() {
   testWidgets('keyboard_quick_keys_open_dialogs_and_act', (tester) async {
     await pumpBoard(tester);
 
-    // Tab = the interval selector button; Escape closes the overlay.
-    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('list-overlay')), findsOneWidget);
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('list-overlay')), findsNothing);
-
     // Delete = the reset button — focus starts on CANCEL: Enter cancels.
     await tester.sendKeyEvent(LogicalKeyboardKey.delete);
     await tester.pumpAndSettle();
@@ -147,10 +139,9 @@ void main() {
     expect(controller.start(), isTrue);
     await tester.pump();
 
-    // Focus starts on the first cell (adjust time, tweaks #7): Right x3
-    // lands on the skip button — Enter advances the run (same as the
-    // button).
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    // Focus starts on the first cell (adjust time, tweaks #7): the row
+    // is [adjust][reset][skip] (P2.3) — Right x2 lands on skip, Enter
+    // advances the run (same as the button).
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pump();
@@ -166,18 +157,38 @@ void main() {
     expect(find.byKey(const Key('adjust-modal')), findsOneWidget);
   });
 
-  testWidgets('keyboard_interval_list_navigation', (tester) async {
+  // v2 P2.3: Alt+Down/Up jumps between intervals — keyboard parity with
+  // the right-click jump (the Tab-opened interval picker is gone).
+  testWidgets('alt_down_up_jump_between_intervals', (tester) async {
     await pumpBoard(tester);
-    await tester.sendKeyEvent(LogicalKeyboardKey.tab); // open the list
-    await tester.pumpAndSettle();
-
-    // Down to the second row, Enter jumps there and closes.
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    expect(controller.start(), isTrue);
     await tester.pump();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('list-overlay')), findsNothing);
+
+    // Alt+Down: the next occurrence, still running at the target.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+    await tester.pump();
     expect(controller.snapshot.ordinal, 1);
+    expect(controller.snapshot.state, SessionState.running);
+
+    // Alt+Up: back to the first — a running jump keeps running.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+    await tester.pump();
+    expect(controller.snapshot.ordinal, 0);
+    expect(controller.snapshot.state, SessionState.running);
+
+    // At the first interval Alt+Up stays put — the key is still absorbed
+    // (the button-walk model must not steal it).
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+    await tester.pump();
+    expect(controller.snapshot.ordinal, 0);
+    expect(controller.snapshot.state, SessionState.running);
+
     controller.dispose();
     await store.close();
   });
@@ -331,86 +342,102 @@ void main() {
     await store.close();
   });
 
-  // 9. btn-list opens the overlay: every instance in order, label+duration.
-  testWidgets('list_overlay_contents_in_order', (tester) async {
+  // ── v2 P2.3: row navigation (jump) ─────────────────────────
+
+  // Right-clicking a row jumps DIRECTLY there: a running run keeps
+  // running at the target occurrence (the first at or after the cursor),
+  // with no confirmation step — the interval-picker overlay is gone.
+  testWidgets('right_click_row_jumps_and_keeps_running', (tester) async {
     await pumpBoard(tester);
-    await tester.tap(find.byKey(const Key('btn-list')));
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const Key('list-overlay')), findsOneWidget);
-    expect(find.text('Intervals'), findsOneWidget);
-    expect(
-      find.descendant(
-        of: find.byKey(const Key('list-row-0')),
-        matching: find.text('1. break'),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(
-        of: find.byKey(const Key('list-row-0')),
-        matching: find.text('1m'),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(
-        of: find.byKey(const Key('list-row-1')),
-        matching: find.text('2. Cards'),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(
-        of: find.byKey(const Key('list-row-1')),
-        matching: find.text('30s'),
-      ),
-      findsOneWidget,
-    );
-
-    controller.dispose();
-    await store.close();
-  });
-
-  // 10. The current instance's row is highlighted: lightBlue label and a
-  //     blue-tinted background distinct from the odd-row subtle tint.
-  testWidgets('list_overlay_highlights_current', (tester) async {
-    await pumpBoard(tester);
-    controller.start();
+    expect(controller.start(), isTrue);
     await tester.pump();
-    await tester.tap(find.byKey(const Key('btn-list')));
-    await tester.pumpAndSettle();
 
-    final label0 = tester.widget<Text>(
-      find.descendant(
-        of: find.byKey(const Key('list-row-0')),
-        matching: find.text('1. break'),
-      ),
+    await tester.tap(
+      find.byKey(const Key('row-b')),
+      buttons: kSecondaryMouseButton,
     );
-    expect(label0.style?.color, AppColors.text); // greyscale-UI rule
-
-    final row0 = tester.widget<Container>(find.byKey(const Key('list-row-0')));
-    final row1 = tester.widget<Container>(find.byKey(const Key('list-row-1')));
-    expect(row0.color, AppColors.text.withValues(alpha: 0.25));
-    expect(row0.color, isNot(equals(row1.color)));
-
-    controller.dispose();
-    await store.close();
-  });
-
-  // 11. Tapping a row jumps the cursor there AND closes the overlay.
-  testWidgets('list_overlay_jump_dispatches_and_closes', (tester) async {
-    await pumpBoard(tester);
-    controller.start();
     await tester.pump();
-    await tester.tap(find.byKey(const Key('btn-list')));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byKey(const Key('list-row-1')));
-    await tester.pumpAndSettle();
 
     expect(controller.snapshot.ordinal, 1);
+    expect(controller.snapshot.state, SessionState.running);
+    expect(find.byType(Dialog), findsNothing); // direct jump, no dialog
+
+    controller.dispose();
+    await store.close();
+  });
+
+  // Backward jump from a PAUSED run: a cursor past the row picks that
+  // row's LAST occurrence; the run sits paused-ready at the target.
+  testWidgets('right_click_row_jumps_backward_while_paused', (tester) async {
+    await pumpBoard(tester);
+    expect(controller.start(), isTrue);
+    await tester.pump();
+    expect(controller.skipNext(), isTrue); // cursor → 'Cards' (ordinal 1)
+    await tester.pump();
+    controller.pause();
+    await tester.pump();
+
+    await tester.tap(
+      find.byKey(const Key('row-a')),
+      buttons: kSecondaryMouseButton,
+    );
+    await tester.pump();
+
+    expect(controller.snapshot.ordinal, 0);
+    expect(controller.snapshot.state, SessionState.paused);
+    expect(find.byType(Dialog), findsNothing);
+
+    controller.dispose();
+    await store.close();
+  });
+
+  // v2 P2.3: the interval-picker overlay is gone — no list button, the
+  // control row is exactly [adjust][reset][skip], and Tab opens nothing.
+  testWidgets('interval_picker_is_gone_and_tab_does_nothing', (tester) async {
+    await pumpBoard(tester);
+
+    expect(find.byKey(const Key('btn-list')), findsNothing);
     expect(find.byKey(const Key('list-overlay')), findsNothing);
+    expect(
+      [
+        for (final w in tester.widgetList<IconButton>(
+          find.descendant(
+            of: find.byKey(const Key('control-row')),
+            matching: find.byType(IconButton),
+          ),
+        ))
+          w.key!,
+      ],
+      const [Key('btn-adjust'), Key('btn-reset'), Key('btn-skip')],
+    );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    expect(find.byKey(const Key('list-overlay')), findsNothing);
+    expect(find.byType(Dialog), findsNothing);
+    expect(controller.snapshot.state, SessionState.notStarted);
+
+    controller.dispose();
+    await store.close();
+  });
+
+  // v2 P2.3 (short-list rule): a list that fits the viewport has
+  // nothing to center — the auto-scroll leaves it parked at the top.
+  testWidgets('short_list_does_not_scroll', (tester) async {
+    await pumpBoard(tester); // 2-def fixture on the 800x600 test surface
+    expect(controller.start(), isTrue);
+    await tester.pump();
+    expect(controller.skipNext(), isTrue); // cursor → row b
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final position =
+        tester.state<ScrollableState>(find.byType(Scrollable)).position;
+    expect(position.maxScrollExtent, 0);
+    expect(position.pixels, 0);
 
     controller.dispose();
     await store.close();
@@ -566,7 +593,7 @@ void main() {
     controller.start();
     await tester.pump();
     expect(tester.widget<IconButton>(find.byKey(const Key('btn-adjust'))).onPressed, isNotNull);
-    expect(find.byKey(const Key('btn-list')), findsOneWidget);
+    expect(find.byKey(const Key('btn-list')), findsNothing); // P2.3: gone
     expect(find.byKey(const Key('btn-reset')), findsOneWidget);
     expect(find.byKey(const Key('btn-skip')), findsOneWidget);
     expect(
@@ -579,7 +606,7 @@ void main() {
         ))
           w.key!,
       ],
-      const [Key('btn-adjust'), Key('btn-list'), Key('btn-reset'), Key('btn-skip')],
+      const [Key('btn-adjust'), Key('btn-reset'), Key('btn-skip')],
     );
 
     // The fixture's intervals are manually complete: the run lands in
