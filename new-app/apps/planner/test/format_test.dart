@@ -65,4 +65,16 @@ void main() {
     expect(formatWallTime(-5), '00:00');
     expect(formatWallTime(90000), '23:59'); // past midnight → clamped
   });
+
+  // 8. Compact duration for the list view's `<left>/<total>` slot — the
+  //    formatDuration components joined WITHOUT spaces (`10m5s/15m`).
+  test('format_duration_compact_joins_without_spaces', () {
+    expect(formatDurationCompact(const Duration(minutes: 10, seconds: 5)), '10m5s');
+    expect(formatDurationCompact(const Duration(minutes: 15)), '15m');
+    expect(formatDurationCompact(const Duration(hours: 7, minutes: 29)), '7h29m');
+    expect(formatDurationCompact(const Duration(hours: 1, minutes: 10, seconds: 3)), '1h10m3s');
+    expect(formatDurationCompact(const Duration(seconds: 45)), '45s');
+    expect(formatDurationCompact(Duration.zero), '0s');
+    expect(formatDurationCompact(const Duration(seconds: -5)), '0s');
+  });
 }

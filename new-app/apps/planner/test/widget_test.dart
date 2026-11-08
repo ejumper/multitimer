@@ -27,7 +27,7 @@ void main() {
     await tester.pumpWidget(PlannerApp(controller: controller));
 
     expect(find.byType(BoardScreen), findsOneWidget);
-    expect(find.byKey(const Key('dial')), findsOneWidget); // fresh session
+    expect(find.byKey(const Key('interval-list')), findsOneWidget); // P2.1
 
     // Dispose in-body: flutter_test checks pending-timer invariants before
     // addTearDown runs, and the controller owns a 1 Hz ticker.

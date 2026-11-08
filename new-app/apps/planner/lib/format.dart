@@ -1,11 +1,11 @@
-/// Pure formatting helpers for the board readout — defined once here and
-/// shared by the dial, the run readout, and the next-interval caption.
+/// Pure formatting helpers for the board — defined once here and shared by
+/// the readouts, the caption, and the list view's interval rows.
 ///
 /// Every helper clamps negative durations to zero: a backwards clock step
 /// must never render as `-01:05` on the board.
 library;
 
-/// `mm:ss` for the big dial line — minutes zero-padded to at least two
+/// `mm:ss` for the big readout line — minutes zero-padded to at least two
 /// digits but unbounded above (3h18m59s → `198:59`), seconds zero-padded
 /// to two (59s → `00:59`). Negative → `00:00`.
 String formatMmSs(Duration d) {
@@ -18,7 +18,7 @@ String formatMmSs(Duration d) {
 /// Compact `h`/`m` total-remaining line — each component shown iff > 0 and
 /// joined with a space (6h44m → `6h 44m`, 3h → `3h`, 44m → `44m`); zero →
 /// `0m`. Seconds are intentionally dropped: this line is a rough "how much
-/// life is left" readout above the precise dial line.
+/// life is left" readout above the precise mm:ss line.
 String formatHm(Duration d) {
   final clamped = d.isNegative ? Duration.zero : d;
   final parts = <String>[
@@ -42,6 +42,20 @@ String formatDuration(Duration d) {
   return parts.isEmpty ? '0s' : parts.join(' ');
 }
 
+/// Compact `h`/`m`/`s` duration WITHOUT the spaces — `10m5s`, `1h2m3s`,
+/// `45s` — for the list view's live `<left>/<total>` slot (`10m5s/15m`).
+/// Same clamping and component rules as [formatDuration]: negatives →
+/// `0s`, zero components dropped.
+String formatDurationCompact(Duration d) {
+  final clamped = d.isNegative ? Duration.zero : d;
+  final parts = <String>[
+    if (clamped.inHours > 0) '${clamped.inHours}h',
+    if (clamped.inMinutes % 60 > 0) '${clamped.inMinutes % 60}m',
+    if (clamped.inSeconds % 60 > 0) '${clamped.inSeconds % 60}s',
+  ];
+  return parts.isEmpty ? '0s' : parts.join();
+}
+
 /// `HH:MM` 24-hour wall time for a trigger's seconds-since-midnight —
 /// `55800` → `15:30`, `0` → `00:00`. Clamped into the 0..86399 day range
 /// (a value outside renders at the nearest edge, never wraps).
@@ -53,7 +67,7 @@ String formatWallTime(int secondsSinceMidnight) {
 }
 
 /// The not-started planned readout as three zero-padded two-digit parts
-/// `(hours, minutes, seconds)` for the `03H : 00M / 00` dial layout
+/// `(hours, minutes, seconds)` for the `03H : 00M / 00` planned layout
 /// (3h → `('03','00','00')`, 1h5m9s → `('01','05','09')`). Hours are
 /// padded but unbounded above.
 (String, String, String) formatPlannedParts(Duration d) {

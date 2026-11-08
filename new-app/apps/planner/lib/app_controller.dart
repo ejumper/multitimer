@@ -40,6 +40,12 @@ class AppController extends ChangeNotifier {
   // Not final: [reload] re-fetches the entity so name/color edits apply
   // without an app restart.
   late IntervalTimer timer;
+
+  /// The timer's authored interval TREE — the board's list view renders
+  /// its rows (P2.1) over the same definitions as [instances] (the
+  /// flattened run). Kept in sync by [_buildSession] and [applyTreeEdit].
+  late IntervalTree tree;
+
   late List<IntervalInstance> instances;
   late RunEventProcessor processor;
   late TimerSession session;
@@ -91,7 +97,7 @@ class AppController extends ChangeNotifier {
   /// state resets to [SessionState.notStarted]. The timer ENTITY is
   /// re-fetched too: the editor's commit updates name and color in the
   /// store, and the board reads both straight off [timer] — without this
-  /// the dial color would stay stale until an app restart.
+  /// the readout color would stay stale until an app restart.
   Future<void> reload() async {
     final timers = await store.timersInBoard(board.id);
     timer = timers.firstWhere((t) => t.id == timer.id, orElse: () => timer);
@@ -112,6 +118,7 @@ class AppController extends ChangeNotifier {
     // before the processor is rebuilt over the edited one.
     await processor.flush();
     final tree = await store.loadTree(timer.id);
+    this.tree = tree; // keep the board's row source current (P2.1)
     final next = flatten(tree);
     alerts = AlertHandler(
       player: player,
@@ -132,6 +139,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> _buildSession() async {
     final tree = await store.loadTree(timer.id);
+    this.tree = tree; // the board's list view reads the tree (P2.1)
     instances = flatten(tree);
     alerts = AlertHandler(
       player: player,
@@ -227,6 +235,24 @@ class AppController extends ChangeNotifier {
   void silenceAlarm() {
     alerts.stopAlerts();
     notifyListeners();
+  }
+
+  /// Toggles the completion mark of the item behind [ordinal] — the board
+  /// list view's completion checkbox (P2.1; the engine owns the rules:
+  /// marking the CURRENT item finishes it and advances). When the run
+  /// moves, the same alert/notification cleanup as [skipNext] applies.
+  /// Returns the new mark, or null when the ordinal is out of range.
+  bool? toggleMark(int ordinal) {
+    final before = snapshot;
+    final marked = session.toggleMark(ordinal);
+    if (marked == null) return null;
+    final after = snapshot;
+    if (after.ordinal != before.ordinal || after.state != before.state) {
+      alerts.stopAlerts();
+      unawaited(notifier.closeVisible());
+    }
+    notifyListeners();
+    return marked;
   }
 
   void reset() {

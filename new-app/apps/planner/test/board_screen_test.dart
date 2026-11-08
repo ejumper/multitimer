@@ -258,19 +258,20 @@ void main() {
     await store.close();
   });
 
-  // 5. Dial taps dispatch the context action for each state in turn.
+  // 5. Readout taps dispatch the context action for each state in turn
+  //    (P2.1: the dial is gone — its tap lives on the display).
   testWidgets('tap_dispatches_context_actions', (tester) async {
     await pumpBoard(tester);
 
-    await tester.tap(find.byKey(const Key('dial')));
+    await tester.tap(find.byKey(const Key('readout')));
     await tester.pump();
     expect(controller.snapshot.state, SessionState.running);
 
-    await tester.tap(find.byKey(const Key('dial')));
+    await tester.tap(find.byKey(const Key('readout')));
     await tester.pump();
     expect(controller.snapshot.state, SessionState.paused);
 
-    await tester.tap(find.byKey(const Key('dial')));
+    await tester.tap(find.byKey(const Key('readout')));
     await tester.pump();
     expect(controller.snapshot.state, SessionState.running);
 
@@ -278,7 +279,7 @@ void main() {
     await store.close();
   });
 
-  // 6. Space performs the same dispatch as a dial tap.
+  // 6. Space performs the same dispatch as a readout tap.
   testWidgets('space_dispatches_context_actions', (tester) async {
     await pumpBoard(tester);
     await tester.pump(); // let autofocus claim the keyboard
@@ -312,12 +313,12 @@ void main() {
     await store.close();
   });
 
-  // 8. Right-click on the dial opens the interval editor (P4.1).
+  // 8. Right-click on the readout opens the interval editor (P4.1).
   testWidgets('right_click_opens_editor_screen', (tester) async {
     await pumpBoard(tester);
 
     await tester.tap(
-      find.byKey(const Key('dial')),
+      find.byKey(const Key('readout')),
       buttons: kSecondaryMouseButton,
     );
     // The handler is async (loads the tree before pushing) — settle the
@@ -484,9 +485,9 @@ void main() {
     await tester.pump();
     expect(controller.snapshot.state, SessionState.awaitingAdvance);
     // Tweaks #5: in limbo the skip button steps aside (the row shows the
-    // limbo actions) — the DIAL completes the held interval instead.
+    // limbo actions) — tap-to-continue completes the held interval instead.
     expect(find.byKey(const Key('btn-skip')), findsNothing);
-    await tester.tap(find.byKey(const Key('dial')));
+    await tester.tap(find.byKey(const Key('tap-to-continue')));
     await tester.pump();
     expect(controller.snapshot.state, SessionState.running);
     expect(controller.snapshot.ordinal, 1);
@@ -555,83 +556,6 @@ void main() {
     await store.close();
   });
 
-  /// The dial painter's inputs: the tick ring maps the WHOLE timer as
-  /// per-interval color segments (fractions of total duration).
-  testWidgets('dial_ticks_map_whole_timer_by_interval_color', (tester) async {
-    await buildFixture();
-    await store.saveTree(
-      controller.timer.id,
-      IntervalTree([
-        DefNode(
-          IntervalDef(
-            id: 'x',
-            timerId: controller.timer.id,
-            name: 'warmup',
-            color: '#ff00b1',
-            durationSeconds: 60,
-            autoFinish: true,
-          ),
-        ),
-        DefNode(
-          IntervalDef(
-            id: 'y',
-            timerId: controller.timer.id,
-            name: 'run',
-            color: '#4800ff',
-            durationSeconds: 60,
-            autoFinish: true,
-          ),
-        ),
-      ]),
-      eventKind: 'tree.save',
-    );
-    await controller.reload();
-    await pumpBoard(tester);
-
-    final painter = tester
-        .widget<CustomPaint>(
-          find.descendant(
-            of: find.byKey(const Key('dial')),
-            matching: find.byType(CustomPaint),
-          ),
-        )
-        .painter as dynamic;
-    expect(painter.segments.length, 2);
-    expect(painter.segments[0].start, 0.0);
-    expect(painter.segments[0].end, 0.5);
-    expect(painter.segments[1].start, 0.5);
-    expect(painter.segments[1].end, 1.0);
-    expect((painter.segments[0].color as Color).toARGB32(), 0xFFFF00B1);
-    expect((painter.segments[1].color as Color).toARGB32(), 0xFF4800FF);
-    expect(painter.elapsed, 0.0); // notStarted: nothing dimmed yet
-
-    controller.dispose();
-    await store.close();
-  });
-
-  /// Progress spans the WHOLE timer: 30s into the 90s fixture = 1/3, not
-  /// the old per-interval fraction.
-  testWidgets('dial_progress_spans_whole_timer', (tester) async {
-    await pumpBoard(tester);
-    expect(controller.start(), isTrue);
-    clock.current = clock.current.add(const Duration(seconds: 30));
-    await controller.tick();
-    await tester.pump();
-
-    final painter = tester
-        .widget<CustomPaint>(
-          find.descendant(
-            of: find.byKey(const Key('dial')),
-            matching: find.byType(CustomPaint),
-          ),
-        )
-        .painter as dynamic;
-    expect(painter.elapsed, moreOrLessEquals(30 / 90, epsilon: 0.001));
-
-    controller.dispose();
-    await store.close();
-  });
-
   // Tweaks #5/#7: the control row is state-driven — adjust (+/- time) is
   // first on a live run; a manual hold switches the row to the limbo
   // actions (silence + adjust) and the abandon-run buttons step aside.
@@ -668,7 +592,7 @@ void main() {
     expect(find.byKey(const Key('btn-adjust')), findsOneWidget);
     expect(find.byKey(const Key('btn-list')), findsOneWidget); // kept
     expect(find.byKey(const Key('btn-reset')), findsOneWidget); // kept
-    expect(find.byKey(const Key('btn-skip')), findsNothing); // the dial
+    expect(find.byKey(const Key('btn-skip')), findsNothing); // the hold
     // Slot contract (user tweak): the shared buttons keep their spots —
     // silence takes skip's far-right slot in both modes.
     List<Key> rowKeys(WidgetTester t) => [

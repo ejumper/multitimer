@@ -1,6 +1,3 @@
-import 'dart:math' as math;
-
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:planner_engine/planner_engine.dart';
@@ -9,18 +6,22 @@ import 'app_controller.dart';
 import 'editor_controller.dart';
 import 'editor_screen.dart';
 import 'format.dart';
+import 'interval_rows.dart';
 import 'keyboard_nav.dart';
 import 'theme.dart';
 import 'time_adjust_modal.dart';
 
-/// The main board screen: header, state-driven dial with the readout in its
-/// center, the control row (interval list, reset, skip), and the
-/// next-interval caption below — or the pulsing tap-to-continue affordance
-/// while the run holds at a zeroed manually-complete instance.
+/// The main board screen (v2 P2.1): the state-driven readout on top, the
+/// interval LIST as the main area (the editor's row vocabulary over the
+/// authored tree — completion checkboxes, live duration slots, left→right
+/// progress fills), the control row (interval list, reset, skip), and the
+/// pulsing tap-to-continue affordance while the run holds at a zeroed
+/// manually-complete instance.
 ///
 /// Interaction is a single context action dispatched by snapshot state —
-/// start / pause / resume / skip — reachable both by tapping the dial and
-/// by pressing Space. Right-clicking the dial opens the (P4.1) editor.
+/// start / pause / resume / skip — reachable both by tapping the readout
+/// and by pressing Space. Right-clicking the readout opens the (P4.1)
+/// editor. The dial is GONE (P2.1): the list is the board.
 ///
 /// No menu/gear buttons in the header: multi-board switching and settings
 /// are out of v1 scope.
@@ -48,8 +49,10 @@ class _BoardScreenState extends State<BoardScreen> {
         onKey: _onKey,
         child: SafeArea(
           child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+            child: ConstrainedBox(
+              // The list reads at the editor's column width (520) — rows
+              // like the editor's, on a wide desktop window.
+              constraints: const BoxConstraints(maxWidth: 520),
               child: ListenableBuilder(
                 listenable: Listenable.merge([controller, _nav]),
                 builder: (context, _) => _buildBoard(context),
@@ -66,9 +69,9 @@ class _BoardScreenState extends State<BoardScreen> {
     // enabled flags (e.g. skip) must track it.
     _nav.updateSections(_sections());
     final snapshot = controller.snapshot;
-    final timerColor = _hexColor(controller.timer.color);
+    final timerColor = hexColor(controller.timer.color);
     return Column(
-      mainAxisSize: MainAxisSize.min,
+      mainAxisSize: MainAxisSize.max,
       children: [
         // Board name hidden for v1 (single board — kept for future
         // multi-board versions, acceptance "Remove the Board Name").
@@ -83,11 +86,16 @@ class _BoardScreenState extends State<BoardScreen> {
         //   ),
         // ),
         const SizedBox(height: 16),
-        _dial(context, snapshot, timerColor),
+        _readoutDisplay(context, snapshot, timerColor),
+        const SizedBox(height: 12),
+        // P2.1: the dial is gone — the interval LIST is the main area.
+        Expanded(child: _intervalList(snapshot)),
         const SizedBox(height: 12),
         _controlRow(context, snapshot),
-        const SizedBox(height: 12),
-        if (snapshot.state == SessionState.awaitingAdvance) _tapToContinue(),
+        if (snapshot.state == SessionState.awaitingAdvance) ...[
+          const SizedBox(height: 12),
+          _tapToContinue(),
+        ],
         // The next-interval caption is gone (acceptance: it was MultiTimer's
         // advance button stand-in — the '>' control replaced it).
         const SizedBox(height: 24),
@@ -95,88 +103,359 @@ class _BoardScreenState extends State<BoardScreen> {
     );
   }
 
-  /// The dial: tick ring painted around the state-driven readout.
-  Widget _dial(BuildContext context, TimerSnapshot snapshot, Color timerColor) {
+  /// The state-driven readout — kept whole for now (P2.4 slims it into a
+  /// header above the list). Tapping it dispatches the context action and
+  /// right-clicking it opens the editor: the old dial's affordances, now
+  /// on the display itself.
+  Widget _readoutDisplay(
+    BuildContext context,
+    TimerSnapshot snapshot,
+    Color timerColor,
+  ) {
     return GestureDetector(
-      key: const Key('dial'),
-      onTapDown: (_) => dispatchContextAction(),
+      key: const Key('readout'),
+      behavior: HitTestBehavior.opaque,
+      onTap: dispatchContextAction,
       onSecondaryTapDown: (_) => _openEditor(context),
-      child: SizedBox(
-        width: 340,
-        height: 340,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Positioned.fill(
-              child: CustomPaint(
-                painter: _DialPainter(
-                  elapsed: _overallProgress(snapshot),
-                  segments: _timelineSegments(),
-                  timerColor: timerColor,
+      child: _readout(snapshot, timerColor),
+    );
+  }
+
+  /// P2.1 — the board's main area: the interval LIST over the authored
+  /// tree (defs and groups — the editor's rows, NOT the flattened
+  /// occurrences), each row mapped onto the live run: completion
+  /// checkbox, live duration slot, left→right progress fill, and
+  /// semi-transparency for completed/passed rows.
+  Widget _intervalList(TimerSnapshot snapshot) {
+    final occurrences = <String, List<int>>{};
+    for (final i in controller.instances) {
+      (occurrences[i.defId] ??= []).add(i.ordinal);
+    }
+    return ListView(
+      key: const Key('interval-list'),
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      children: _treeRows(controller.tree.roots, occurrences, snapshot),
+    );
+  }
+
+  /// One row per tree node (8px between entries — the editor's rhythm),
+  /// recursing into groups.
+  List<Widget> _treeRows(
+    List<IntervalNode> nodes,
+    Map<String, List<int>> occurrences,
+    TimerSnapshot snapshot,
+  ) {
+    final rows = <Widget>[
+      for (final node in nodes)
+        switch (node) {
+          DefNode(:final def) => _defRow(def, occurrences, snapshot),
+          GroupNode(:final group, :final children) =>
+            _groupRow(group, children, occurrences, snapshot),
+        },
+    ];
+    return [
+      for (var i = 0; i < rows.length; i++) ...[
+        if (i > 0) const SizedBox(height: 8),
+        rows[i],
+      ],
+    ];
+  }
+
+  /// One authored interval: completion checkbox | chip card whose duration
+  /// slot is LIVE (`<left>/<total>` for the current occurrence, `wait` at
+  /// a hold, the wall countdown, `15:30`/duration/`open` otherwise) over
+  /// the left→right progress fill. A fully-marked item or a row whose
+  /// occurrences have all passed renders semi-transparent — the dial's
+  /// dimmed ticks, as rows (the shared [AppColors.dimmed] alpha).
+  Widget _defRow(
+    IntervalDef def,
+    Map<String, List<int>> occurrences,
+    TimerSnapshot snapshot,
+  ) {
+    final ordinals = occurrences[def.id] ?? const <int>[];
+    final cursor = snapshot.ordinal;
+    final isCurrent = cursor != null && ordinals.contains(cursor);
+    final suspendedAt = snapshot.suspendedOrdinal;
+    final isSuspended = suspendedAt != null && ordinals.contains(suspendedAt);
+    final completed = controller.session.isCompleted(def.id);
+    final passed = cursor != null &&
+        ordinals.isNotEmpty &&
+        !isSuspended &&
+        ordinals.every((o) => o < cursor);
+    final hold = isCurrent && snapshot.state == SessionState.awaitingAdvance;
+    final color = hexColor(def.color);
+
+    return Opacity(
+      key: Key('row-${def.id}'),
+      opacity: (completed || passed) ? AppColors.dimmed.a : 1.0,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          RowCircle(
+            key: Key('check-${def.id}'),
+            checked: completed,
+            onTap: ordinals.isEmpty
+                ? null
+                : () => controller.toggleMark(ordinals.first),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Stack(
+              fit: StackFit.passthrough,
+              children: [
+                IntervalChipCard(
+                  def: def,
+                  shape: _defTime(def, ordinals, snapshot),
+                  shapeKey: Key('time-${def.id}'),
+                  badge: isCurrent && snapshot.late ? 'late' : null,
+                  fillFraction: _defFraction(ordinals, snapshot),
+                  fillColor: color.withValues(alpha: 0.3),
+                  fillKey: Key('fill-${def.id}'),
+                  bordered: !hold,
                 ),
-              ),
+                if (hold)
+                  // The "» tap to continue" pulse vocabulary, on the held
+                  // row's border (the card's static border stands down).
+                  Positioned.fill(
+                    key: Key('hold-pulse-${def.id}'),
+                    child: _Pulse(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: const BorderRadius.all(
+                            Radius.circular(AppDecorations.rectRadius),
+                          ),
+                          border: Border.all(
+                            color: color,
+                            width: AppDecorations.borderWidth,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
-            // Scale the readout down to fit INSIDE the tick ring — the old
-            // unconstrained FittedBox let the idle readout overlap the
-            // ticks (acceptance: "time is still too large").
-            SizedBox(
-              width: 236,
-              height: 236,
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: _readout(snapshot, timerColor),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  /// The whole-timer timeline as color segments: fractional spans (0..1 of
-  /// the total duration), one per flattened instance in its interval color
-  /// (repeats expand to repeated segments). Empty timer → empty list (the
-  /// painter falls back to the timer color).
-  List<({double start, double end, Color color})> _timelineSegments() {
-    final instances = controller.instances;
-    final total = instances.fold<int>(0, (s, i) => s + (i.durationSeconds ?? 0));
-    if (total <= 0) return const [];
-    final segments = <({double start, double end, Color color})>[];
-    var acc = 0;
-    for (final inst in instances) {
-      final start = acc / total;
-      acc += inst.durationSeconds ?? 0;
-      segments.add((
-        start: start,
-        end: acc / total,
-        color: _hexColor(inst.color),
-      ));
+  /// The duration slot's LIVE text: `wait` at a hold on the current row,
+  /// the wall countdown while the run awaits a pending wall, the current
+  /// occurrence's `<left>/<total>` (e.g. `10m5s/15m` — the total is that
+  /// occurrence's effective duration), the suspended occurrence's frozen
+  /// `<left>/<total>`, else the authored shape (`15:30` / duration /
+  /// `open` — [rowShape]).
+  String _defTime(
+    IntervalDef def,
+    List<int> ordinals,
+    TimerSnapshot snapshot,
+  ) {
+    final cursor = snapshot.ordinal;
+    if (cursor != null && ordinals.contains(cursor)) {
+      if (snapshot.state == SessionState.awaitingAdvance) return 'wait';
+      if (snapshot.state == SessionState.awaitingWall) {
+        // The countdown TO the wall is the meaningful clock here.
+        return formatDurationCompact(snapshot.remaining ?? Duration.zero);
+      }
+      final total = Duration(
+        seconds: controller.instances[cursor].durationSeconds ?? 0,
+      );
+      if (total == Duration.zero) return 'open'; // an Open row parked current
+      final left = snapshot.remaining ?? total;
+      return '${formatDurationCompact(left)}/${formatDurationCompact(total)}';
     }
-    return segments;
+    final suspendedAt = snapshot.suspendedOrdinal;
+    if (suspendedAt != null && ordinals.contains(suspendedAt)) {
+      final total = Duration(
+        seconds: controller.instances[suspendedAt].durationSeconds ?? 0,
+      );
+      if (total == Duration.zero) return 'open';
+      final left = snapshot.suspendedRemaining ?? Duration.zero;
+      return '${formatDurationCompact(left)}/${formatDurationCompact(total)}';
+    }
+    return rowShape(def);
   }
 
-  /// Fraction (0..1) of the WHOLE timer already elapsed — drives the tick
-  /// ring's dim/bright boundary: completed instances plus the current
-  /// instance's elapsed part. Zero at notStarted / after a reset; a
-  /// held-at-zero awaitingAdvance instance counts as fully elapsed.
-  double _overallProgress(TimerSnapshot snapshot) {
-    if (snapshot.state == SessionState.notStarted ||
-        snapshot.ordinal == null ||
-        controller.instances.isEmpty) {
-      return 0;
+  /// The row's progress fill: the current occurrence's elapsed/effective,
+  /// 1.0 once every occurrence has passed (a held-at-zero occurrence
+  /// counts as fully consumed), 0 for future rows, a pending wall
+  /// (awaitingWall), and a fresh run.
+  double _defFraction(List<int> ordinals, TimerSnapshot snapshot) {
+    final cursor = snapshot.ordinal;
+    if (cursor == null || ordinals.isEmpty) return 0;
+    if (ordinals.contains(cursor)) {
+      switch (snapshot.state) {
+        case SessionState.notStarted:
+          return 0;
+        case SessionState.awaitingAdvance:
+          return 1; // held AT zero — the occurrence consumed its length
+        case SessionState.awaitingWall:
+          return 0; // the wall has not fired yet
+        case SessionState.running:
+        case SessionState.paused:
+          final total =
+              (controller.instances[cursor].durationSeconds ?? 0) * 1000;
+          if (total <= 0) return 0;
+          final left = snapshot.remaining?.inMilliseconds ?? total;
+          return ((total - left) / total).clamp(0.0, 1.0);
+      }
     }
-    final instances = controller.instances;
-    final totalMs =
-        instances.fold<int>(0, (s, i) => s + (i.durationSeconds ?? 0)) * 1000;
-    if (totalMs <= 0) return 0;
-    var doneMs = 0;
-    for (var i = 0; i < snapshot.ordinal!; i++) {
-      doneMs += (instances[i].durationSeconds ?? 0) * 1000;
+    final suspendedAt = snapshot.suspendedOrdinal;
+    if (suspendedAt != null && ordinals.contains(suspendedAt)) {
+      final total =
+          (controller.instances[suspendedAt].durationSeconds ?? 0) * 1000;
+      if (total <= 0) return 0;
+      final left = snapshot.suspendedRemaining?.inMilliseconds ?? total;
+      return ((total - left) / total).clamp(0.0, 1.0);
     }
-    final curMs = (instances[snapshot.ordinal!].durationSeconds ?? 0) * 1000;
-    final remainingMs = snapshot.remaining?.inMilliseconds ?? curMs;
-    doneMs += (curMs - remainingMs).clamp(0, curMs);
-    return (doneMs / totalMs).clamp(0.0, 1.0).toDouble();
+    return ordinals.every((o) => o < cursor) ? 1 : 0;
+  }
+
+  /// One group, rendered like the editor's group rows (bracket + nested
+  /// children): the repeat counter counts DOWN (repeats LEFT) and the
+  /// group block carries the aggregate fill across its occurrences (the
+  /// per-repeat segmented fill is v3 polish).
+  Widget _groupRow(
+    GroupDef group,
+    List<IntervalNode> children,
+    Map<String, List<int>> occurrences,
+    TimerSnapshot snapshot,
+  ) {
+    final (:defIds, :ordinals) = _subtree(children, occurrences);
+    final cursor = snapshot.ordinal;
+    final suspendedAt = snapshot.suspendedOrdinal;
+    final isSuspended = suspendedAt != null && ordinals.contains(suspendedAt);
+    final completed =
+        defIds.isNotEmpty && defIds.every(controller.session.isCompleted);
+    final passed = cursor != null &&
+        ordinals.isNotEmpty &&
+        !isSuspended &&
+        ordinals.every((o) => o < cursor);
+
+    return Opacity(
+      key: Key('row-${group.id}'),
+      opacity: (completed || passed) ? AppColors.dimmed.a : 1.0,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          RowCircle(key: Key('check-${group.id}'), checked: completed),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Stack(
+              fit: StackFit.passthrough,
+              children: [
+                Positioned.fill(
+                  child: RowFill(
+                    key: Key('fill-${group.id}'),
+                    fraction: _groupFraction(ordinals, snapshot),
+                    color: AppColors.outline,
+                  ),
+                ),
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      GroupBracketBar(
+                        key: Key('bracket-${group.id}'),
+                        repeatKey: Key('repeat-${group.id}'),
+                        repeatLabel:
+                            '${_repeatsLeft(group, children, ordinals, snapshot)}',
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: _treeRows(children, occurrences, snapshot),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Def ids + flattened ordinals of a group's subtree — the ordinals are
+  /// SORTED because nested repeats interleave the per-def occurrence
+  /// lists (the pass structure is only visible in ordinal order).
+  ({List<String> defIds, List<int> ordinals}) _subtree(
+    List<IntervalNode> nodes,
+    Map<String, List<int>> occurrences,
+  ) {
+    final defIds = <String>[];
+    final ordinals = <int>[];
+    void walk(List<IntervalNode> ns) {
+      for (final n in ns) {
+        switch (n) {
+          case DefNode(:final def):
+            defIds.add(def.id);
+            ordinals.addAll(occurrences[def.id] ?? const <int>[]);
+          case GroupNode(:final children):
+            walk(children);
+        }
+      }
+    }
+
+    walk(nodes);
+    ordinals.sort();
+    return (defIds: defIds, ordinals: ordinals);
+  }
+
+  /// The group's aggregate progress: every passed occurrence in full, plus
+  /// the current/suspended occurrence's elapsed part, over the subtree's
+  /// total duration (Open occurrences add nothing).
+  double _groupFraction(List<int> ordinals, TimerSnapshot snapshot) {
+    final cursor = snapshot.ordinal;
+    if (cursor == null || ordinals.isEmpty) return 0;
+    var total = 0;
+    var done = 0;
+    for (final o in ordinals) {
+      final planned = (controller.instances[o].durationSeconds ?? 0) * 1000;
+      total += planned;
+      if (o == cursor) {
+        final left = switch (snapshot.state) {
+          SessionState.running || SessionState.paused =>
+            snapshot.remaining?.inMilliseconds ?? planned,
+          SessionState.awaitingAdvance => 0, // held AT zero: consumed
+          SessionState.awaitingWall => planned, // not fired: nothing elapsed
+          SessionState.notStarted => planned,
+        };
+        done += (planned - left).clamp(0, planned);
+      } else if (o == snapshot.suspendedOrdinal) {
+        final left = snapshot.suspendedRemaining?.inMilliseconds ?? planned;
+        done += (planned - left).clamp(0, planned);
+      } else if (o < cursor) {
+        done += planned;
+      }
+    }
+    if (total <= 0) return ordinals.every((o) => o < cursor) ? 1 : 0;
+    return (done / total).clamp(0.0, 1.0);
+  }
+
+  /// Repeats LEFT for a group row — the editor's total count counting
+  /// down: the group's own pass index under the cursor (nested repeats
+  /// cycle the counter once per enclosing pass). Fresh run → the full
+  /// count; the cursor past every pass → 0.
+  int _repeatsLeft(
+    GroupDef group,
+    List<IntervalNode> children,
+    List<int> ordinals,
+    TimerSnapshot snapshot,
+  ) {
+    final repeat = group.repeatCount;
+    final cursor = snapshot.ordinal;
+    if (cursor == null || ordinals.isEmpty) return repeat;
+    final at = ordinals.indexOf(cursor);
+    if (at < 0) return ordinals.every((o) => o < cursor) ? 0 : repeat;
+    final perPass = flatten(IntervalTree(children)).length;
+    if (perPass <= 0) return repeat;
+    final ownPass = (at ~/ perPass) % repeat;
+    return repeat - ownPass;
   }
 
   /// Center readout: the planned `03H : 00M / 00` layout before a run, the
@@ -232,7 +511,7 @@ class _BoardScreenState extends State<BoardScreen> {
     );
   }
 
-  /// Control row between dial and caption: open the interval list, reset
+  /// Control row under the list: open the interval list overlay, reset
   /// (with confirmation), and skip. Skip is disabled ONLY at notStarted —
   /// there is nothing to skip before a run begins; every other state
   /// (running, paused, awaitingAdvance) skips.
@@ -242,7 +521,7 @@ class _BoardScreenState extends State<BoardScreen> {
     const gap = SizedBox(width: 8);
     // Tweaks #5: in limbo the row keeps the shared buttons in their
     // usual slots — only Skip is swapped out, and Silence alarm takes
-    // its place on the far right (the dial completes the hold).
+    // its place on the far right (tap-to-continue completes the hold).
     if (inLimbo) {
       return Row(
         key: const Key('control-row'),
@@ -333,8 +612,8 @@ class _BoardScreenState extends State<BoardScreen> {
   }
 
   /// Opens the timer editor over a freshly loaded tree; Done in the
-  /// editor commits and reloads the board's session (onDone). The dial's
-  /// right-click and Escape share this path.
+  /// editor commits and reloads the board's session (onDone). The
+  /// readout's right-click and Escape share this path.
   Future<void> _openEditor(BuildContext context) async {
     final tree = await controller.store.loadTree(controller.timer.id);
     if (!context.mounted) return;
@@ -585,8 +864,8 @@ class _BoardScreenState extends State<BoardScreen> {
     );
   }
 
-  /// The one context action, dispatched by snapshot state — the dial tap
-  /// and Space both land here.
+  /// The one context action, dispatched by snapshot state — the readout
+  /// tap and Space both land here.
   void dispatchContextAction() {
     switch (controller.snapshot.state) {
       case SessionState.notStarted:
@@ -602,7 +881,7 @@ class _BoardScreenState extends State<BoardScreen> {
     }
   }
 
-  /// Board keyboard model (acceptance): Space = the dial action; the
+  /// Board keyboard model (acceptance): Space = the context action; the
   /// arrows/Home/End/Enter walk the control buttons (shared model); the
   /// quick keys hit the buttons directly — Tab = interval selector,
   /// Delete = reset, Ctrl+Right = next, Escape = the timer editor.
@@ -705,103 +984,6 @@ class _BoardScreenState extends State<BoardScreen> {
       ]),
     ];
   }
-}
-
-/// `#rrggbb` hex (v1 preset swatches) → opaque [Color].
-Color _hexColor(String hex) =>
-    Color(int.parse(hex.substring(1), radix: 16) | 0xFF000000);
-
-/// Tick ring painter: thin outer ring in the TIMER color plus 60
-/// round-cap ticks spanning the WHOLE timer — each tick takes the color of
-/// the timeline segment (interval instance) it falls into, so the ring is
-/// a color map of the entire run (short intervals in long timers may land
-/// on zero ticks — accepted trade-off of the fixed 60-tick resolution).
-/// Ticks at or before the progress boundary are elapsed: drawn at the
-/// universal semi-transparent alpha (theme card) and 66% brightness —
-/// dimmed but still in their interval color, so the dim/bright edge marks
-/// "now" and the colors map the whole run.
-class _DialPainter extends CustomPainter {
-  const _DialPainter({
-    required this.elapsed,
-    required this.segments,
-    required this.timerColor,
-  });
-
-  /// Elapsed fraction (0..1) of the whole timer.
-  final double elapsed;
-
-  /// Timeline segments: fractional spans of the total + interval color.
-  final List<({double start, double end, Color color})> segments;
-
-  /// Ring color — also the tick fallback when there are no segments.
-  final Color timerColor;
-
-  /// Alpha shared with the app's semi-transparent backgrounds (AppColors
-  /// card's alpha — follows it when halved.
-  static final double _dimAlpha = AppColors.card.a;
-
-  /// Elapsed-tick brightness relative to the interval color.
-  static const double _dimBrightness = 0.66;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = size.center(Offset.zero);
-    final radius = size.shortestSide / 2;
-
-    // Outer ring.
-    canvas.drawCircle(
-      center,
-      radius - 4,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 5
-        ..color = timerColor,
-    );
-
-    // Tick ring: whole-timer color map; elapsed ticks dimmed.
-    final tickInner = radius - 26;
-    final tickOuter = radius - 11;
-    final tickPaint = Paint()
-      ..strokeWidth = 3.2
-      ..strokeCap = StrokeCap.round;
-    for (var i = 0; i < 60; i++) {
-      final frac = (i + 0.5) / 60;
-      final angle = i * 2 * math.pi / 60 - math.pi / 2;
-      final dir = Offset(math.cos(angle), math.sin(angle));
-      final color = _colorAt(frac);
-      tickPaint.color = frac < elapsed ? _dim(color) : color;
-      canvas.drawLine(
-        center + dir * tickInner,
-        center + dir * tickOuter,
-        tickPaint,
-      );
-    }
-  }
-
-  /// The interval color at timeline fraction [frac] — tick midpoint lookup,
-  /// no half-ticks at segment boundaries.
-  Color _colorAt(double frac) {
-    for (final s in segments) {
-      if (frac >= s.start && frac < s.end) return s.color;
-    }
-    return segments.isEmpty ? timerColor : segments.last.color;
-  }
-
-  /// Elapsed-tick color: 66% brightness + the shared semi-transparent
-  /// alpha (over the transparent window this blends with the desktop).
-  Color _dim(Color color) {
-    final hsl = HSLColor.fromColor(color);
-    return hsl
-        .withLightness((hsl.lightness * _dimBrightness).clamp(0.0, 1.0))
-        .toColor()
-        .withValues(alpha: _dimAlpha);
-  }
-
-  @override
-  bool shouldRepaint(covariant _DialPainter oldDelegate) =>
-      oldDelegate.elapsed != elapsed ||
-      oldDelegate.timerColor != timerColor ||
-      !listEquals(oldDelegate.segments, segments);
 }
 
 /// Not-started readout: `03H : 00M` big with a small seconds subscript —

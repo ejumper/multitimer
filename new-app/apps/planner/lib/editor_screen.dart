@@ -4,8 +4,8 @@ import 'package:planner_engine/planner_engine.dart';
 
 import 'adapters/ports.dart';
 import 'editor_controller.dart';
-import 'format.dart';
 import 'interval_editor.dart';
+import 'interval_rows.dart';
 import 'keyboard_nav.dart';
 import 'repeat_modal.dart';
 import 'theme.dart';
@@ -571,7 +571,7 @@ class _EditorScreenState extends State<EditorScreen> {
         child: Container(
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: _hexColor(hex),
+            color: hexColor(hex),
           ),
           child: selected
               ? Center(
@@ -580,7 +580,7 @@ class _EditorScreenState extends State<EditorScreen> {
                     height: 10,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: contrastDot(_hexColor(hex)),
+                      color: contrastDot(hexColor(hex)),
                     ),
                   ),
                 )
@@ -1111,17 +1111,6 @@ class _EditorScreenState extends State<EditorScreen> {
 
   // ── row widgets ───────────────────────────────────────────────────────
 
-  /// The chip's right-hand shape (P1.5): the trigger time when dated
-  /// (`15:30`), else the duration when present, else `open` for an Open
-  /// interval — the three v2 shapes (dated / timed / open) at a glance.
-  String _rowShape(IntervalDef def) {
-    final trigger = def.triggerTimeSeconds;
-    if (trigger != null) return formatWallTime(trigger);
-    final duration = def.durationSeconds;
-    if (duration != null) return formatDuration(Duration(seconds: duration));
-    return 'open';
-  }
-
   /// One interval: selection circle (ROOT-level rows only — inside a group
   /// the rows are one unit and not individually selectable, acceptance
   /// "group selection semantics"; tapping the card still edits) | chip card
@@ -1146,82 +1135,14 @@ class _EditorScreenState extends State<EditorScreen> {
               onTap: () => _openIntervalEditor(context, defId: def.id),
               child: FocusRing(
                 focused: _nav.isFocused('rect-${def.id}'),
-                child: _chipCard(def),
+                // The card is shared with the board's list view
+                // (interval_rows.dart) — one row vocabulary everywhere.
+                child: IntervalChipCard(def: def, shape: rowShape(def)),
               ),
             ),
           ),
         ),
       ],
-    );
-  }
-
-  Widget _chipCard(IntervalDef def) {
-    final alert = def.endAlertSoundFile;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        borderRadius: const BorderRadius.all(
-          Radius.circular(AppDecorations.rectRadius),
-        ),
-        border: Border.all(
-          color: _hexColor(def.color),
-          width: AppDecorations.borderWidth,
-        ),
-        // Interval-color tinted background @ the shared semi-transparent
-        // alpha (acceptance: "Color intervals background in the editor").
-        color: _hexColor(def.color).withValues(alpha: AppColors.card.a),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  def.name ?? 'Interval',
-                  style: const TextStyle(
-                    fontFamily: AppFonts.ui,
-                    fontSize: 15,
-                    color: AppColors.text,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                _rowShape(def),
-                style: const TextStyle(
-                  fontFamily: AppFonts.digits,
-                  fontSize: 14,
-                  color: AppColors.text,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                alert == null ? Icons.volume_off_outlined : Icons.volume_up_outlined,
-                size: 12,
-                color: AppColors.dimmed,
-              ),
-              const SizedBox(width: 4),
-              Flexible(
-                child: Text(
-                  alert ?? 'No end alert',
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontFamily: AppFonts.ui,
-                    fontSize: 12,
-                    color: AppColors.dimmed,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
     );
   }
 
@@ -1250,45 +1171,15 @@ class _EditorScreenState extends State<EditorScreen> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                SizedBox(
-                  width: 34,
-                  // Builder: the bar tap needs a context and _groupRow
-                  // has none of its own; opaque so the bare capsule area is
-                  // hittable where no child covers the tap point.
-                  child: Builder(
-                    builder: (context) => FocusRing(
-                      focused: _nav.isFocused('bar-${group.id}'),
-                      child: GestureDetector(
-                      key: Key('bracket-${group.id}'),
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () => _bracketTapped(context, group),
-                      child: Stack(
-                        children: [
-                          // The group bar: filled capsule (repeat stepper
-                          // target — see _bracketTapped).
-                          Positioned.fill(
-                            child: CustomPaint(painter: _GroupBarPainter()),
-                          ),
-                          // Repeat count: centered BOTH ways, plain text.
-                          Positioned.fill(
-                            child: Center(
-                              key: Key('repeat-${group.id}'),
-                              child: Text(
-                                '${group.repeatCount}',
-                                style: const TextStyle(
-                                  fontFamily: AppFonts.digits,
-                                  fontWeight: FontWeight.w500,
-                                  fontSize: 13,
-                                  color: AppColors.text,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    ),
-                  ),
+                // The bracket bar (repeat stepper target — see
+                // _bracketTapped) — shared with the board's list view,
+                // where the count reads repeats LEFT.
+                GroupBracketBar(
+                  key: Key('bracket-${group.id}'),
+                  repeatKey: Key('repeat-${group.id}'),
+                  repeatLabel: '${group.repeatCount}',
+                  focused: _nav.isFocused('bar-${group.id}'),
+                  onTap: () => _bracketTapped(context, group),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -1310,32 +1201,14 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   /// 20px selection circle at the far left of every row; selected shows a
-  /// blue-tinted fill + check.
-  Widget _selectionCircle(String nodeId) {
-    final selected = controller.selection.contains(nodeId);
-    return FocusRing(
-      focused: _nav.isFocused('circle-$nodeId'),
-      child: GestureDetector(
-      key: Key('select-$nodeId'),
-      onTap: () => controller.toggleSelect(nodeId),
-      child: Container(
-        width: 20,
-        height: 20,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: AppColors.outline,
-            width: AppDecorations.borderWidth,
-          ),
-          color: selected ? AppColors.text.withValues(alpha: 0.35) : null,
-        ),
-        child: selected
-            ? const Icon(Icons.check, size: 14, color: AppColors.text)
-            : null,
-      ),
-      ),
-    );
-  }
+  /// blue-tinted fill + check (the shared [RowCircle] — the board's list
+  /// view reuses it as the completion checkbox).
+  Widget _selectionCircle(String nodeId) => RowCircle(
+    key: Key('select-$nodeId'),
+    checked: controller.selection.contains(nodeId),
+    focused: _nav.isFocused('circle-$nodeId'),
+    onTap: () => controller.toggleSelect(nodeId),
+  );
 
   /// Empty tree: the hint + the add affordance.
   Widget _emptyState(BuildContext context) {
@@ -1415,38 +1288,3 @@ class _LabelFieldState extends State<_LabelField> {
     );
   }
 }
-
-/// The group bar (MultiTimer-style, IMG_6229/6230): a filled CAPSULE down
-/// the group's left edge — closed rounded rectangle (it HAS a left side),
-/// filled with the outline's color at the app's semi-transparent opacity,
-/// stroked with the outline color.
-class _GroupBarPainter extends CustomPainter {
-  const _GroupBarPainter();
-
-  /// Outline color @ the shared semi-transparent alpha (theme card,
-  /// halved again per acceptance).
-  static final Color _fill = AppColors.outline.withValues(alpha: AppColors.card.a);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final bar = RRect.fromRectAndRadius(
-      Offset.zero & size,
-      Radius.circular(size.width / 2), // capsule ends
-    );
-    canvas.drawRRect(bar, Paint()..color = _fill);
-    canvas.drawRRect(
-      bar,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = AppDecorations.borderWidth
-        ..color = AppColors.outline,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _GroupBarPainter oldDelegate) => false;
-}
-
-/// `#rrggbb` hex (v1 preset swatches) → opaque [Color].
-Color _hexColor(String hex) =>
-    Color(int.parse(hex.substring(1), radix: 16) | 0xFF000000);
