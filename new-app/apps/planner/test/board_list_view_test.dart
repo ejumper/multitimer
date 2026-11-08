@@ -1,5 +1,6 @@
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:planner/app_controller.dart';
 import 'package:planner/board_screen.dart';
@@ -608,4 +609,258 @@ void main() {
     controller.dispose();
     await store.close();
   });
+
+  // ── v2 P2.2: the completion interaction ─────────────────────────
+
+  /// Two simple manual/autofinish defs for the interaction tests (no
+  /// walls, no repeats).
+  Future<void> buildSimpleFixture() async {
+    clock = FixedClock(t0);
+    db = PlannerDb(NativeDatabase.memory());
+    store = DriftStore(db, clock);
+    final board = await store.createBoard('My Board');
+    final timer = await store.createTimer(
+      boardId: board.id,
+      name: 'Interval timer',
+      color: '#0055ff',
+    );
+    await store.saveTree(
+      timer.id,
+      IntervalTree([
+        DefNode(
+          IntervalDef(
+            id: 'x',
+            timerId: timer.id,
+            name: 'Study',
+            color: '#0055ff',
+            durationSeconds: 60,
+            autoFinish: false,
+          ),
+        ),
+        DefNode(
+          IntervalDef(
+            id: 'y',
+            timerId: timer.id,
+            name: 'Store',
+            color: '#ff00b1',
+            durationSeconds: 60,
+            autoFinish: false,
+          ),
+        ),
+      ]),
+      eventKind: 'tree.save',
+    );
+    controller = AppController(
+      store: store,
+      clock: clock,
+      notifier: RecordingNotifier(),
+      player: RecordingPlayer(),
+      soundsDir: '/sounds',
+      soundListing: () => const [],
+    );
+    await controller.init();
+  }
+
+  testWidgets('enter_at_hold_completes_and_checks', (tester) async {
+    await buildSimpleFixture();
+    await pumpBoard(tester);
+    controller.start();
+    clock.current = clock.current.add(const Duration(seconds: 60));
+    await controller.tick();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(controller.snapshot.state, SessionState.awaitingAdvance);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(controller.session.isCompleted('x'), isTrue);
+    expect(controller.snapshot.state, SessionState.running);
+    expect(controller.snapshot.ordinal, 1);
+    controller.dispose();
+  });
+
+  testWidgets('not_completed_button_and_N_advance_unchecked',
+      (tester) async {
+    await buildSimpleFixture();
+    await pumpBoard(tester);
+    controller.start();
+    clock.current = clock.current.add(const Duration(seconds: 60));
+    await controller.tick();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    await tester.tap(find.byKey(const Key('btn-not-completed')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(controller.session.isCompleted('x'), isFalse);
+    expect(controller.snapshot.ordinal, 1);
+
+    // Second hold: the N key does the same.
+    clock.current = clock.current.add(const Duration(seconds: 60));
+    await controller.tick();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(controller.snapshot.state, SessionState.awaitingAdvance);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(controller.session.isCompleted('y'), isFalse);
+    expect(controller.snapshot.state, SessionState.notStarted);
+    controller.dispose();
+  });
+
+  testWidgets('tap_to_continue_completes_at_a_hold', (tester) async {
+    await buildSimpleFixture();
+    await pumpBoard(tester);
+    controller.start();
+    clock.current = clock.current.add(const Duration(seconds: 60));
+    await controller.tick();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    await tester.tap(find.byKey(const Key('tap-to-continue')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(controller.session.isCompleted('x'), isTrue);
+    expect(controller.snapshot.ordinal, 1);
+    controller.dispose();
+  });
+
+  testWidgets('hold_row_slot_contract', (tester) async {
+    await buildSimpleFixture();
+    await pumpBoard(tester);
+    controller.start();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    // Running: the list shortcut holds the second slot, no decision button.
+    expect(find.byKey(const Key('btn-list')), findsOneWidget);
+    expect(find.byKey(const Key('btn-not-completed')), findsNothing);
+
+    clock.current = clock.current.add(const Duration(seconds: 60));
+    await controller.tick();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    // Hold: [adjust][not-completed][reset][silence] — silence keeps the
+    // far-right slot (the v1 contract), the list shortcut steps aside.
+    final icons = tester
+        .widgetList<IconButton>(
+          find.descendant(
+            of: find.byKey(const Key('control-row')),
+            matching: find.byType(IconButton),
+          ),
+        )
+        .toList();
+    expect(icons, hasLength(4));
+    expect(find.byKey(const Key('btn-not-completed')), findsOneWidget);
+    expect(find.byKey(const Key('btn-silence')), findsOneWidget);
+    expect(find.byKey(const Key('btn-list')), findsNothing);
+    expect(find.byKey(const Key('btn-skip')), findsNothing);
+    controller.dispose();
+  });
+
+  testWidgets('enter_outside_a_hold_keeps_the_button_model', (tester) async {
+    await buildSimpleFixture();
+    await pumpBoard(tester);
+    controller.start();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    // The arrow-walk to Reset and Enter activates it (the confirm dialog
+    // appears) — Enter is NOT a completion action while running.
+    await tester.sendKeyEvent(LogicalKeyboardKey.home);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(Dialog), findsOneWidget); // the dialog opened
+    expect(controller.snapshot.state, SessionState.running); // untouched
+    controller.dispose();
+  });
+
+  testWidgets('retry_missed_runs_only_the_un_done_items', (tester) async {
+    await buildSimpleFixture();
+    await pumpBoard(tester);
+    // Fresh: nothing to retry.
+    expect(find.byKey(const Key('btn-retry-missed')), findsNothing);
+
+    controller.start();
+    clock.current = clock.current.add(const Duration(seconds: 60));
+    await controller.tick();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter); // x completes
+    controller.skipNext(); // y skipped = not completed
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(controller.snapshot.state, SessionState.notStarted);
+
+    expect(find.text('Retry missed (1)'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('btn-retry-missed')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    // x flew past (its work stands); y runs.
+    expect(controller.snapshot.ordinal, 1);
+    expect(controller.snapshot.state, SessionState.running);
+
+    // Let y run its course and complete -> all done -> no button.
+    clock.current = clock.current.add(const Duration(seconds: 60));
+    await controller.tick();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(controller.snapshot.state, SessionState.notStarted);
+    expect(find.byKey(const Key('btn-retry-missed')), findsNothing);
+    controller.dispose();
+  });
+
+  testWidgets('reset_un_checks_rows_visibly', (tester) async {
+    await buildSimpleFixture();
+    await pumpBoard(tester);
+    controller.start();
+    clock.current = clock.current.add(const Duration(seconds: 60));
+    await controller.tick();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter); // x checked
+    expect(controller.session.isCompleted('x'), isTrue);
+
+    controller.reset();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(controller.session.completedDefIds, isEmpty);
+    // The row is back to full opacity (the dimming released).
+    expect(rowOpacity(tester, 'x'), 1.0);
+    controller.dispose();
+  });
+
+  testWidgets('mark_changes_persist_through_the_store', (tester) async {
+    await buildSimpleFixture();
+    await pumpBoard(tester);
+    controller.start();
+    clock.current = clock.current.add(const Duration(seconds: 60));
+    await controller.tick();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter); // x checked
+    await tester.pump();
+
+    // The mark is on the DEF in the store (the durable record) and the
+    // change log carries the run.mark entry.
+    final reloaded = await store.loadTree(controller.timer.id);
+    expect((reloaded.nodeById('x') as DefNode).def.completed, isTrue);
+    final events = await db.select(db.eventLog).get();
+    expect(
+      events.any((e) => e.kind == 'run.mark'),
+      isTrue,
+      reason: 'the mark change is logged',
+    );
+    controller.dispose();
+  });
+
 }

@@ -396,6 +396,36 @@ class IntervalTree {
     ),
   };
 
+  /// v2 (P2.2) — replaces one def's contents in place, keeping its
+  /// position (the completion-mark persistence path). No-op if [id] is
+  /// absent; throws [TreeOpException] if it names a group.
+  IntervalTree updated(String id, IntervalDef Function(IntervalDef) update) {
+    void check(IntervalNode n) {
+      if (n.id == id && n is! DefNode) {
+        throw TreeOpException('updated: $id is not an interval');
+      }
+    }
+
+    for (final n in allNodes) {
+      check(n);
+    }
+    return IntervalTree(_updatedDef(roots, id, update));
+  }
+
+  static List<IntervalNode> _updatedDef(
+    List<IntervalNode> nodes,
+    String id,
+    IntervalDef Function(IntervalDef) update,
+  ) => [
+    for (final n in nodes)
+      switch (n) {
+        DefNode(:final def) when def.id == id => DefNode(update(def)),
+        GroupNode(:final group, :final children) =>
+          GroupNode(group, _updatedDef(children, id, update)),
+        _ => n,
+      },
+  ];
+
   /// v2 (P1.1) — the fork/copy rule (OVERVIEW §6): deep-copy this tree as a
   /// NEW plan: fresh ids throughout, owned by [timerId], completion marks
   /// cleared. Used by day materialization (P4.1) and save-to-folder (P3.2);

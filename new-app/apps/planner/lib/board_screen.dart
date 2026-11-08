@@ -91,6 +91,24 @@ class _BoardScreenState extends State<BoardScreen> {
         // P2.1: the dial is gone — the interval LIST is the main area.
         Expanded(child: _intervalList(snapshot)),
         const SizedBox(height: 12),
+        // v2 P2.2: Retry missed — the residue of a partial run. The
+        // engine's fly-past makes a plain start re-run ONLY the
+        // un-completed items (marks are the record; Reset clears them).
+        if (_retryMissedCount(snapshot) case final n when n != null) ...[
+          TextButton(
+            key: const Key('btn-retry-missed'),
+            onPressed: () => controller.start(),
+            child: Text(
+              'Retry missed ($n)',
+              style: const TextStyle(
+                fontFamily: AppFonts.ui,
+                fontSize: 15,
+                color: AppColors.lightBlue,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
         _controlRow(context, snapshot),
         if (snapshot.state == SessionState.awaitingAdvance) ...[
           const SizedBox(height: 12),
@@ -511,6 +529,20 @@ class _BoardScreenState extends State<BoardScreen> {
     );
   }
 
+  /// v2 P2.2 — how many ITEMS (defs) a retry would redo: shown only when
+  /// the run is over with a partial residue (some done, some not). Null =
+  /// no button (fresh timer: nothing to "retry"; fully done: nothing left).
+  int? _retryMissedCount(TimerSnapshot snapshot) {
+    if (snapshot.state != SessionState.notStarted) return null;
+    final items = controller.instances.map((i) => i.defId).toSet();
+    if (items.isEmpty) return null;
+    final missed = items
+       .where((id) => !controller.session.isCompleted(id))
+        .length;
+    if (missed == 0 || missed == items.length) return null;
+    return missed;
+  }
+
   /// Control row under the list: open the interval list overlay, reset
   /// (with confirmation), and skip. Skip is disabled ONLY at notStarted —
   /// there is nothing to skip before a run begins; every other state
@@ -535,12 +567,14 @@ class _BoardScreenState extends State<BoardScreen> {
             onPressed: () => _openAdjust(context),
           ),
           gap,
+          // v2 P2.2: the hold's second slot is the "not completed"
+          // decision (the interval-list shortcut steps aside here).
           _HoverIconButton(
             circularRing: true,
-            buttonKey: const Key('btn-list'),
-            icon: Icons.menu,
-            focused: _nav.isFocused('btn-list'),
-            onPressed: () => _showListOverlay(context),
+            buttonKey: const Key('btn-not-completed'),
+            icon: Icons.remove_done,
+            focused: _nav.isFocused('btn-not-completed'),
+            onPressed: () => controller.resolveHold(completed: false),
           ),
           gap,
           _HoverIconButton(
@@ -839,7 +873,8 @@ class _BoardScreenState extends State<BoardScreen> {
   Widget _tapToContinue() {
     return GestureDetector(
       key: const Key('tap-to-continue'),
-      onTapDown: (_) => controller.skipNext(),
+      // v2 P2.2: the tap completes (✓) — same as Enter/Space at a hold.
+      onTapDown: (_) => controller.resolveHold(completed: true),
       child: _Pulse(
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -875,7 +910,9 @@ class _BoardScreenState extends State<BoardScreen> {
       case SessionState.paused:
         controller.resume();
       case SessionState.awaitingAdvance:
-        controller.skipNext();
+        // v2 P2.2: the dial/Space action at a hold IS the completion
+        // decision — Enter = completed, exactly like the tap-to-continue.
+        controller.resolveHold(completed: true);
       case SessionState.awaitingWall: // v2 P1.4: skip the waited wall
         controller.skipNext();
     }
@@ -915,6 +952,20 @@ class _BoardScreenState extends State<BoardScreen> {
       _openEditor(context);
       return KeyEventResult.handled;
     }
+    // v2 P2.2: at a hold Enter is THE completion decision (the user rule)
+    // and N is the "not completed" button — both supersede the shared
+    // button model only while the run holds.
+    if (controller.snapshot.state == SessionState.awaitingAdvance) {
+      if (key == LogicalKeyboardKey.enter ||
+          key == LogicalKeyboardKey.numpadEnter) {
+        controller.resolveHold(completed: true);
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.keyN) {
+        controller.resolveHold(completed: false);
+        return KeyEventResult.handled;
+      }
+    }
     return null; // arrows/Home/End/Enter -> the shared button model
   }
 
@@ -933,10 +984,10 @@ class _BoardScreenState extends State<BoardScreen> {
             activate: () => _openAdjust(context),
           ),
           NavCell(
-            id: 'btn-list',
+            id: 'btn-not-completed',
             row: 0,
             col: 1,
-            activate: () => _showListOverlay(context),
+            activate: () => controller.resolveHold(completed: false),
           ),
           NavCell(
             id: 'btn-reset',

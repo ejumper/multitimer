@@ -382,4 +382,33 @@ void main() {
     });
   });
 
+
+  group('updated (v2 P2.2 mark persistence)', () {
+    test('replaces one def in place, keeping position and siblings', () {
+      final t = tree([
+        def('a'),
+        groupOf('g1', [def('b')], repeat: 2),
+        def('c'),
+      ]);
+      final r = t.updated('b', (d) => d.copyWith(completed: true));
+      expect(
+        r.toDebugString(),
+        'def:a | group:g1[2]{def:b} | def:c',
+      );
+      expect((r.nodeById('b') as DefNode).def.completed, isTrue);
+      expect((r.nodeById('a') as DefNode).def.completed, isFalse);
+      // The original is untouched (trees are values).
+      expect((t.nodeById('b') as DefNode).def.completed, isFalse);
+    });
+
+    test('absent id is a no-op; groups are rejected', () {
+      final t = tree([def('a'), groupOf('g1', [def('b')])]);
+      expect(t.updated('zz', (d) => d).toDebugString(), t.toDebugString());
+      expect(
+        () => t.updated('g1', (d) => d),
+        throwsA(isA<TreeOpException>()),
+      );
+    });
+  });
+
 }

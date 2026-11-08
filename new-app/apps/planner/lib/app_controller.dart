@@ -244,8 +244,10 @@ class AppController extends ChangeNotifier {
   /// Returns the new mark, or null when the ordinal is out of range.
   bool? toggleMark(int ordinal) {
     final before = snapshot;
+    final defId = instances[ordinal].defId;
     final marked = session.toggleMark(ordinal);
     if (marked == null) return null;
+    _persistMark(defId, marked);
     final after = snapshot;
     if (after.ordinal != before.ordinal || after.state != before.state) {
       alerts.stopAlerts();
@@ -255,8 +257,68 @@ class AppController extends ChangeNotifier {
     return marked;
   }
 
+  /// v2 P2.2 — resolves a hold: [completed] is the Enter path (✓), false
+  /// is the "not completed" button. Outside a hold it is a no-op.
+  void resolveHold({required bool completed}) {
+    final before = snapshot;
+    if (before.state != SessionState.awaitingAdvance) return;
+    final defId = instances[before.ordinal!].defId;
+    if (!session.resolveHold(completed: completed)) return;
+    _persistMark(defId, completed);
+    final after = snapshot;
+    if (after.ordinal != before.ordinal || after.state != before.state) {
+      alerts.stopAlerts();
+      unawaited(notifier.closeVisible());
+    }
+    notifyListeners();
+  }
+
+  /// The def is the durable record (P1.1): the mark lands on the tree and
+  /// is written through the normal save path — `run.mark` is both the
+  /// change-log entry and the persistence write, fire-and-forget like the
+  /// other UI-side store calls.
+  void _persistMark(String defId, bool completed) {
+    tree = tree.updated(defId, (d) => d.copyWith(completed: completed));
+    unawaited(
+      store
+          .saveTree(
+            timer.id,
+            tree,
+            eventKind: 'run.mark',
+            eventPayload: {'defId': defId, 'completed': completed},
+          )
+          .catchError((Object e) {
+            debugPrint('run.mark save failed: $e');
+          }),
+    );
+  }
+
   void reset() {
     session.reset();
+    // v2 P1.3/P2.2: Reset un-completes every item — persisted too (the
+    /// task-list "uncheck everything for the next trip" use case).
+    var cleared = false;
+    for (final id in tree.allIds.toSet()) {
+      final node = tree.nodeById(id);
+      if (node is DefNode && node.def.completed) {
+        tree = tree.updated(id, (d) => d.copyWith(completed: false));
+        cleared = true;
+      }
+    }
+    if (cleared) {
+      unawaited(
+        store
+            .saveTree(
+              timer.id,
+              tree,
+              eventKind: 'run.mark',
+              eventPayload: {'cleared': true},
+            )
+            .catchError((Object e) {
+              debugPrint('run.mark save failed: $e');
+            }),
+      );
+    }
     alerts.stopAlerts(); // abandoning the run cuts any alert sound
     unawaited(notifier.closeVisible());
     notifyListeners();

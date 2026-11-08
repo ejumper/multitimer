@@ -20,7 +20,7 @@ is stale, check the changelog).
 
 | Key | Action |
 | --- | --- |
-| Space / media play-pause | context action: start / pause / resume; at a held manual zero = continue |
+| Space / media play-pause | context action: start / pause / resume; at a held manual zero = completed (✓) |
 | ← → | move between the control buttons (interval selector, reset, next) |
 | Home / End | first / last control button |
 | Enter | activate the focused button |
@@ -132,3 +132,9 @@ Focus starts in the alert list.
 | ← | stop the preview |
 | Enter | select the focused alert (auto-closes) |
 | Escape | back (same as the back button) |
+
+**v2 P2.2 — hold decisions (while an interval holds at zero):**
+- `Enter` (or `NumpadEnter`) = **completed** (✓) — supersedes button activation at holds only
+- `N` = **not completed** (✗) — the same as the control row's decision button
+- `Space` / the tap-to-continue area = completed (same as Enter)
+- Elsewhere Enter keeps its button-activation role (the arrow-walk model).

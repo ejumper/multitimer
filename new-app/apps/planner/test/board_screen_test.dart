@@ -590,11 +590,14 @@ void main() {
     expect(controller.snapshot.state, SessionState.awaitingAdvance);
     expect(find.byKey(const Key('btn-silence')), findsOneWidget);
     expect(find.byKey(const Key('btn-adjust')), findsOneWidget);
-    expect(find.byKey(const Key('btn-list')), findsOneWidget); // kept
+    // v2 P2.2: at a hold the second slot IS the decision — "not completed"
+    // (the interval-list shortcut steps aside).
+    expect(find.byKey(const Key('btn-not-completed')), findsOneWidget);
+    expect(find.byKey(const Key('btn-list')), findsNothing);
     expect(find.byKey(const Key('btn-reset')), findsOneWidget); // kept
     expect(find.byKey(const Key('btn-skip')), findsNothing); // the hold
-    // Slot contract (user tweak): the shared buttons keep their spots —
-    // silence takes skip's far-right slot in both modes.
+    // Slot contract: the shared buttons keep their spots — silence takes
+    // skip's far-right slot in both modes.
     List<Key> rowKeys(WidgetTester t) => [
       for (final w in t.widgetList<IconButton>(
         find.descendant(
@@ -606,7 +609,7 @@ void main() {
     ];
     expect(rowKeys(tester), const [
       Key('btn-adjust'),
-      Key('btn-list'),
+      Key('btn-not-completed'),
       Key('btn-reset'),
       Key('btn-silence'),
     ]);
