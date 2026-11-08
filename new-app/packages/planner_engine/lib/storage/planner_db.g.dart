@@ -292,6 +292,28 @@ class $TimersTable extends Timers with TableInfo<$TimersTable, TimerRow> {
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _dayDateMeta = const VerificationMeta(
+    'dayDate',
+  );
+  @override
+  late final GeneratedColumn<int> dayDate = GeneratedColumn<int>(
+    'day_date',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _originPlanIdMeta = const VerificationMeta(
+    'originPlanId',
+  );
+  @override
+  late final GeneratedColumn<String> originPlanId = GeneratedColumn<String>(
+    'origin_plan_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -302,6 +324,8 @@ class $TimersTable extends Timers with TableInfo<$TimersTable, TimerRow> {
     sortIndex,
     createdAt,
     updatedAt,
+    dayDate,
+    originPlanId,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -374,6 +398,21 @@ class $TimersTable extends Timers with TableInfo<$TimersTable, TimerRow> {
     } else if (isInserting) {
       context.missing(_updatedAtMeta);
     }
+    if (data.containsKey('day_date')) {
+      context.handle(
+        _dayDateMeta,
+        dayDate.isAcceptableOrUnknown(data['day_date']!, _dayDateMeta),
+      );
+    }
+    if (data.containsKey('origin_plan_id')) {
+      context.handle(
+        _originPlanIdMeta,
+        originPlanId.isAcceptableOrUnknown(
+          data['origin_plan_id']!,
+          _originPlanIdMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -415,6 +454,14 @@ class $TimersTable extends Timers with TableInfo<$TimersTable, TimerRow> {
         DriftSqlType.int,
         data['${effectivePrefix}updated_at'],
       )!,
+      dayDate: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}day_date'],
+      ),
+      originPlanId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}origin_plan_id'],
+      ),
     );
   }
 
@@ -433,6 +480,8 @@ class TimerRow extends DataClass implements Insertable<TimerRow> {
   final int sortIndex;
   final int createdAt;
   final int updatedAt;
+  final int? dayDate;
+  final String? originPlanId;
   const TimerRow({
     required this.id,
     required this.boardId,
@@ -442,6 +491,8 @@ class TimerRow extends DataClass implements Insertable<TimerRow> {
     required this.sortIndex,
     required this.createdAt,
     required this.updatedAt,
+    this.dayDate,
+    this.originPlanId,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -456,6 +507,12 @@ class TimerRow extends DataClass implements Insertable<TimerRow> {
     map['sort_index'] = Variable<int>(sortIndex);
     map['created_at'] = Variable<int>(createdAt);
     map['updated_at'] = Variable<int>(updatedAt);
+    if (!nullToAbsent || dayDate != null) {
+      map['day_date'] = Variable<int>(dayDate);
+    }
+    if (!nullToAbsent || originPlanId != null) {
+      map['origin_plan_id'] = Variable<String>(originPlanId);
+    }
     return map;
   }
 
@@ -471,6 +528,12 @@ class TimerRow extends DataClass implements Insertable<TimerRow> {
       sortIndex: Value(sortIndex),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
+      dayDate: dayDate == null && nullToAbsent
+          ? const Value.absent()
+          : Value(dayDate),
+      originPlanId: originPlanId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(originPlanId),
     );
   }
 
@@ -488,6 +551,8 @@ class TimerRow extends DataClass implements Insertable<TimerRow> {
       sortIndex: serializer.fromJson<int>(json['sortIndex']),
       createdAt: serializer.fromJson<int>(json['createdAt']),
       updatedAt: serializer.fromJson<int>(json['updatedAt']),
+      dayDate: serializer.fromJson<int?>(json['dayDate']),
+      originPlanId: serializer.fromJson<String?>(json['originPlanId']),
     );
   }
   @override
@@ -502,6 +567,8 @@ class TimerRow extends DataClass implements Insertable<TimerRow> {
       'sortIndex': serializer.toJson<int>(sortIndex),
       'createdAt': serializer.toJson<int>(createdAt),
       'updatedAt': serializer.toJson<int>(updatedAt),
+      'dayDate': serializer.toJson<int?>(dayDate),
+      'originPlanId': serializer.toJson<String?>(originPlanId),
     };
   }
 
@@ -514,6 +581,8 @@ class TimerRow extends DataClass implements Insertable<TimerRow> {
     int? sortIndex,
     int? createdAt,
     int? updatedAt,
+    Value<int?> dayDate = const Value.absent(),
+    Value<String?> originPlanId = const Value.absent(),
   }) => TimerRow(
     id: id ?? this.id,
     boardId: boardId ?? this.boardId,
@@ -523,6 +592,8 @@ class TimerRow extends DataClass implements Insertable<TimerRow> {
     sortIndex: sortIndex ?? this.sortIndex,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
+    dayDate: dayDate.present ? dayDate.value : this.dayDate,
+    originPlanId: originPlanId.present ? originPlanId.value : this.originPlanId,
   );
   TimerRow copyWithCompanion(TimersCompanion data) {
     return TimerRow(
@@ -534,6 +605,10 @@ class TimerRow extends DataClass implements Insertable<TimerRow> {
       sortIndex: data.sortIndex.present ? data.sortIndex.value : this.sortIndex,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      dayDate: data.dayDate.present ? data.dayDate.value : this.dayDate,
+      originPlanId: data.originPlanId.present
+          ? data.originPlanId.value
+          : this.originPlanId,
     );
   }
 
@@ -547,7 +622,9 @@ class TimerRow extends DataClass implements Insertable<TimerRow> {
           ..write('folderId: $folderId, ')
           ..write('sortIndex: $sortIndex, ')
           ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('dayDate: $dayDate, ')
+          ..write('originPlanId: $originPlanId')
           ..write(')'))
         .toString();
   }
@@ -562,6 +639,8 @@ class TimerRow extends DataClass implements Insertable<TimerRow> {
     sortIndex,
     createdAt,
     updatedAt,
+    dayDate,
+    originPlanId,
   );
   @override
   bool operator ==(Object other) =>
@@ -574,7 +653,9 @@ class TimerRow extends DataClass implements Insertable<TimerRow> {
           other.folderId == this.folderId &&
           other.sortIndex == this.sortIndex &&
           other.createdAt == this.createdAt &&
-          other.updatedAt == this.updatedAt);
+          other.updatedAt == this.updatedAt &&
+          other.dayDate == this.dayDate &&
+          other.originPlanId == this.originPlanId);
 }
 
 class TimersCompanion extends UpdateCompanion<TimerRow> {
@@ -586,6 +667,8 @@ class TimersCompanion extends UpdateCompanion<TimerRow> {
   final Value<int> sortIndex;
   final Value<int> createdAt;
   final Value<int> updatedAt;
+  final Value<int?> dayDate;
+  final Value<String?> originPlanId;
   final Value<int> rowid;
   const TimersCompanion({
     this.id = const Value.absent(),
@@ -596,6 +679,8 @@ class TimersCompanion extends UpdateCompanion<TimerRow> {
     this.sortIndex = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
+    this.dayDate = const Value.absent(),
+    this.originPlanId = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   TimersCompanion.insert({
@@ -607,6 +692,8 @@ class TimersCompanion extends UpdateCompanion<TimerRow> {
     required int sortIndex,
     required int createdAt,
     required int updatedAt,
+    this.dayDate = const Value.absent(),
+    this.originPlanId = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        boardId = Value(boardId),
@@ -624,6 +711,8 @@ class TimersCompanion extends UpdateCompanion<TimerRow> {
     Expression<int>? sortIndex,
     Expression<int>? createdAt,
     Expression<int>? updatedAt,
+    Expression<int>? dayDate,
+    Expression<String>? originPlanId,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -635,6 +724,8 @@ class TimersCompanion extends UpdateCompanion<TimerRow> {
       if (sortIndex != null) 'sort_index': sortIndex,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
+      if (dayDate != null) 'day_date': dayDate,
+      if (originPlanId != null) 'origin_plan_id': originPlanId,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -648,6 +739,8 @@ class TimersCompanion extends UpdateCompanion<TimerRow> {
     Value<int>? sortIndex,
     Value<int>? createdAt,
     Value<int>? updatedAt,
+    Value<int?>? dayDate,
+    Value<String?>? originPlanId,
     Value<int>? rowid,
   }) {
     return TimersCompanion(
@@ -659,6 +752,8 @@ class TimersCompanion extends UpdateCompanion<TimerRow> {
       sortIndex: sortIndex ?? this.sortIndex,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      dayDate: dayDate ?? this.dayDate,
+      originPlanId: originPlanId ?? this.originPlanId,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -690,6 +785,12 @@ class TimersCompanion extends UpdateCompanion<TimerRow> {
     if (updatedAt.present) {
       map['updated_at'] = Variable<int>(updatedAt.value);
     }
+    if (dayDate.present) {
+      map['day_date'] = Variable<int>(dayDate.value);
+    }
+    if (originPlanId.present) {
+      map['origin_plan_id'] = Variable<String>(originPlanId.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -707,6 +808,8 @@ class TimersCompanion extends UpdateCompanion<TimerRow> {
           ..write('sortIndex: $sortIndex, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
+          ..write('dayDate: $dayDate, ')
+          ..write('originPlanId: $originPlanId, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2765,6 +2868,213 @@ class DefaultRulesCompanion extends UpdateCompanion<DefaultRuleRow> {
   }
 }
 
+class $DaysTable extends Days with TableInfo<$DaysTable, DayRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $DaysTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _dateMeta = const VerificationMeta('date');
+  @override
+  late final GeneratedColumn<int> date = GeneratedColumn<int>(
+    'date',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _planTimerIdMeta = const VerificationMeta(
+    'planTimerId',
+  );
+  @override
+  late final GeneratedColumn<String> planTimerId = GeneratedColumn<String>(
+    'plan_timer_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [date, planTimerId];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'days';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<DayRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('date')) {
+      context.handle(
+        _dateMeta,
+        date.isAcceptableOrUnknown(data['date']!, _dateMeta),
+      );
+    }
+    if (data.containsKey('plan_timer_id')) {
+      context.handle(
+        _planTimerIdMeta,
+        planTimerId.isAcceptableOrUnknown(
+          data['plan_timer_id']!,
+          _planTimerIdMeta,
+        ),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {date};
+  @override
+  DayRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return DayRow(
+      date: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}date'],
+      )!,
+      planTimerId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}plan_timer_id'],
+      ),
+    );
+  }
+
+  @override
+  $DaysTable createAlias(String alias) {
+    return $DaysTable(attachedDatabase, alias);
+  }
+}
+
+class DayRow extends DataClass implements Insertable<DayRow> {
+  final int date;
+  final String? planTimerId;
+  const DayRow({required this.date, this.planTimerId});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['date'] = Variable<int>(date);
+    if (!nullToAbsent || planTimerId != null) {
+      map['plan_timer_id'] = Variable<String>(planTimerId);
+    }
+    return map;
+  }
+
+  DaysCompanion toCompanion(bool nullToAbsent) {
+    return DaysCompanion(
+      date: Value(date),
+      planTimerId: planTimerId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(planTimerId),
+    );
+  }
+
+  factory DayRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return DayRow(
+      date: serializer.fromJson<int>(json['date']),
+      planTimerId: serializer.fromJson<String?>(json['planTimerId']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'date': serializer.toJson<int>(date),
+      'planTimerId': serializer.toJson<String?>(planTimerId),
+    };
+  }
+
+  DayRow copyWith({
+    int? date,
+    Value<String?> planTimerId = const Value.absent(),
+  }) => DayRow(
+    date: date ?? this.date,
+    planTimerId: planTimerId.present ? planTimerId.value : this.planTimerId,
+  );
+  DayRow copyWithCompanion(DaysCompanion data) {
+    return DayRow(
+      date: data.date.present ? data.date.value : this.date,
+      planTimerId: data.planTimerId.present
+          ? data.planTimerId.value
+          : this.planTimerId,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('DayRow(')
+          ..write('date: $date, ')
+          ..write('planTimerId: $planTimerId')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(date, planTimerId);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is DayRow &&
+          other.date == this.date &&
+          other.planTimerId == this.planTimerId);
+}
+
+class DaysCompanion extends UpdateCompanion<DayRow> {
+  final Value<int> date;
+  final Value<String?> planTimerId;
+  const DaysCompanion({
+    this.date = const Value.absent(),
+    this.planTimerId = const Value.absent(),
+  });
+  DaysCompanion.insert({
+    this.date = const Value.absent(),
+    this.planTimerId = const Value.absent(),
+  });
+  static Insertable<DayRow> custom({
+    Expression<int>? date,
+    Expression<String>? planTimerId,
+  }) {
+    return RawValuesInsertable({
+      if (date != null) 'date': date,
+      if (planTimerId != null) 'plan_timer_id': planTimerId,
+    });
+  }
+
+  DaysCompanion copyWith({Value<int>? date, Value<String?>? planTimerId}) {
+    return DaysCompanion(
+      date: date ?? this.date,
+      planTimerId: planTimerId ?? this.planTimerId,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (date.present) {
+      map['date'] = Variable<int>(date.value);
+    }
+    if (planTimerId.present) {
+      map['plan_timer_id'] = Variable<String>(planTimerId.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('DaysCompanion(')
+          ..write('date: $date, ')
+          ..write('planTimerId: $planTimerId')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$PlannerDb extends GeneratedDatabase {
   _$PlannerDb(QueryExecutor e) : super(e);
   $PlannerDbManager get managers => $PlannerDbManager(this);
@@ -2775,6 +3085,7 @@ abstract class _$PlannerDb extends GeneratedDatabase {
   late final $EventLogTable eventLog = $EventLogTable(this);
   late final $FoldersTable folders = $FoldersTable(this);
   late final $DefaultRulesTable defaultRules = $DefaultRulesTable(this);
+  late final $DaysTable days = $DaysTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2787,6 +3098,7 @@ abstract class _$PlannerDb extends GeneratedDatabase {
     eventLog,
     folders,
     defaultRules,
+    days,
   ];
 }
 
@@ -2932,6 +3244,8 @@ typedef $$TimersTableCreateCompanionBuilder = TimersCompanion Function({
   required int sortIndex,
   required int createdAt,
   required int updatedAt,
+  Value<int?> dayDate,
+  Value<String?> originPlanId,
   Value<int> rowid,
 });
 typedef $$TimersTableUpdateCompanionBuilder = TimersCompanion Function({
@@ -2943,6 +3257,8 @@ typedef $$TimersTableUpdateCompanionBuilder = TimersCompanion Function({
   Value<int> sortIndex,
   Value<int> createdAt,
   Value<int> updatedAt,
+  Value<int?> dayDate,
+  Value<String?> originPlanId,
   Value<int> rowid,
 });
 
@@ -2991,6 +3307,16 @@ class $$TimersTableFilterComposer extends Composer<_$PlannerDb, $TimersTable> {
 
   ColumnFilters<int> get updatedAt => $composableBuilder(
     column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get dayDate => $composableBuilder(
+    column: $table.dayDate,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get originPlanId => $composableBuilder(
+    column: $table.originPlanId,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -3043,6 +3369,16 @@ class $$TimersTableOrderingComposer
     column: $table.updatedAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<int> get dayDate => $composableBuilder(
+    column: $table.dayDate,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get originPlanId => $composableBuilder(
+    column: $table.originPlanId,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$TimersTableAnnotationComposer
@@ -3077,6 +3413,14 @@ class $$TimersTableAnnotationComposer
 
   GeneratedColumn<int> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<int> get dayDate =>
+      $composableBuilder(column: $table.dayDate, builder: (column) => column);
+
+  GeneratedColumn<String> get originPlanId => $composableBuilder(
+    column: $table.originPlanId,
+    builder: (column) => column,
+  );
 }
 
 class $$TimersTableTableManager
@@ -3115,6 +3459,8 @@ class $$TimersTableTableManager
                 Value<int> sortIndex = const Value.absent(),
                 Value<int> createdAt = const Value.absent(),
                 Value<int> updatedAt = const Value.absent(),
+                Value<int?> dayDate = const Value.absent(),
+                Value<String?> originPlanId = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => TimersCompanion(
                 id: id,
@@ -3125,6 +3471,8 @@ class $$TimersTableTableManager
                 sortIndex: sortIndex,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                dayDate: dayDate,
+                originPlanId: originPlanId,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -3137,6 +3485,8 @@ class $$TimersTableTableManager
                 required int sortIndex,
                 required int createdAt,
                 required int updatedAt,
+                Value<int?> dayDate = const Value.absent(),
+                Value<String?> originPlanId = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => TimersCompanion.insert(
                 id: id,
@@ -3147,6 +3497,8 @@ class $$TimersTableTableManager
                 sortIndex: sortIndex,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
+                dayDate: dayDate,
+                originPlanId: originPlanId,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -4303,6 +4655,131 @@ typedef $$DefaultRulesTableProcessedTableManager =
       DefaultRuleRow,
       PrefetchHooks Function()
     >;
+typedef $$DaysTableCreateCompanionBuilder = DaysCompanion Function({
+  Value<int> date,
+  Value<String?> planTimerId,
+});
+typedef $$DaysTableUpdateCompanionBuilder = DaysCompanion Function({
+  Value<int> date,
+  Value<String?> planTimerId,
+});
+
+class $$DaysTableFilterComposer extends Composer<_$PlannerDb, $DaysTable> {
+  $$DaysTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get date => $composableBuilder(
+    column: $table.date,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get planTimerId => $composableBuilder(
+    column: $table.planTimerId,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$DaysTableOrderingComposer extends Composer<_$PlannerDb, $DaysTable> {
+  $$DaysTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get date => $composableBuilder(
+    column: $table.date,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get planTimerId => $composableBuilder(
+    column: $table.planTimerId,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$DaysTableAnnotationComposer extends Composer<_$PlannerDb, $DaysTable> {
+  $$DaysTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get date =>
+      $composableBuilder(column: $table.date, builder: (column) => column);
+
+  GeneratedColumn<String> get planTimerId => $composableBuilder(
+    column: $table.planTimerId,
+    builder: (column) => column,
+  );
+}
+
+class $$DaysTableTableManager
+    extends
+        RootTableManager<
+          _$PlannerDb,
+          $DaysTable,
+          DayRow,
+          $$DaysTableFilterComposer,
+          $$DaysTableOrderingComposer,
+          $$DaysTableAnnotationComposer,
+          $$DaysTableCreateCompanionBuilder,
+          $$DaysTableUpdateCompanionBuilder,
+          (DayRow, BaseReferences<_$PlannerDb, $DaysTable, DayRow>),
+          DayRow,
+          PrefetchHooks Function()
+        > {
+  $$DaysTableTableManager(_$PlannerDb db, $DaysTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$DaysTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$DaysTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$DaysTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<int> date = const Value.absent(),
+            Value<String?> planTimerId = const Value.absent(),
+          }) => DaysCompanion(date: date, planTimerId: planTimerId),
+          createCompanionCallback: ({
+            Value<int> date = const Value.absent(),
+            Value<String?> planTimerId = const Value.absent(),
+          }) => DaysCompanion.insert(date: date, planTimerId: planTimerId),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$DaysTable, DayRow>(table),
+                  BaseReferences<_$PlannerDb, $DaysTable, DayRow>(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$DaysTableProcessedTableManager =
+    ProcessedTableManager<
+      _$PlannerDb,
+      $DaysTable,
+      DayRow,
+      $$DaysTableFilterComposer,
+      $$DaysTableOrderingComposer,
+      $$DaysTableAnnotationComposer,
+      $$DaysTableCreateCompanionBuilder,
+      $$DaysTableUpdateCompanionBuilder,
+      (DayRow, BaseReferences<_$PlannerDb, $DaysTable, DayRow>),
+      DayRow,
+      PrefetchHooks Function()
+    >;
 
 class $PlannerDbManager {
   final _$PlannerDb _db;
@@ -4321,4 +4798,5 @@ class $PlannerDbManager {
       $$FoldersTableTableManager(_db, _db.folders);
   $$DefaultRulesTableTableManager get defaultRules =>
       $$DefaultRulesTableTableManager(_db, _db.defaultRules);
+  $$DaysTableTableManager get days => $$DaysTableTableManager(_db, _db.days);
 }

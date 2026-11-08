@@ -30,6 +30,12 @@ library;
 
 import 'entities.dart';
 
+/// The shared day encoding: [date]'s LOCAL calendar day as YYYYMMDD
+/// (year × 10000 + month × 100 + day). One-off/date [DefaultRule.value]s
+/// carry it, and the `days` table's `date` primary key is exactly this
+/// (P4.1) — rules and days speak the same day.
+int dayNumber(DateTime date) => date.year * 10000 + date.month * 100 + date.day;
+
 /// The precedence tier [rule] claims for [date] — 3 = one-off/exact date,
 /// 2 = monthday, 1 = weekday, 0 = global default — or null when the rule
 /// does not match that day.
@@ -64,7 +70,7 @@ String? resolvePlanFor({
   required List<DefaultRule> rules,
   required DateTime date,
 }) {
-  final day = date.year * 10000 + date.month * 100 + date.day;
+  final day = dayNumber(date);
 
   DefaultRule? best;
   var bestTier = -1;

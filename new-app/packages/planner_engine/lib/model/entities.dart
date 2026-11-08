@@ -30,7 +30,7 @@ class Board {
 /// execution, not authoring, and never touch [updatedAt]. `0` = a row that
 /// predates schema v3 with an unknown origin.
 ///
-/// P4 adds day provenance (`dayDate`/`originPlanId`) on top of this.
+/// P4.1 adds day provenance (`dayDate`/`originPlanId`) on top of this.
 class IntervalTimer {
   const IntervalTimer({
     required this.id,
@@ -41,6 +41,8 @@ class IntervalTimer {
     this.sortIndex = 0,
     this.createdAt = 0,
     this.updatedAt = 0,
+    this.dayDate,
+    this.originPlanId,
   });
 
   /// UUIDv4 string.
@@ -64,6 +66,16 @@ class IntervalTimer {
   /// Last-authored-change stamp, epoch milliseconds.
   final int updatedAt;
 
+  /// The owning calendar day as YYYYMMDD (P4.1) — non-null only on a
+  /// day's OWN materialized copy (the lazy fork); null on every
+  /// ordinary library plan.
+  final int? dayDate;
+
+  /// The plan this timer was forked FROM (P4.1 provenance): the
+  /// placeholder plan id for a day's copy; null on a plan with no fork
+  /// origin (also what save-to-folder lineage hangs off).
+  final String? originPlanId;
+
   IntervalTimer copyWith({String? name, String? color}) => IntervalTimer(
     id: id,
     boardId: boardId,
@@ -73,12 +85,15 @@ class IntervalTimer {
     sortIndex: sortIndex,
     createdAt: createdAt,
     updatedAt: updatedAt,
+    dayDate: dayDate,
+    originPlanId: originPlanId,
   );
 
   @override
   String toString() =>
       'IntervalTimer($id, board=$boardId, $name, $color, '
-      'folder=$folderId, sort=$sortIndex)';
+      'folder=$folderId, sort=$sortIndex'
+      '${dayDate == null ? '' : ', day=$dayDate'})';
 }
 
 /// A Library folder (v2 P3.2): organization for plans — "a folder is just

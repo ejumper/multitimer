@@ -41,6 +41,18 @@ class AppController extends ChangeNotifier {
   // without an app restart.
   late IntervalTimer timer;
 
+  /// The calendar day this controller is bound to (P4.1), null for an
+  /// ordinary plan/boot binding. Set by [init]; while set, every WRITE
+  /// path materializes the day's own copy first
+  /// ([_ensureDayMaterialized]) while every read goes through
+  /// `resolveDayPlan` and writes nothing.
+  DateTime? dayDate;
+
+  /// Whether [dayDate]'s own copy has been materialized AND this
+  /// controller rebinds to it — set once [_ensureDayMaterialized] has
+  /// forked (or found) the day's timer.
+  bool _dayMaterialized = false;
+
   /// The timer's authored interval TREE — the board's list view renders
   /// its rows (P2.1) over the same definitions as [instances] (the
   /// flattened run). Kept in sync by [_buildSession] and [applyTreeEdit].
@@ -69,22 +81,36 @@ class AppController extends ChangeNotifier {
   /// [timerId] binds the controller to ONE timer (P3.2's plan board): the
   /// board containing that timer owns the controller instead of the boot
   /// default. An unknown id falls back to the default boot behavior.
-  Future<void> init({String? timerId}) async {
+  ///
+  /// [dayDate] binds the controller to a CALENDAR DAY (P4.1): the open
+  /// goes through `resolveDayPlan` — the explicit pin or the rule-
+  /// resolved placeholder — READ-ONLY (init never materializes; the day's
+  /// own copy appears on the first write, see [_ensureDayMaterialized]).
+  /// A day nothing claims falls back exactly like an unknown [timerId].
+  /// When both are passed, [dayDate] wins (a day board's binding IS its
+  /// plan).
+  Future<void> init({String? timerId, DateTime? dayDate}) async {
+    this.dayDate = dayDate;
+    _dayMaterialized = false;
     final boards = await store.allBoards();
     // Chosen into a local first: the `board` field initializes exactly
     // once (a late field must not be written twice).
-    var chosen = boards.isEmpty ? await store.createBoard('My Board') : boards.first;
+    var chosen = boards.isEmpty
+        ? await store.createBoard('My Board')
+        : boards.first;
+
+    // What binds the controller: the day's resolved plan (P4.1) when a
+    // date is given, else the requested timer id.
+    final binding = this.dayDate != null
+        ? await store.resolveDayPlan(this.dayDate!)
+        : timerId;
 
     IntervalTimer? bound;
-    if (timerId != null) {
-      for (final b in boards) {
-        final match = (await store.timersInBoard(b.id))
-            .where((t) => t.id == timerId);
-        if (match.isNotEmpty) {
-          chosen = b;
-          bound = match.first;
-          break;
-        }
+    if (binding != null) {
+      final found = await _findTimer(binding, boards);
+      if (found != null) {
+        chosen = found.board;
+        bound = found.timer;
       }
     }
     board = chosen;
@@ -133,7 +159,12 @@ class AppController extends ChangeNotifier {
   /// remaining re-derives as new − elapsed, a deleted current continues
   /// at the next survivor, adjustments re-key). Idle behaves like a
   /// plain reload.
+  ///
+  /// P4.1: the tree-save path — a date-bound controller materializes the
+  /// day's copy FIRST (the editor's own commit already landed there via
+  /// [timerForWrite]; for direct callers this is where the fork happens).
   Future<void> applyTreeEdit() async {
+    await _ensureDayMaterialized();
     final timers = await store.timersInBoard(board.id);
     timer = timers.firstWhere((t) => t.id == timer.id, orElse: () => timer);
     // Pending run-log entries belong to the old schedule — land them
@@ -178,6 +209,60 @@ class AppController extends ChangeNotifier {
     session = TimerSession(instances, clock: clock, sink: processor);
   }
 
+  /// Finds [timerId]'s plan across [boards] (the board that holds it,
+  /// or null) — the [init] binding loop and the day-fork rebind in
+  /// [_ensureDayMaterialized] share it.
+  Future<({Board board, IntervalTimer timer})?> _findTimer(
+    String timerId,
+    List<Board> boards,
+  ) async {
+    for (final b in boards) {
+      final match =
+          (await store.timersInBoard(b.id)).where((t) => t.id == timerId);
+      if (match.isNotEmpty) return (board: b, timer: match.first);
+    }
+    return null;
+  }
+
+  /// P4.1's lazy fork, idempotent — the hook EVERY date-bound write path
+  /// awaits before touching anything:
+  ///
+  /// 1. not date-bound, or the day's copy already exists → no-op.
+  /// 2. ask the store to `materializeDay` (read-only rule resolution + a
+  ///    fresh copy of the plan AS IT STANDS, completion marks cleared —
+  ///    an already-materialized day returns its own timer untouched).
+  /// 3. rebind [timer]/[tree]/[session] to the day's own copy so the
+  ///    pending write lands THERE, never on the placeholder.
+  ///
+  /// The rebind rebuilds the session — safe because this IS the day's
+  /// FIRST write: no run can be live yet ([start] materializes before
+  /// anything can run), and the copy is structurally identical to the
+  /// placeholder it replaces. When nothing claims the day there is
+  /// nothing to fork: the write proceeds on the bound timer unchanged.
+  Future<void> _ensureDayMaterialized() async {
+    final date = dayDate;
+    if (date == null || _dayMaterialized) return;
+    final forkedId = await store.materializeDay(date);
+    if (forkedId == null) return; // no plan claims this day (yet)
+    _dayMaterialized = true;
+    if (forkedId == timer.id) return; // bound to the day's copy already
+    final found = await _findTimer(forkedId, await store.allBoards());
+    if (found == null) {
+      throw StateError('materialized day timer not found: $forkedId');
+    }
+    timer = found.timer;
+    await _buildSession(); // the copy's tree + a fresh not-started run
+  }
+
+  /// The timer a DEFINITION write must land on (P4.1's write seam for
+  /// paths that resolve their own target — the editor's commit): awaits
+  /// [_ensureDayMaterialized], then hands back the (possibly rebound)
+  /// [timer].
+  Future<IntervalTimer> timerForWrite() async {
+    await _ensureDayMaterialized();
+    return timer;
+  }
+
   /// Heartbeat: settles the session at `clock.now()`, persists any queued
   /// terminal run-log entries, and notifies listeners. Public so tests can
   /// drive it directly on a fixed clock.
@@ -187,7 +272,11 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool start() {
+  /// P4.1: a run start is a day's FIRST write — materialize + rebind
+  /// before the session starts, so the run (and every mark it produces)
+  /// lives on the day's own copy.
+  Future<bool> start() async {
+    await _ensureDayMaterialized();
     final started = session.start();
     notifyListeners();
     return started;
@@ -233,7 +322,9 @@ class AppController extends ChangeNotifier {
   /// ends the instance — manual → limbo, auto → next — through the normal
   /// event path (end alert + notification fire). Adding time to a held
   /// instance pulls it back to running. Returns whether it applied.
-  bool adjustTime(int deltaSeconds) {
+  /// P4.1: an adjustment is a day's first write — materialize first.
+  Future<bool> adjustTime(int deltaSeconds) async {
+    await _ensureDayMaterialized();
     final before = snapshot;
     final applied = session.adjustCurrent(deltaSeconds);
     if (applied) {
@@ -265,7 +356,11 @@ class AppController extends ChangeNotifier {
   /// marking the CURRENT item finishes it and advances). When the run
   /// moves, the same alert/notification cleanup as [skipNext] applies.
   /// Returns the new mark, or null when the ordinal is out of range.
-  bool? toggleMark(int ordinal) {
+  /// P4.1: a checkmark is a day's first write — materialize + rebind
+  /// BEFORE the session op, so the mark and its persistence both land on
+  /// the day's copy.
+  Future<bool?> toggleMark(int ordinal) async {
+    await _ensureDayMaterialized();
     final before = snapshot;
     final defId = instances[ordinal].defId;
     final marked = session.toggleMark(ordinal);
@@ -282,7 +377,9 @@ class AppController extends ChangeNotifier {
 
   /// v2 P2.2 — resolves a hold: [completed] is the Enter path (✓), false
   /// is the "not completed" button. Outside a hold it is a no-op.
-  void resolveHold({required bool completed}) {
+  /// P4.1: same write-first rule as [toggleMark].
+  Future<void> resolveHold({required bool completed}) async {
+    await _ensureDayMaterialized();
     final before = snapshot;
     if (before.state != SessionState.awaitingAdvance) return;
     final defId = instances[before.ordinal!].defId;
@@ -316,7 +413,11 @@ class AppController extends ChangeNotifier {
     );
   }
 
-  void reset() {
+  Future<void> reset() async {
+    // P4.1: the mark clearing is a day's write — materialize + rebind
+    // BEFORE anything else, so the clearing runs against the day's copy
+    // (never the placeholder, never a tree the rebind would discard).
+    await _ensureDayMaterialized();
     session.reset();
     // v2 P1.3/P2.2: Reset un-completes every item — persisted too (the
     /// task-list "uncheck everything for the next trip" use case).

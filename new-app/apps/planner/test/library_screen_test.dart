@@ -724,4 +724,25 @@ void main() {
     controller.dispose();
     await store.close();
   });
+
+  // P4.1: a day's materialized fork lives under its day — the Library
+  // lists PLANS only (dayDate != null never appears here).
+  testWidgets('day_forks_never_appear_in_the_library', (tester) async {
+    final day = DateTime.utc(2026, 3, 2);
+    await store.setDayPlan(day, chores.id); // the day claims a plan
+    final forkId = await store.materializeDay(day);
+    expect(forkId, isNotNull);
+    await pumpBoard(tester);
+    await openLibrary(tester);
+    // The fork exists and is day-owned...
+    final all = await store.timersInBoard(controller.board.id);
+    expect(all.any((t) => t.id == forkId && t.dayDate != null), isTrue);
+    // ...but the Library shows PLANS only.
+    expect(
+      find.byKey(Key('plan-$forkId')),
+      findsNothing,
+      reason: 'day forks live under their day, not in the Library',
+    );
+  });
+
 }

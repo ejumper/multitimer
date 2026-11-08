@@ -933,13 +933,16 @@ class _BoardScreenState extends State<BoardScreen> {
   Future<void> _openAdjust(BuildContext context) async {
     final deltaSeconds = await showTimeAdjustModal(context);
     if (deltaSeconds != null && deltaSeconds != 0) {
-      controller.adjustTime(deltaSeconds);
+      await controller.adjustTime(deltaSeconds);
     }
   }
 
   /// Opens the timer editor over a freshly loaded tree; Done in the
   /// editor commits and reloads the board's session (onDone). The
-  /// readout's right-click and Escape share this path.
+  /// readout's right-click and Escape share this path. P4.1: the editor's
+  /// commit resolves its target through the controller (timerForWrite),
+  /// so on a date-bound board the edit materializes the day's copy and
+  /// lands there — opening the editor itself stays read-only.
   Future<void> _openEditor(BuildContext context) async {
     final tree = await controller.store.loadTree(controller.timer.id);
     if (!context.mounted) return;
@@ -950,6 +953,7 @@ class _BoardScreenState extends State<BoardScreen> {
             store: controller.store,
             timer: controller.timer,
             initialTree: tree,
+            resolveTimer: controller.timerForWrite,
           ),
           soundsDir: controller.soundsDir,
           soundListing: controller.soundListing,

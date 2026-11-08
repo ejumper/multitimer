@@ -33,6 +33,7 @@ class EditorController extends ChangeNotifier {
     required this.store,
     required this.timer,
     required IntervalTree initialTree,
+    this.resolveTimer,
   }) : name = timer.name,
        color = timer.color,
        tree = initialTree;
@@ -42,6 +43,13 @@ class EditorController extends ChangeNotifier {
 
   /// The timer being edited; its current name/color seed the working copy.
   final IntervalTimer timer;
+
+  /// Resolves the timer a [commit] writes (P4.1): null = commit straight
+  /// to [timer]; a date-bound board passes `AppController.timerForWrite`,
+  /// which materializes the day's own copy first and returns it — the
+  /// commit IS the day's first write, so it must land on the copy and
+  /// never on the placeholder.
+  final Future<IntervalTimer> Function()? resolveTimer;
 
   /// Working-copy timer name (persisted only on [commit]).
   String name;
@@ -605,16 +613,23 @@ class EditorController extends ChangeNotifier {
 
   /// Persists the working copy as ONE logged unit (see class doc):
   /// `editor.commit` carries the tree save plus the working name/color, and
-  /// `timer.update` follows only when name or color differ from [timer]'s.
+  /// `timer.update` follows only when name or color differ from the
+  /// target's — [resolveTimer]'s answer when one is wired (P4.1: a
+  /// date-bound board hands back its materialized copy), else [timer].
   Future<void> commit() async {
+    final target = await resolveTimer?.call() ?? timer;
+    // P4.1: a date-bound commit resolves to the day's COPY, while the
+    // working tree was seeded from the placeholder — re-target it (ids
+    // and values untouched) so saveTree's ownership check accepts it.
+    final toSave = target.id == timer.id ? tree : _rebasedTo(tree, target.id);
     await store.saveTree(
-      timer.id,
-      tree,
+      target.id,
+      toSave,
       eventKind: 'editor.commit',
       eventPayload: {'name': name, 'color': color},
     );
-    if (name != timer.name || color != timer.color) {
-      await store.updateTimer(timer.id, name: name, color: color);
+    if (name != target.name || color != target.color) {
+      await store.updateTimer(target.id, name: name, color: color);
     }
   }
 
@@ -633,3 +648,38 @@ typedef _Snapshot = ({
   IntervalTree tree,
   Set<String> selection,
 });
+
+/// P4.1 — [tree] with every node owned by [timerId]: ids and all values
+/// untouched, only the owning timer changes. The editor's working copy
+/// carries the timer it was SEEDED from (the placeholder on an
+/// unmaterialized day); a commit that resolved to the day's own copy
+/// ([EditorController.resolveTimer]) writes this rebased shape, which is
+/// exactly what `saveTree`'s ownership check demands.
+IntervalTree _rebasedTo(IntervalTree tree, String timerId) => IntervalTree([
+  for (final n in tree.roots) _rebasedNode(n, timerId),
+]);
+
+IntervalNode _rebasedNode(IntervalNode node, String timerId) =>
+    switch (node) {
+      DefNode(:final def) => DefNode(
+        IntervalDef(
+          id: def.id,
+          timerId: timerId,
+          name: def.name,
+          color: def.color,
+          durationSeconds: def.durationSeconds,
+          autoFinish: def.autoFinish,
+          endAlertSoundFile: def.endAlertSoundFile,
+          completed: def.completed,
+          triggerTimeSeconds: def.triggerTimeSeconds,
+        ),
+      ),
+      GroupNode(:final group, :final children) => GroupNode(
+        GroupDef(
+          id: group.id,
+          timerId: timerId,
+          repeatCount: group.repeatCount,
+        ),
+        [for (final c in children) _rebasedNode(c, timerId)],
+      ),
+    };

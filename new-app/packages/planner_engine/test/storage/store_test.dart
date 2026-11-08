@@ -533,6 +533,59 @@ void main() {
     );
   });
 
+  group('schema v5 migration (P4.1)', () {
+    test('a v4 database gains days + the timers provenance columns', () async {
+      final dir = Directory.systemTemp.createTempSync('planner_migration_v5');
+      final file = File('${dir.path}/mig5.db');
+
+      // Phase 1: a schemaVersion-4 database — the current shape minus
+      // `days` and the timers day columns — with one board + one plan.
+      final v4 = PlannerDb(NativeDatabase(file));
+      await v4.customStatement('DROP TABLE days');
+      await v4.customStatement('ALTER TABLE timers DROP COLUMN day_date');
+      await v4.customStatement('ALTER TABLE timers DROP COLUMN origin_plan_id');
+      await v4.customStatement(
+        "INSERT INTO boards (id, name) VALUES ('b1', 'My Board')",
+      );
+      await v4.customStatement(
+        'INSERT INTO timers '
+        '(id, board_id, name, color, sort_index, created_at, updated_at) '
+        "VALUES ('t1', 'b1', 'Routine', '#0055ff', 0, 1772000000000, "
+        '1772000000000)',
+      );
+      await v4.customStatement('PRAGMA user_version = 4');
+      await v4.close();
+
+      // Phase 2: reopening under schema v5 runs the 4→5 migration —
+      // the table lands (empty), migrated plans read with null
+      // provenance, and the store accepts day writes end to end.
+      final v5 = PlannerDb(NativeDatabase(file));
+      final store5 = DriftStore(v5, clock);
+      final migrated = (await store5.timersInBoard('b1')).single;
+      expect(migrated.dayDate, isNull);
+      expect(migrated.originPlanId, isNull);
+      expect(await v5.select(v5.days).get(), isEmpty); // table exists
+
+      final day = DateTime(2026, 3, 2);
+      expect(await store5.dayPlanId(day), isNull);
+      await store5.addRule(
+        timerId: 't1',
+        kind: DefaultRuleKind.date,
+        value: 20260302,
+      );
+      final forkId = await store5.materializeDay(day);
+      expect(forkId, isNotNull);
+      expect(await store5.dayPlanId(day), forkId);
+      final fork = (await store5.timersInBoard('b1'))
+          .firstWhere((t) => t.id == forkId);
+      expect(fork.dayDate, 20260302);
+      expect(fork.originPlanId, 't1');
+      await store5.close();
+
+      dir.deleteSync(recursive: true);
+    });
+  });
+
   group('default rules (P3.4)', () {
     test(
       'every kind round-trips (manual enum mapping); re-add is idempotent',
@@ -756,6 +809,370 @@ void main() {
       expect(defaults.value, isNull);
       expect((await store.rulesFor(t.id)).single.value, isNull);
     });
+  });
+
+  group('days + lazy fork (P4.1)', () {
+    late Board board;
+    late IntervalTimer plan;
+    final day = DateTime(2026, 3, 2); // YYYYMMDD 20260302, a Monday
+
+    /// A marked tree: one plain interval, a repeating group of a marked
+    /// manual interval and an Open one — enough shape to prove the fork
+    /// rule (fresh ids, marks cleared) against.
+    IntervalTree markedTree(String timerId) => IntervalTree([
+      DefNode(
+        IntervalDef(
+          id: 'm1',
+          timerId: timerId,
+          name: 'Deep work',
+          color: '#0055ff',
+          durationSeconds: 900,
+          autoFinish: true,
+          completed: true,
+        ),
+      ),
+      GroupNode(GroupDef(id: 'mg', timerId: timerId, repeatCount: 3), [
+        DefNode(
+          IntervalDef(
+            id: 'm2',
+            timerId: timerId,
+            name: 'Lift',
+            color: '#ff00b1',
+            durationSeconds: 600,
+            autoFinish: false,
+            completed: true,
+          ),
+        ),
+        DefNode(
+          IntervalDef(
+            id: 'm3',
+            timerId: timerId,
+            color: '#00ad6b',
+            durationSeconds: null,
+            autoFinish: false,
+          ),
+        ),
+      ]),
+    ]);
+
+    setUp(() async {
+      board = await store.createBoard('b');
+      plan = await store.createTimer(
+        boardId: board.id,
+        name: 'Routine',
+        color: '#0055ff',
+      );
+      await store.saveTree(
+        plan.id,
+        markedTree(plan.id),
+        eventKind: 'tree.save',
+      );
+      await store.addRule(
+        timerId: plan.id,
+        kind: DefaultRuleKind.date,
+        value: 20260302,
+      );
+    });
+
+    test(
+      'resolveDayPlan reads the rule winner through — zero rows, zero events',
+      () async {
+        final eventsBefore = (await store.events()).length;
+
+        expect(await store.dayPlanId(day), isNull); // no explicit pin
+        expect(await store.resolveDayPlan(day), plan.id); // rules answer
+        expect(await store.dayItemCount(day), 3); // authored intervals
+        expect(
+          await store.resolveDayPlan(DateTime(2026, 3, 3)),
+          isNull,
+          reason: 'an unclaimed day renders nothing',
+        );
+
+        expect(
+          await db.select(db.days).get(),
+          isEmpty,
+          reason: 'placeholder reads must never write rows',
+        );
+        expect(
+          (await store.events()).length,
+          eventsBefore,
+          reason: 'placeholder reads must never append events',
+        );
+      },
+    );
+
+    test(
+      'setDayPlan pins explicitly; clearing falls back to the rules',
+      () async {
+        final other = await store.createTimer(
+          boardId: board.id,
+          name: 'Other',
+          color: '#ff00b1',
+        );
+        expect(await store.resolveDayPlan(day), plan.id); // rules
+
+        await store.setDayPlan(day, other.id);
+        expect(await store.dayPlanId(day), other.id);
+        expect(await store.resolveDayPlan(day), other.id); // pin beats rules
+
+        await store.setDayPlan(day, null);
+        expect(await store.dayPlanId(day), isNull);
+        expect(await store.resolveDayPlan(day), plan.id); // back to rules
+
+        expect(
+          (await store.events()).map((e) => e.kind),
+          containsAllInOrder(<String>['day.setPlan', 'day.setPlan']),
+        );
+      },
+    );
+
+    test(
+      'materializeDay copies: marks cleared, fresh ids, provenance + dayDate',
+      () async {
+        final forkId = await store.materializeDay(day);
+        expect(forkId, isNotNull);
+        expect(forkId, isNot(plan.id));
+
+        final source = await store.loadTree(plan.id);
+        final copy = await store.loadTree(forkId!);
+
+        // Fresh ids throughout, same shape node-for-node.
+        expect(
+          copy.allIds.toSet().intersection(source.allIds.toSet()),
+          isEmpty,
+          reason: 'a fork never reuses the source ids',
+        );
+        expect(copy.allNodes.length, source.allNodes.length);
+        for (var i = 0; i < source.allNodes.length; i++) {
+          final s = source.allNodes[i];
+          final c = copy.allNodes[i];
+          expect(c.runtimeType, s.runtimeType);
+          expect(c.timerId, forkId, reason: 'the copy is owned by the fork');
+          if (s is DefNode && c is DefNode) {
+            expect(c.def.name, s.def.name);
+            expect(c.def.color, s.def.color);
+            expect(c.def.durationSeconds, s.def.durationSeconds);
+            expect(c.def.autoFinish, s.def.autoFinish);
+            expect(c.def.triggerTimeSeconds, s.def.triggerTimeSeconds);
+            expect(
+              c.def.completed,
+              isFalse,
+              reason: 'completion marks never travel to a fork',
+            );
+          } else if (s is GroupNode && c is GroupNode) {
+            expect(c.group.repeatCount, s.group.repeatCount);
+          }
+        }
+
+        // The copy's entity: owning day + lineage + library-root placement.
+        final fork = (await store.timersInBoard(board.id))
+            .firstWhere((t) => t.id == forkId);
+        expect(fork.dayDate, 20260302);
+        expect(fork.originPlanId, plan.id);
+        expect(fork.folderId, isNull);
+        expect(fork.boardId, board.id);
+        expect(fork.name, plan.name);
+        expect(fork.color, plan.color);
+
+        // The day now points at its OWN timer.
+        expect(await store.dayPlanId(day), forkId);
+
+        // The source stays exactly as it was — marks and ids untouched.
+        final srcReload = await store.loadTree(plan.id);
+        expect(srcReload.allIds, source.allIds);
+        expect((srcReload.nodeById('m1') as DefNode).def.completed, isTrue);
+
+        // One logged materialization, carrying the lineage.
+        final materialized = (await store.events())
+            .where((e) => e.kind == 'day.materialize')
+            .toList();
+        expect(materialized, hasLength(1));
+        expect(
+          materialized.single.payloadJson,
+          contains('"originPlanId":"${plan.id}"'),
+        );
+      },
+    );
+
+    test(
+      'materializeDay is idempotent: the copy exists exactly once',
+      () async {
+        final first = await store.materializeDay(day);
+        final second = await store.materializeDay(day);
+        final third = await store.materializeDay(day);
+        expect(first, isNotNull);
+        expect(second, first);
+        expect(third, first);
+
+        expect(
+          (await store.timersInBoard(board.id)).where((t) => t.dayDate != null),
+          hasLength(1),
+          reason: 'exactly one day timer ever exists',
+        );
+        expect(await db.select(db.days).get(), hasLength(1));
+        expect(
+          (await store.events()).where((e) => e.kind == 'day.materialize'),
+          hasLength(1),
+          reason: 're-materializing appends no second event',
+        );
+      },
+    );
+
+    test(
+      'post-fork independence: a later library saveTree never touches the copy',
+      () async {
+        final forkId = await store.materializeDay(day);
+        expect(forkId, isNotNull);
+        final frozen = (await store.loadTree(forkId!)).toDebugString();
+
+        // The library plan is edited AFTER the fork: rename + a new item.
+        final src = await store.loadTree(plan.id);
+        final edited = IntervalTree([
+          DefNode(
+            IntervalDef(
+              id: 'later',
+              timerId: plan.id,
+              name: 'Later addition',
+              color: '#0055ff',
+              durationSeconds: 30,
+              autoFinish: true,
+            ),
+          ),
+          for (final n
+              in src
+                  .updated('m1', (d) => d.copyWith(name: 'Renamed in library'))
+                  .roots)
+            n,
+        ]);
+        await store.saveTree(plan.id, edited, eventKind: 'tree.save');
+
+        final sourceNow = await store.loadTree(plan.id);
+        expect(
+          sourceNow.allNodes.whereType<DefNode>().map((n) => n.def.name),
+          contains('Renamed in library'),
+        );
+        expect(
+          (await store.loadTree(forkId)).toDebugString(),
+          frozen,
+          reason: 'a lived day is frozen at its fork moment',
+        );
+      },
+    );
+
+    test('placeholder picks up later library edits before the fork', () async {
+      // Edit the library FIRST — the day has not materialized yet.
+      final src = await store.loadTree(plan.id);
+      await store.saveTree(
+        plan.id,
+        src.updated('m1', (d) => d.copyWith(name: 'Edited later')),
+        eventKind: 'tree.save',
+      );
+      expect(await store.dayPlanId(day), isNull); // still a placeholder
+
+      final forkId = await store.materializeDay(day);
+      final copy = await store.loadTree(forkId!);
+      expect(
+        copy.allNodes.whereType<DefNode>().map((n) => n.def.name),
+        contains('Edited later'),
+        reason: 'the fork copies the plan as it stands at that moment',
+      );
+      expect(await store.dayPlanId(day), forkId);
+    });
+
+    test('materializeDay forks the explicit pin when one is set', () async {
+      final other = await store.createTimer(
+        boardId: board.id,
+        name: 'Pinned',
+        color: '#ff00b1',
+      );
+      await store.saveTree(
+        other.id,
+        IntervalTree([
+          DefNode(
+            IntervalDef(
+              id: 'p1',
+              timerId: other.id,
+              color: '#ff00b1',
+              durationSeconds: 10,
+              autoFinish: true,
+            ),
+          ),
+        ]),
+        eventKind: 'tree.save',
+      );
+      await store.setDayPlan(day, other.id);
+
+      final forkId = await store.materializeDay(day);
+      expect(forkId, isNotNull);
+      final fork = (await store.timersInBoard(board.id))
+          .firstWhere((t) => t.id == forkId);
+      expect(fork.originPlanId, other.id, reason: 'the pin is the source');
+      expect(fork.dayDate, 20260302);
+      expect(await store.dayPlanId(day), forkId);
+      expect(
+        (await store.loadTree(forkId!)).allNodes.whereType<DefNode>().length,
+        1,
+      );
+    });
+
+    test('a day no rule claims never materializes (null, no rows)', () async {
+      final unclaimed = DateTime(2026, 3, 9);
+      expect(await store.materializeDay(unclaimed), isNull);
+      expect(await db.select(db.days).get(), isEmpty);
+      expect(
+        (await store.timersInBoard(board.id)).where((t) => t.dayDate != null),
+        isEmpty,
+      );
+      expect(
+        (await store.events()).map((e) => e.kind),
+        isNot(contains('day.materialize')),
+      );
+      expect(await store.dayItemCount(unclaimed), 0);
+    });
+
+    test(
+      'dayItemCount counts placeholder and fork identically, never forking',
+      () async {
+        expect(await store.dayItemCount(day), 3);
+        expect(await store.dayPlanId(day), isNull); // counting forked nothing
+
+        final forkId = await store.materializeDay(day);
+        expect(await store.dayItemCount(day), 3);
+        expect(await store.dayPlanId(day), forkId);
+        expect(
+          (await store.events()).where((e) => e.kind == 'day.materialize'),
+          hasLength(1),
+        );
+      },
+    );
+
+    test(
+      'provenance round-trips: dayDate/originPlanId survive tree writes',
+      () async {
+        final forkId = await store.materializeDay(day);
+        expect(forkId, isNotNull);
+        final copy = await store.loadTree(forkId!);
+        final firstId = copy.allNodes.first.id;
+
+        await store.saveTree(
+          forkId,
+          copy.updated(firstId, (d) => d.copyWith(completed: true)),
+          eventKind: 'run.mark',
+        );
+
+        final fork = (await store.timersInBoard(board.id))
+            .firstWhere((t) => t.id == forkId);
+        expect(fork.dayDate, 20260302);
+        expect(fork.originPlanId, plan.id);
+        expect(
+          ((await store.loadTree(
+            forkId,
+          )).nodeById(firstId) as DefNode).def.completed,
+          isTrue,
+          reason: 'the write itself landed on the copy',
+        );
+      },
+    );
   });
 
   group('change log', () {

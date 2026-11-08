@@ -4,7 +4,7 @@
 /// columns are derived from [IntervalTree] positions on save and rebuilt into
 /// tree structure on load. `schemaVersion` + drift migrations exist from day
 /// one: v1 = version 1, v2 (P1.1) = version 2, the Library (P3.2) =
-/// version 3, default rules (P3.4) = version 4.
+/// version 3, default rules (P3.4) = version 4, days (P4.1) = version 5.
 ///
 /// The database is opened via an injected `QueryExecutor` — the app supplies
 /// the on-disk opener from `storage/impl/` (the engine's only `dart:io`).
@@ -37,10 +37,20 @@ class Timers extends Table {
   // (epoch ms; `run.mark` writes do not bump [updatedAt] — marks are
   // execution, not authoring). Inserted by [DriftStore] from its injected
   // Clock; the v2→v3 migration backfills with SQLite's clock + rowid.
+  //
+  // v2 (P4.1): day provenance (schema v5) — [dayDate] is the owning
+  // calendar day (the local day as YYYYMMDD) when this timer is a day's
+  // OWN materialized copy (null = an ordinary library plan), and
+  // [originPlanId] is the plan the copy was forked from (provenance;
+  // it also carries save-to-folder lineage). Both land via
+  // [DriftStore.materializeDay]; the v4→v5 migration adds them
+  // presence-guarded.
   TextColumn get folderId => text().nullable()();
   IntColumn get sortIndex => integer()();
   IntColumn get createdAt => integer()();
   IntColumn get updatedAt => integer()();
+  IntColumn get dayDate => integer().nullable()();
+  TextColumn get originPlanId => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -134,6 +144,24 @@ class DefaultRules extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+/// Day → plan references (v2 P4.1): the calendar's lazy-fork rows.
+/// `date` is the LOCAL day as YYYYMMDD — the same encoding
+/// `DefaultRule.value` uses for one-off/date rules. `planTimerId`:
+///
+/// - NULL (or no row at all) = the day is unresolved: reads render the
+///   rule-resolved PLACEHOLDER and write nothing.
+/// - set = an explicit pin (a library plan) until the day's first write,
+///   then the day's OWN materialized timer (a [Timers] row whose
+///   `day_date` equals this date).
+@DataClassName('DayRow')
+class Days extends Table {
+  IntColumn get date => integer()();
+  TextColumn get planTimerId => text().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {date};
+}
+
 @DriftDatabase(
   tables: [
     Boards,
@@ -143,13 +171,14 @@ class DefaultRules extends Table {
     EventLog,
     Folders,
     DefaultRules,
+    Days,
   ],
 )
 class PlannerDb extends _$PlannerDb {
   PlannerDb(super.e);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -162,6 +191,8 @@ class PlannerDb extends _$PlannerDb {
             await _migrate2To3(m);
           case 4:
             await _migrate3To4(m);
+          case 5:
+            await _migrate4To5(m);
         }
       }
     },
@@ -262,5 +293,37 @@ class PlannerDb extends _$PlannerDb {
     if (rulesExist.isEmpty) {
       await m.createTable(defaultRules);
     }
+  }
+
+  /// v5 (P4.1): the `days` table plus the Timers day-provenance columns
+  /// (`day_date`, `origin_plan_id`). Purely additive/nullable — same
+  /// presence-guarded pattern as v2→v3/v3→v4: a test-fabricated v4
+  /// database carved out of a current-schema file (newer table/columns
+  /// already present beside `user_version`) migrates cleanly too.
+  Future<void> _migrate4To5(Migrator m) async {
+    final daysExist = await customSelect(
+      "SELECT name FROM sqlite_master WHERE type = 'table' "
+      "AND name = 'days'",
+    ).get();
+    if (daysExist.isEmpty) {
+      await m.createTable(days);
+    }
+
+    final columns = {
+      for (final row in await customSelect('PRAGMA table_info(timers)').get())
+        row.read<String>('name'),
+    };
+    Future<void> addColumn(String name, String ddl) async {
+      if (!columns.contains(name)) await customStatement(ddl);
+    }
+
+    await addColumn(
+      'day_date',
+      'ALTER TABLE timers ADD COLUMN day_date INTEGER',
+    );
+    await addColumn(
+      'origin_plan_id',
+      'ALTER TABLE timers ADD COLUMN origin_plan_id TEXT',
+    );
   }
 }

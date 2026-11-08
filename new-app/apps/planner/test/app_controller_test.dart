@@ -1,6 +1,7 @@
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:planner/app_controller.dart';
+import 'package:planner/editor_controller.dart';
 import 'package:planner_engine/planner_engine.dart';
 
 import 'fakes.dart';
@@ -106,13 +107,13 @@ void main() {
     await saveDefs([def('d1')]);
     await controller.reload();
 
-    expect(controller.start(), isTrue);
+    expect(await controller.start(), isTrue);
     expect(controller.snapshot.state, SessionState.running);
     expect(controller.pause(), isTrue);
     expect(controller.snapshot.state, SessionState.paused);
     expect(controller.resume(), isTrue);
     expect(controller.snapshot.state, SessionState.running);
-    controller.reset();
+    await controller.reset();
     expect(controller.snapshot.state, SessionState.notStarted);
   });
 
@@ -122,7 +123,7 @@ void main() {
     await saveDefs([def('d1', seconds: 30), def('d2', seconds: 45)]);
     await controller.reload();
 
-    expect(controller.start(), isTrue);
+    expect(await controller.start(), isTrue);
     final s = controller.snapshot;
     expect(s.state, SessionState.running);
     expect(s.ordinal, 0);
@@ -139,7 +140,7 @@ void main() {
     await saveDefs([def('d1', seconds: 1, autoFinish: false)]);
     await controller.reload();
 
-    expect(controller.start(), isTrue);
+    expect(await controller.start(), isTrue);
     clock.current = clock.current.add(const Duration(seconds: 2));
     await controller.tick();
 
@@ -179,7 +180,7 @@ void main() {
     );
     await c.reload();
 
-    expect(c.start(), isTrue);
+    expect(await c.start(), isTrue);
     clock.current = clock.current.add(const Duration(seconds: 2));
     await c.tick();
 
@@ -221,7 +222,7 @@ void main() {
     );
     await c.reload();
 
-    c.start();
+    await c.start();
     clock.current = clock.current.add(const Duration(seconds: 2));
     await c.tick();
 
@@ -250,7 +251,7 @@ void main() {
     );
     await c.reload();
 
-    c.start();
+    await c.start();
     clock.current = clock.current.add(const Duration(seconds: 2));
     await c.tick();
 
@@ -292,7 +293,7 @@ void main() {
     );
     await c.reload();
 
-    c.start();
+    await c.start();
     clock.current = clock.current.add(const Duration(seconds: 61));
     await c.tick();
 
@@ -322,7 +323,7 @@ void main() {
     );
     await c.reload();
 
-    c.start();
+    await c.start();
     clock.current = clock.current.add(const Duration(seconds: 61));
     await c.tick();
 
@@ -353,7 +354,7 @@ void main() {
     );
     await c.reload();
 
-    c.start();
+    await c.start();
     clock.current = clock.current.add(const Duration(seconds: 61));
     await c.tick();
 
@@ -385,7 +386,7 @@ void main() {
     );
     await c.reload();
 
-    c.start();
+    await c.start();
     clock.current = clock.current.add(const Duration(seconds: 61));
     await c.tick();
     expect(player.stopCount, 0);
@@ -415,12 +416,12 @@ void main() {
     );
     await c.reload();
 
-    c.start();
+    await c.start();
     clock.current = clock.current.add(const Duration(seconds: 61));
     await c.tick();
     expect(player.stopCount, 0);
 
-    c.reset();
+    await c.reset();
     expect(player.stopCount, 1);
   });
 
@@ -448,7 +449,7 @@ void main() {
     );
     await c.reload();
 
-    expect(c.start(), isTrue);
+    expect(await c.start(), isTrue);
     clock.current = clock.current.add(const Duration(seconds: 2));
     await c.tick();
 
@@ -479,7 +480,7 @@ void main() {
     );
     await c.reload();
 
-    expect(c.start(), isTrue);
+    expect(await c.start(), isTrue);
     clock.current = clock.current.add(const Duration(seconds: 2));
     await c.tick();
 
@@ -513,7 +514,7 @@ void main() {
     );
     await c.reload();
 
-    c.start();
+    await c.start();
     clock.current = clock.current.add(const Duration(seconds: 2));
     await c.tick();
 
@@ -540,7 +541,7 @@ void main() {
     await controller.init();
     await saveDefs([def('a'), def('b')]);
     await controller.reload();
-    controller.start();
+    await controller.start();
     controller.pause();
     controller.resume();
     expect(notifier.closes, 0);
@@ -548,7 +549,7 @@ void main() {
     expect(notifier.closes, 1);
     expect(controller.jumpTo(0), isTrue);
     expect(notifier.closes, 2);
-    controller.reset();
+    await controller.reset();
     expect(notifier.closes, 3);
   });
 
@@ -559,16 +560,16 @@ void main() {
     await controller.init();
     await saveDefs([def('a', seconds: 30, autoFinish: false), def('b')]);
     await controller.reload();
-    controller.start();
+    await controller.start();
     clock.current = clock.current.add(const Duration(seconds: 35));
     await controller.tick(); // manual instance holds at zero
     expect(controller.snapshot.state, SessionState.awaitingAdvance);
     final closesBefore = notifier.closes;
-    expect(controller.adjustTime(20), isTrue);
+    expect(await controller.adjustTime(20), isTrue);
     expect(controller.snapshot.state, SessionState.running);
     expect(controller.snapshot.remaining, const Duration(seconds: 20));
     expect(notifier.closes, closesBefore + 1);
-    expect(controller.adjustTime(5), isTrue); // plain nudge
+    expect(await controller.adjustTime(5), isTrue); // plain nudge
     expect(notifier.closes, closesBefore + 1);
   });
 
@@ -578,7 +579,7 @@ void main() {
     await controller.init();
     await saveDefs([def('a', seconds: 30, autoFinish: false), def('b')]);
     await controller.reload();
-    controller.start();
+    await controller.start();
     clock.current = clock.current.add(const Duration(seconds: 35));
     await controller.tick();
     expect(controller.snapshot.state, SessionState.awaitingAdvance);
@@ -595,11 +596,11 @@ void main() {
     await controller.init();
     await saveDefs([def('a', seconds: 5), def('b')]);
     await controller.reload();
-    controller.start();
-    expect(controller.adjustTime(10), isTrue);
+    await controller.start();
+    expect(await controller.adjustTime(10), isTrue);
     expect(controller.snapshot.remaining, const Duration(seconds: 15));
-    controller.reset();
-    controller.start();
+    await controller.reset();
+    await controller.start();
     expect(controller.snapshot.remaining, const Duration(seconds: 5));
   });
 
@@ -610,7 +611,7 @@ void main() {
     await controller.init();
     await saveDefs([def('a', seconds: 5), def('b', seconds: 5)]);
     await controller.reload();
-    controller.start();
+    await controller.start();
     clock.current = clock.current.add(const Duration(seconds: 2));
     await controller.tick();
     // The edit grows interval a from 5s to 10s.
@@ -627,7 +628,7 @@ void main() {
     await controller.init();
     await saveDefs([def('a', seconds: 5), def('b', seconds: 7)]);
     await controller.reload();
-    controller.start();
+    await controller.start();
     clock.current = clock.current.add(const Duration(seconds: 2));
     await controller.tick();
     // The edit deletes the RUNNING interval a.
@@ -636,5 +637,243 @@ void main() {
     expect(controller.snapshot.state, SessionState.running);
     expect(controller.snapshot.ordinal, 0);
     expect(controller.snapshot.remaining, const Duration(seconds: 7));
+  });
+
+  // ── P4.1: date-bound controllers + the lazy fork ───────────────────
+
+  final dayDate = DateTime(2026, 3, 2); // YYYYMMDD 20260302
+
+  /// Boots the default plan (two intervals), pins the day to it via a
+  /// date rule, and returns the source (placeholder) plan id.
+  Future<String> setupDayPlan() async {
+    await controller.init();
+    await saveDefs([def('d1'), def('d2', seconds: 45)]);
+    await store.addRule(
+      timerId: controller.timer.id,
+      kind: DefaultRuleKind.date,
+      value: 20260302,
+    );
+    return controller.timer.id;
+  }
+
+  /// A second controller bound to [dayDate] (disposed by tearDown).
+  AppController makeDayController() {
+    final day = makeController();
+    addTearDown(day.dispose);
+    return day;
+  }
+
+  // The placeholder invariant: opening a day (init + snapshot reads)
+  // renders the rule-resolved plan and writes NOTHING — no day row, no
+  // copy, no events.
+  test('day_open_is_read_only_and_materializes_nothing', () async {
+    final sourceId = await setupDayPlan();
+    final eventsBefore = (await store.events()).length;
+    final day = makeDayController();
+
+    await day.init(dayDate: dayDate);
+
+    expect(day.dayDate, dayDate);
+    expect(day.timer.id, sourceId); // the placeholder, not a copy
+    expect(day.snapshot.state, SessionState.notStarted); // a pure read
+    expect(await store.dayPlanId(dayDate), isNull);
+    expect(await store.resolveDayPlan(dayDate), sourceId);
+    expect(
+      (await store.timersInBoard(day.board.id)).where((t) => t.dayDate != null),
+      isEmpty,
+      reason: 'no day timer was created',
+    );
+    expect(
+      (await store.events()).length,
+      eventsBefore,
+      reason: 'a read-only open appends no events',
+    );
+  });
+
+  // The first-write trigger: a checkmark materializes the day's copy
+  // exactly once, and BOTH the mark and its persistence land on the copy
+  // — the placeholder never changes.
+  test('first_mark_toggle_materializes_once_and_lands_on_the_copy', () async {
+    final sourceId = await setupDayPlan();
+    final day = makeDayController();
+    await day.init(dayDate: dayDate);
+
+    expect(await day.toggleMark(0), isTrue);
+
+    final forkId = await store.dayPlanId(dayDate);
+    expect(forkId, isNotNull);
+    expect(forkId, isNot(sourceId));
+    expect(day.timer.id, forkId, reason: 'the controller rebinds to the copy');
+
+    final copy = await store.loadTree(forkId!);
+    expect(copy.allNodes.whereType<DefNode>().first.def.completed, isTrue);
+    final source = await store.loadTree(sourceId);
+    expect(
+      source.allNodes.whereType<DefNode>().first.def.completed,
+      isFalse,
+      reason: 'the placeholder must not receive the day\u2019s write',
+    );
+
+    // Exactly once: a second write reuses the same copy.
+    await day.toggleMark(1);
+    expect(await store.dayPlanId(dayDate), forkId);
+    expect(
+      (await store.timersInBoard(day.board.id)).where((t) => t.dayDate != null),
+      hasLength(1),
+    );
+    expect(
+      (await store.events()).where((e) => e.kind == 'day.materialize'),
+      hasLength(1),
+    );
+  });
+
+  // A run start is a first-write trigger too: the run executes over the
+  // copy's fresh ids, and its persisted entries carry them.
+  test('run_start_materializes_and_the_run_lands_on_the_copy', () async {
+    final sourceId = await setupDayPlan();
+    final day = makeDayController();
+    await day.init(dayDate: dayDate);
+
+    expect(await day.start(), isTrue);
+
+    final forkId = await store.dayPlanId(dayDate);
+    expect(forkId, isNotNull);
+    expect(day.timer.id, forkId);
+
+    clock.current = clock.current.add(const Duration(seconds: 46));
+    await day.tick();
+
+    final copyIds = (await store.loadTree(forkId!)).allIds.toSet();
+    final runIds = {for (final i in day.instances) i.defId};
+    expect(
+      runIds.difference(copyIds),
+      isEmpty,
+      reason: 'the run executes over the copy\u2019s ids',
+    );
+    expect(
+      runIds.intersection((await store.loadTree(sourceId)).allIds.toSet()),
+      isEmpty,
+    );
+    expect(
+      (await store.events()).where((e) => e.kind == 'run.terminal'),
+      isNotEmpty,
+      reason: 'the flushed run entry came from the live copy',
+    );
+    expect(
+      (await store.events()).where((e) => e.kind == 'day.materialize'),
+      hasLength(1),
+    );
+  });
+
+  // The tree-save path: applyTreeEdit materializes first (idempotent —
+  // the editor's commit already landed via timerForWrite, direct callers
+  // fork here).
+  test('apply_tree_edit_materializes_the_day', () async {
+    final sourceId = await setupDayPlan();
+    final day = makeDayController();
+    await day.init(dayDate: dayDate);
+
+    await day.applyTreeEdit();
+
+    final forkId = await store.dayPlanId(dayDate);
+    expect(forkId, isNotNull);
+    expect(day.timer.id, forkId);
+    expect(day.tree.allIds, isNotEmpty);
+    expect((await store.loadTree(sourceId)).allIds, [
+      'd1',
+      'd2',
+    ], reason: 'the placeholder is untouched');
+    expect(
+      (await store.events()).where((e) => e.kind == 'day.materialize'),
+      hasLength(1),
+    );
+  });
+
+  // The editor's commit resolves its target through the controller — on
+  // a day board the edit materializes the day and lands on the copy;
+  // the library plan never sees it.
+  test('editor_commit_on_a_day_lands_on_the_copy', () async {
+    final sourceId = await setupDayPlan();
+    final day = makeDayController();
+    await day.init(dayDate: dayDate);
+
+    final editor = EditorController(
+      store: store,
+      timer: day.timer,
+      initialTree: IntervalTree([
+        DefNode(
+          IntervalDef(
+            id: 'fresh',
+            timerId: day.timer.id,
+            name: 'Added',
+            color: '#0055ff',
+            durationSeconds: 10,
+            autoFinish: true,
+          ),
+        ),
+      ]),
+      resolveTimer: day.timerForWrite,
+    );
+    await editor.commit();
+
+    final forkId = await store.dayPlanId(dayDate);
+    expect(forkId, isNotNull);
+    expect(forkId, isNot(sourceId));
+    final copy = await store.loadTree(forkId!);
+    expect(copy.allNodes.whereType<DefNode>().single.def.name, 'Added');
+    expect(
+      copy.allNodes.single.id,
+      'fresh',
+      reason: 'the re-target keeps every id (only ownership changes)',
+    );
+    expect((await store.loadTree(sourceId)).allIds, [
+      'd1',
+      'd2',
+    ], reason: 'the edit must never reach the placeholder');
+    expect(day.timer.id, forkId, reason: 'timerForWrite rebound the board');
+  });
+
+  // The reset clearing: a mark on the day's copy is cleared on that same
+  // copy — the materialization happened at the first write and is not
+  // repeated.
+  test('reset_clearing_lands_on_the_copy', () async {
+    await setupDayPlan();
+    final day = makeDayController();
+    await day.init(dayDate: dayDate);
+    await day.toggleMark(0); // first write → materialized
+    final forkId = await store.dayPlanId(dayDate);
+    expect(forkId, isNotNull);
+
+    await day.reset();
+
+    final copy = await store.loadTree(forkId!);
+    expect(
+      copy.allNodes.whereType<DefNode>().every((n) => !n.def.completed),
+      isTrue,
+      reason: 'Reset cleared the marks on the day\u2019s own copy',
+    );
+    expect(
+      (await store.events()).where((e) => e.kind == 'day.materialize'),
+      hasLength(1),
+      reason: 'reset never re-materializes',
+    );
+  });
+
+  // The adjustment path materializes too (a first-write trigger); an
+  // inert nudge on a not-started run still forks the day exactly once.
+  test('adjust_time_materializes_the_day', () async {
+    await setupDayPlan();
+    final day = makeDayController();
+    await day.init(dayDate: dayDate);
+
+    await day.adjustTime(10);
+
+    final forkId = await store.dayPlanId(dayDate);
+    expect(forkId, isNotNull);
+    expect(day.timer.id, forkId);
+    expect(
+      (await store.events()).where((e) => e.kind == 'day.materialize'),
+      hasLength(1),
+    );
   });
 }

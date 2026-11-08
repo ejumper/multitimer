@@ -16,6 +16,7 @@ import '../model/entities.dart';
 import '../model/event_log.dart';
 import '../model/group_def.dart';
 import '../model/interval_def.dart';
+import '../model/resolve.dart';
 import '../model/tree.dart';
 import '../uuid.dart';
 import 'planner_db.dart';
@@ -109,6 +110,8 @@ class DriftStore implements Store {
           sortIndex: r.sortIndex,
           createdAt: r.createdAt,
           updatedAt: r.updatedAt,
+          dayDate: r.dayDate,
+          originPlanId: r.originPlanId,
         ),
     ];
   }
@@ -456,6 +459,135 @@ class DriftStore implements Store {
     if (needsDay && !_isYyyyMmDd(value)) {
       throw StateError('default rule: expected a YYYYMMDD day, got $value');
     }
+  }
+
+  // ── days (v2 P4.1) ──────────────────────────────────────────────────
+
+  Future<DayRow?> _dayRow(int day) => (_db.select(
+    _db.days,
+  )..where((t) => t.date.equals(day))).getSingleOrNull();
+
+  Future<TimerRow?> _timerRow(String timerId) => (_db.select(
+    _db.timers,
+  )..where((t) => t.id.equals(timerId))).getSingleOrNull();
+
+  /// The pure rule winner over ALL plans' rules — the placeholder a day
+  /// with no explicit pin renders ([resolvePlanFor], order-independent).
+  Future<String?> _ruleWinner(DateTime date) async {
+    final rows = await _db.select(_db.defaultRules).get();
+    return resolvePlanFor(
+      rules: [for (final r in rows) _ruleFromRow(r)],
+      date: date,
+    );
+  }
+
+  @override
+  Future<String?> dayPlanId(DateTime date) async {
+    final row = await _dayRow(dayNumber(date));
+    return row?.planTimerId;
+  }
+
+  @override
+  Future<void> setDayPlan(DateTime date, String? timerId) => _db.transaction(
+    () async {
+      final day = dayNumber(date);
+      await (_db.delete(_db.days)..where((t) => t.date.equals(day))).go();
+      await _db
+          .into(_db.days)
+          .insert(DaysCompanion.insert(date: Value(day), planTimerId: Value(timerId)));
+      await _appendEvent('day.setPlan', {'date': day, 'planTimerId': timerId});
+    },
+  );
+
+  @override
+  Future<String?> resolveDayPlan(DateTime date) async {
+    final pinned = await dayPlanId(date); // the explicit pin, read-only
+    if (pinned != null) return pinned;
+    return _ruleWinner(date);
+  }
+
+  @override
+  Future<String?> materializeDay(DateTime date) => _db.transaction<String?>(
+    () async {
+      final day = dayNumber(date);
+
+      // Already the day's own timer? (The idempotence guard: a day row
+      // pointing at a timer whose dayDate == this day IS the fork.)
+      final pinned = (await _dayRow(day))?.planTimerId;
+      if (pinned != null) {
+        final pinnedTimer = await _timerRow(pinned);
+        if (pinnedTimer != null && pinnedTimer.dayDate == day) {
+          return pinnedTimer.id;
+        }
+      }
+
+      // Source: the explicit pin when it still exists, else the rule winner
+      // — same precedence as resolveDayPlan, i.e. exactly the placeholder
+      // the day renders right now.
+      String? sourceId = pinned;
+      if (sourceId != null && await _timerRow(sourceId) == null) {
+        sourceId = null;
+      }
+      sourceId ??= await _ruleWinner(date);
+      if (sourceId == null) return null; // nothing claims the day
+      final source = await _timerRow(sourceId);
+      if (source == null) return null; // dangling rule (deleted plan)
+
+      // The day's OWN timer: same board/name/color as the source, at the
+      // library root (folderId null), carrying the day + its lineage.
+      final forkId = newId();
+      final nowMs = _nowMs();
+      final siblings =
+          await (_db.select(_db.timers)
+                ..where((t) => t.folderId.isNull())
+                ..orderBy([(t) => OrderingTerm.asc(t.sortIndex)]))
+              .get();
+      final sortIndex = siblings.isEmpty ? 0 : siblings.first.sortIndex - 1;
+      await _db
+          .into(_db.timers)
+          .insert(
+            TimersCompanion.insert(
+              id: forkId,
+              boardId: source.boardId,
+              name: source.name,
+              color: source.color,
+              folderId: const Value(null),
+              sortIndex: sortIndex,
+              createdAt: nowMs,
+              updatedAt: nowMs,
+              dayDate: Value(day),
+              originPlanId: Value(source.id),
+            ),
+          );
+
+      // The fork rule (P1.1): the source's tree AS IT STANDS — fresh ids
+      // everywhere, completion marks cleared — owned by the copy.
+      final sourceTree = await loadTree(source.id);
+      await saveTree(
+        forkId,
+        sourceTree.copiedToTimer(forkId, newId),
+        eventKind: 'day.materialize',
+        eventPayload: {'date': day, 'originPlanId': source.id},
+      );
+
+      // Point the day at its own copy (upsert: the row may or may not
+      // exist yet — an unresolved day has no row, a pinned one does).
+      await (_db.delete(_db.days)..where((t) => t.date.equals(day))).go();
+      await _db
+          .into(_db.days)
+          .insert(DaysCompanion.insert(date: Value(day), planTimerId: Value(forkId)));
+      return forkId;
+    },
+  );
+
+  @override
+  Future<int> dayItemCount(DateTime date) async {
+    // Read-through: resolve + count, never materialize (a count is a
+    // read — P4.2's calendar counts ride this without forking days).
+    final planId = await resolveDayPlan(date);
+    if (planId == null) return 0;
+    final tree = await loadTree(planId);
+    return tree.allNodes.whereType<DefNode>().length;
   }
 
   // ── interval tree ───────────────────────────────────────────────────────

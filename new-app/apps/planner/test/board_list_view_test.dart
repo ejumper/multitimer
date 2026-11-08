@@ -289,7 +289,7 @@ void main() {
   //    band over the row's track); future rows stay empty.
   testWidgets('current_row_shows_left_over_total_and_fill', (tester) async {
     await pumpBoard(tester);
-    expect(controller.start(), isTrue);
+    expect(await controller.start(), isTrue);
     await tester.pump();
     expect(timeText(tester, 'a'), '1m/1m');
     expect(fillFraction(tester, 'a'), 0.0);
@@ -326,7 +326,7 @@ void main() {
     expect(timeText(tester, 'w'), '15:30');
     expect(timeText(tester, 'o'), 'open');
 
-    expect(controller.start(), isTrue);
+    expect(await controller.start(), isTrue);
     await tester.pump();
     expect(timeText(tester, 'w'), '15:30'); // still future mid-run
     expect(timeText(tester, 'o'), 'open');
@@ -345,7 +345,7 @@ void main() {
     expect(rowOpacity(tester, 'b'), 1.0);
 
     // Mark the item → dim + checked; the untouched row stays live.
-    controller.toggleMark(0);
+    await controller.toggleMark(0);
     await tester.pump();
     expect(rowOpacity(tester, 'a'), AppColors.dimmed.a);
     expect(
@@ -365,13 +365,13 @@ void main() {
     expect(rowOpacity(tester, 'b'), 1.0);
 
     // Un-check → full opacity again (marks toggle freely).
-    controller.toggleMark(0);
+    await controller.toggleMark(0);
     await tester.pump();
     expect(rowOpacity(tester, 'a'), 1.0);
 
     // A passed-but-unmarked row dims too (the dial's dimmed ticks, as
     // rows): start, skip past 'break'.
-    expect(controller.start(), isTrue);
+    expect(await controller.start(), isTrue);
     await tester.pump();
     expect(controller.skipNext(), isTrue);
     await tester.pump();
@@ -388,7 +388,7 @@ void main() {
   //    the pulse hangs pumpAndSettle.
   testWidgets('hold_shows_wait_with_pulsing_border', (tester) async {
     await pumpBoard(tester);
-    expect(controller.start(), isTrue);
+    expect(await controller.start(), isTrue);
     await tester.pump();
     clock.current = clock.current.add(const Duration(seconds: 60));
     await controller.tick();
@@ -440,7 +440,7 @@ void main() {
   testWidgets('awaiting_wall_row_shows_countdown', (tester) async {
     await buildWallFixture(trigger: 55800); // 15:30
     await pumpBoard(tester);
-    expect(controller.start(), isTrue);
+    expect(await controller.start(), isTrue);
     await tester.pump();
     clock.current = clock.current.add(const Duration(seconds: 60)); // 08:01
     await controller.tick();
@@ -467,7 +467,7 @@ void main() {
   testWidgets('late_badge_on_current_row', (tester) async {
     await buildWallFixture(trigger: 28805); // 08:00:05 — 5s after t0
     await pumpBoard(tester);
-    expect(controller.start(), isTrue);
+    expect(await controller.start(), isTrue);
     await tester.pump();
     clock.current = clock.current.add(const Duration(seconds: 10)); // late
     await controller.tick();
@@ -501,7 +501,7 @@ void main() {
   testWidgets('suspended_row_shows_frozen_remaining', (tester) async {
     await buildWallFixture(trigger: 28805); // 08:00:05
     await pumpBoard(tester);
-    expect(controller.start(), isTrue);
+    expect(await controller.start(), isTrue);
     await tester.pump();
     clock.current = clock.current.add(const Duration(seconds: 10));
     await controller.tick();
@@ -538,7 +538,7 @@ void main() {
     expect(repeatText(tester, 'g1'), '2'); // fresh run: 2 passes left
     expect(fillFraction(tester, 'g1'), 0.0);
 
-    expect(controller.start(), isTrue);
+    expect(await controller.start(), isTrue);
     await tester.pump();
     expect(repeatText(tester, 'g1'), '2'); // pass 1 of 2 in progress
 
@@ -564,7 +564,7 @@ void main() {
   //     empty ahead of it — across a skip and a jump.
   testWidgets('fills_track_passed_and_future_rows', (tester) async {
     await pumpBoard(tester);
-    expect(controller.start(), isTrue);
+    expect(await controller.start(), isTrue);
     await tester.pump();
     expect(controller.skipNext(), isTrue); // cursor → Cards pass 1
     await tester.pump();
@@ -676,7 +676,7 @@ void main() {
   testWidgets('enter_at_hold_completes_and_checks', (tester) async {
     await buildSimpleFixture();
     await pumpBoard(tester);
-    controller.start();
+    await controller.start();
     clock.current = clock.current.add(const Duration(seconds: 60));
     await controller.tick();
     await tester.pump();
@@ -696,7 +696,7 @@ void main() {
       (tester) async {
     await buildSimpleFixture();
     await pumpBoard(tester);
-    controller.start();
+    await controller.start();
     clock.current = clock.current.add(const Duration(seconds: 60));
     await controller.tick();
     await tester.pump();
@@ -725,7 +725,7 @@ void main() {
   testWidgets('tap_to_continue_completes_at_a_hold', (tester) async {
     await buildSimpleFixture();
     await pumpBoard(tester);
-    controller.start();
+    await controller.start();
     clock.current = clock.current.add(const Duration(seconds: 60));
     await controller.tick();
     await tester.pump();
@@ -742,7 +742,7 @@ void main() {
   testWidgets('hold_row_slot_contract', (tester) async {
     await buildSimpleFixture();
     await pumpBoard(tester);
-    controller.start();
+    await controller.start();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     // Running: the plain three-button row [adjust][reset][skip] — the
@@ -776,7 +776,7 @@ void main() {
   testWidgets('enter_outside_a_hold_keeps_the_button_model', (tester) async {
     await buildSimpleFixture();
     await pumpBoard(tester);
-    controller.start();
+    await controller.start();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     // The arrow-walk to Reset and Enter activates it (the confirm dialog
@@ -800,7 +800,7 @@ void main() {
     // Fresh: nothing to retry.
     expect(find.byKey(const Key('btn-retry-missed')), findsNothing);
 
-    controller.start();
+    await controller.start();
     clock.current = clock.current.add(const Duration(seconds: 60));
     await controller.tick();
     await tester.pump();
@@ -835,7 +835,7 @@ void main() {
   testWidgets('reset_un_checks_rows_visibly', (tester) async {
     await buildSimpleFixture();
     await pumpBoard(tester);
-    controller.start();
+    await controller.start();
     clock.current = clock.current.add(const Duration(seconds: 60));
     await controller.tick();
     await tester.pump();
@@ -843,7 +843,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter); // x checked
     expect(controller.session.isCompleted('x'), isTrue);
 
-    controller.reset();
+    await controller.reset();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(controller.session.completedDefIds, isEmpty);
@@ -855,7 +855,7 @@ void main() {
   testWidgets('mark_changes_persist_through_the_store', (tester) async {
     await buildSimpleFixture();
     await pumpBoard(tester);
-    controller.start();
+    await controller.start();
     clock.current = clock.current.add(const Duration(seconds: 60));
     await controller.tick();
     await tester.pump();
@@ -900,7 +900,7 @@ void main() {
     // Start: the current row is the FIRST one — it can only reach the
     // top edge (the clamp), never a fake center. Measured on the ROW
     // (the contract), not raw pixels — list padding makes pixels != 0.
-    expect(controller.start(), isTrue);
+    expect(await controller.start(), isTrue);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 300));
@@ -935,7 +935,7 @@ void main() {
 
   testWidgets('manual_scroll_returns_to_current_row', (tester) async {
     await pumpShortBoard(tester);
-    expect(controller.start(), isTrue);
+    expect(await controller.start(), isTrue);
     expect(controller.skipNext(), isTrue);
     expect(controller.skipNext(), isTrue);
     expect(controller.skipNext(), isTrue); // ordinal 3 = 'Wrap'

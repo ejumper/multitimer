@@ -121,7 +121,7 @@ void main() {
 
   testWidgets('keyboard_reset_dialog_right_confirms', (tester) async {
     await pumpBoard(tester);
-    expect(controller.start(), isTrue);
+    expect(await controller.start(), isTrue);
     await tester.pump();
 
     // Delete opens the dialog; Right selects Reset; Enter resets the run.
@@ -136,7 +136,7 @@ void main() {
 
   testWidgets('keyboard_arrows_walk_control_buttons', (tester) async {
     await pumpBoard(tester);
-    expect(controller.start(), isTrue);
+    expect(await controller.start(), isTrue);
     await tester.pump();
 
     // Focus starts on the first cell (adjust time, tweaks #7): the row
@@ -161,7 +161,7 @@ void main() {
   // the right-click jump (the Tab-opened interval picker is gone).
   testWidgets('alt_down_up_jump_between_intervals', (tester) async {
     await pumpBoard(tester);
-    expect(controller.start(), isTrue);
+    expect(await controller.start(), isTrue);
     await tester.pump();
 
     // Alt+Down: the next occurrence, still running at the target.
@@ -215,7 +215,7 @@ void main() {
   // 2. Running: hm total on top, big mm:ss, current label, next caption.
   testWidgets('board_renders_running', (tester) async {
     await pumpBoard(tester);
-    expect(controller.start(), isTrue);
+    expect(await controller.start(), isTrue);
     await tester.pump();
 
     expect(find.text('1m'), findsOneWidget); // totalRemaining 90s
@@ -233,7 +233,7 @@ void main() {
   //    frozen remaining.
   testWidgets('board_renders_paused', (tester) async {
     await pumpBoard(tester);
-    controller.start();
+    await controller.start();
     await tester.pump();
     controller.pause();
     await tester.pump();
@@ -250,7 +250,7 @@ void main() {
   //    chip; awaitingAdvance swaps the caption for tap-to-continue.
   testWidgets('board_renders_awaiting_advance', (tester) async {
     await pumpBoard(tester);
-    controller.start();
+    await controller.start();
     await tester.pump();
     clock.current = clock.current.add(const Duration(seconds: 60));
     await controller.tick();
@@ -349,7 +349,7 @@ void main() {
   // with no confirmation step — the interval-picker overlay is gone.
   testWidgets('right_click_row_jumps_and_keeps_running', (tester) async {
     await pumpBoard(tester);
-    expect(controller.start(), isTrue);
+    expect(await controller.start(), isTrue);
     await tester.pump();
 
     await tester.tap(
@@ -370,7 +370,7 @@ void main() {
   // row's LAST occurrence; the run sits paused-ready at the target.
   testWidgets('right_click_row_jumps_backward_while_paused', (tester) async {
     await pumpBoard(tester);
-    expect(controller.start(), isTrue);
+    expect(await controller.start(), isTrue);
     await tester.pump();
     expect(controller.skipNext(), isTrue); // cursor → 'Cards' (ordinal 1)
     await tester.pump();
@@ -427,7 +427,7 @@ void main() {
   // nothing to center — the auto-scroll leaves it parked at the top.
   testWidgets('short_list_does_not_scroll', (tester) async {
     await pumpBoard(tester); // 2-def fixture on the 800x600 test surface
-    expect(controller.start(), isTrue);
+    expect(await controller.start(), isTrue);
     await tester.pump();
     expect(controller.skipNext(), isTrue); // cursor → row b
     await tester.pump();
@@ -446,7 +446,7 @@ void main() {
   // 12. Reset needs confirmation: cancel leaves the run untouched.
   testWidgets('reset_requires_confirmation', (tester) async {
     await pumpBoard(tester);
-    controller.start();
+    await controller.start();
     await tester.pump();
 
     await tester.tap(find.byKey(const Key('btn-reset')));
@@ -466,7 +466,7 @@ void main() {
   // 13. Confirming the reset dialog returns the session to notStarted.
   testWidgets('reset_confirms_and_resets', (tester) async {
     await pumpBoard(tester);
-    controller.start();
+    await controller.start();
     await tester.pump();
 
     await tester.tap(find.byKey(const Key('btn-reset')));
@@ -491,7 +491,7 @@ void main() {
       isNull,
     );
 
-    controller.start();
+    await controller.start();
     await tester.pump();
     await tester.tap(find.byKey(const Key('btn-skip')));
     await tester.pump();
@@ -505,7 +505,7 @@ void main() {
     await tester.pump();
     expect(controller.snapshot.state, SessionState.notStarted); // past the end
 
-    controller.start();
+    await controller.start();
     await tester.pump();
     clock.current = clock.current.add(const Duration(seconds: 60));
     await controller.tick();
@@ -533,7 +533,7 @@ void main() {
     );
 
     await pumpBoard(tester);
-    controller.start();
+    await controller.start();
     await tester.pump();
     clock.current = clock.current.add(const Duration(seconds: 6));
     await controller.tick();
@@ -561,7 +561,7 @@ void main() {
     );
 
     await pumpBoard(tester);
-    controller.start();
+    await controller.start();
     await tester.pump();
     clock.current = clock.current.add(const Duration(seconds: 6));
     await controller.tick();
@@ -590,7 +590,7 @@ void main() {
     await pumpBoard(tester);
     // notStarted: the adjust button is disabled (nothing to adjust).
     expect(tester.widget<IconButton>(find.byKey(const Key('btn-adjust'))).onPressed, isNull);
-    controller.start();
+    await controller.start();
     await tester.pump();
     expect(tester.widget<IconButton>(find.byKey(const Key('btn-adjust'))).onPressed, isNotNull);
     expect(find.byKey(const Key('btn-list')), findsNothing); // P2.3: gone
@@ -647,7 +647,7 @@ void main() {
   // remaining for this run only.
   testWidgets('tweaks_adjust_menu_applies_delta', (tester) async {
     await pumpBoard(tester);
-    controller.start();
+    await controller.start();
     await tester.pump();
     await tester.tap(find.byKey(const Key('btn-adjust')));
     await tester.pump();
@@ -665,7 +665,7 @@ void main() {
   // Tweaks #5: silence keeps the hold; the play button is what completes.
   testWidgets('tweaks_silence_keeps_limbo', (tester) async {
     await pumpBoard(tester);
-    controller.start();
+    await controller.start();
     clock.current = clock.current.add(const Duration(seconds: 65));
     await controller.tick();
     await tester.pump();
@@ -680,7 +680,7 @@ void main() {
   // RUNNING timer, hit Done — the run keeps going.
   testWidgets('tweaks_editor_done_keeps_the_run', (tester) async {
     await pumpBoard(tester);
-    controller.start();
+    await controller.start();
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.escape); // open editor
     await tester.pump();

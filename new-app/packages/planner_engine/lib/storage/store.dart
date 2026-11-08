@@ -118,6 +118,45 @@ abstract interface class Store {
   /// (missing-row ops throw, like renameBoard/renameFolder).
   Future<void> removeRule(String ruleId);
 
+  // ── days (v2 P4.1) ────────────────────────────────────────────────────
+  /// The day's EXPLICIT plan reference (the `days` row's `planTimerId`),
+  /// or null when the day has none configured. READ-ONLY: rules are not
+  /// consulted and no row is ever written.
+  Future<String?> dayPlanId(DateTime date);
+
+  /// Pins [date] to [timerId] (null clears the pin back to unresolved —
+  /// the row's `planTimerId` becomes NULL). The pin does not validate
+  /// that the timer exists; resolution simply reads it back. Appends one
+  /// `day.setPlan` change-log event.
+  Future<void> setDayPlan(DateTime date, String? timerId);
+
+  /// The plan [date] RENDERS: the explicit pin when set, else the winning
+  /// default rule (the pure `resolvePlanFor` over ALL plans' rules —
+  /// date > monthday > weekday > global default). Null when nothing
+  /// claims the day.
+  ///
+  /// READ-ONLY — placeholder reads (board render, calendar counts) never
+  /// materialize and never write rows.
+  Future<String?> resolveDayPlan(DateTime date);
+
+  /// The P4.1 lazy fork: creates [date]'s OWN timer — same board/name/
+  /// color as the resolved plan, `folderId` null, `dayDate` = the day,
+  /// `originPlanId` = the source plan — copies the source's tree AS IT
+  /// STANDS through `IntervalTree.copiedToTimer` (fresh ids, completion
+  /// marks cleared), points the day's row at the copy, and returns its id.
+  ///
+  /// IDEMPOTENT (materialized exactly once): a day already pointing at
+  /// its own timer (`dayDate` == the day) returns that id untouched — no
+  /// second copy, no second `day.materialize` event. Returns null when
+  /// nothing claims the day (no pin, no rule) — no rows are written.
+  Future<String?> materializeDay(DateTime date);
+
+  /// How many AUTHORED intervals (tree `DefNode`s — group repeats are
+  /// not expanded) the day's resolved plan has: `resolveDayPlan` + a tree
+  /// read-through, with NO materialization (a count is a read; 0 when
+  /// nothing claims the day).
+  Future<int> dayItemCount(DateTime date);
+
   // ── change log ──────────────────────────────────────────────────────────
   /// All events, oldest first (insertion order).
   Future<List<EventLogEntry>> events();

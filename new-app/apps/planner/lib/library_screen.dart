@@ -79,7 +79,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   Future<void> _reload() async {
     final folders = await _store.allFolders();
-    final plans = await _store.timersInBoard(controller.board.id);
+    // The Library lists PLANS — day forks (P4.1's materialized copies,
+    // dayDate != null) live under their day and never appear here.
+    final plans = [
+      for (final t in await _store.timersInBoard(controller.board.id))
+        if (t.dayDate == null) t,
+    ];
     final trees = <String, IntervalTree>{};
     for (final plan in plans) {
       trees[plan.id] = await _store.loadTree(plan.id);
