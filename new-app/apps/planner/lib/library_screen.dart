@@ -583,13 +583,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 }
 
-/// The shared destructive confirmation (delete plan / delete folder):
-/// Cancel (or the barrier) dismisses = false, the red Delete = true. Keys
+/// The shared confirmation (delete plan / delete folder / make default,
+/// P3.4): Cancel (or the barrier) dismisses = false, the confirm button =
+/// true — red `Delete` by default; callers may relabel/retint it
+/// ([confirmLabel] / [confirmColor]) for non-destructive confirms. Keys
 /// follow the board's reset-dialog convention.
 Future<bool> showConfirmDialog(
   BuildContext context, {
   required String title,
   required String message,
+  String confirmLabel = 'Delete',
+  Color confirmColor = AppColors.danger,
 }) async {
   final confirmed = await showDialog<bool>(
     context: context,
@@ -608,10 +612,7 @@ Future<bool> showConfirmDialog(
         TextButton(
           key: const Key('dialog-confirm'),
           onPressed: () => Navigator.of(dialogContext).pop(true),
-          child: const Text(
-            'Delete',
-            style: TextStyle(color: AppColors.danger),
-          ),
+          child: Text(confirmLabel, style: TextStyle(color: confirmColor)),
         ),
       ],
     ),

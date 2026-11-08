@@ -82,6 +82,7 @@ class DriftStore implements Store {
       // consumer; board.delete comes last.
       for (final t in timers) {
         await _deleteTimerRows(t.id);
+        await _deleteRuleRows(t.id);
         await _appendEvent('timer.delete', {'timerId': t.id});
       }
       await (_db.delete(_db.timers)..where((t) => t.boardId.equals(id))).go();
@@ -190,6 +191,7 @@ class DriftStore implements Store {
   Future<void> deleteTimer(String id) async {
     await _db.transaction(() async {
       await _deleteTimerRows(id);
+      await _deleteRuleRows(id);
       // The plan itself — without this the delete is a silent no-op and
       // the plan survives its own deletion (P3.2 bug caught by tests).
       await (_db.delete(_db.timers)..where((t) => t.id.equals(id))).go();
@@ -208,6 +210,14 @@ class DriftStore implements Store {
       _db.groupDefs,
     )..where((t) => t.timerId.equals(timerId))).go();
   }
+
+  /// Clears a timer's default rules — the DELETE cascades only
+  /// (deleteTimer / deleteBoard / deleteFolder). NOT part of
+  /// [_deleteTimerRows]: saveTree reuses that as its clear-before-insert
+  /// step, and tree writes must never wipe the plan's rules.
+  Future<void> _deleteRuleRows(String timerId) => (_db.delete(
+    _db.defaultRules,
+  )..where((t) => t.timerId.equals(timerId))).go();
 
   // ── library folders (v2 P3.2) ─────────────────────────────────────────
 
@@ -265,6 +275,7 @@ class DriftStore implements Store {
       )..where((t) => t.folderId.equals(id))).get();
       for (final t in timers) {
         await _deleteTimerRows(t.id);
+        await _deleteRuleRows(t.id);
         await _appendEvent('timer.delete', {'timerId': t.id});
       }
       await (_db.delete(_db.timers)..where((t) => t.folderId.equals(id))).go();
@@ -319,6 +330,132 @@ class DriftStore implements Store {
         'toIndex': at,
       });
     });
+  }
+
+  // ── default rules (v2 P3.4) ────────────────────────────────────────
+
+  /// Enum mapping (BLOCKERS #2: drift's `textEnum` breaks codegen) —
+  /// [DefaultRuleKind] ⇄ its TEXT wire value, in both directions.
+  DefaultRule _ruleFromRow(DefaultRuleRow r) => DefaultRule(
+    id: r.id,
+    timerId: r.timerId,
+    kind: DefaultRuleKind.fromWireName(r.kind),
+    value: r.value,
+    repeat: r.repeat,
+  );
+
+  @override
+  Future<List<DefaultRule>> rulesFor(String timerId) async {
+    // Creation order (SQLite rowid): the menu lists rules oldest first.
+    final rows =
+        await (_db.select(_db.defaultRules)
+              ..where((t) => t.timerId.equals(timerId))
+              ..orderBy([(t) => OrderingTerm.asc(t.rowId)]))
+            .get();
+    return [for (final r in rows) _ruleFromRow(r)];
+  }
+
+  @override
+  Future<DefaultRule> addRule({
+    required String timerId,
+    required DefaultRuleKind kind,
+    int? value,
+    bool repeat = false,
+  }) async {
+    // A global default stores value = null whatever was passed — the
+    // column's meaning is kind-dependent (see [DefaultRule]).
+    final storedValue = kind == DefaultRuleKind.globalDefault ? null : value;
+    _validateRule(kind, storedValue, repeat);
+    return _db.transaction(() async {
+      // Idempotent re-add (P3.4): the same rule exists → hand it back
+      // untouched (no row, no event — a no-op is not a mutation).
+      final existing =
+          await (_db.select(_db.defaultRules)
+                ..where((t) => t.timerId.equals(timerId))
+                ..where((t) => t.kind.equals(kind.wireName))
+                ..where(
+                  (t) => storedValue == null
+                      ? t.value.isNull()
+                      : t.value.equals(storedValue),
+                )
+                ..where((t) => t.repeat.equals(repeat)))
+              .getSingleOrNull();
+      if (existing != null) return _ruleFromRow(existing);
+
+      final rule = DefaultRule(
+        id: newId(),
+        timerId: timerId,
+        kind: kind,
+        value: storedValue,
+        repeat: repeat,
+      );
+      await _db
+          .into(_db.defaultRules)
+          .insert(
+            DefaultRulesCompanion.insert(
+              id: rule.id,
+              timerId: rule.timerId,
+              kind: rule.kind.wireName,
+              value: Value(rule.value),
+              repeat: rule.repeat,
+            ),
+          );
+      await _appendEvent('rule.add', {
+        'ruleId': rule.id,
+        'timerId': timerId,
+        'kind': kind.wireName,
+        'value': storedValue,
+        'repeat': repeat,
+      });
+      return rule;
+    });
+  }
+
+  @override
+  Future<void> removeRule(String ruleId) => _db.transaction(() async {
+    final rows = await (_db.select(
+      _db.defaultRules,
+    )..where((t) => t.id.equals(ruleId))).get();
+    if (rows.isEmpty) throw StateError('rule not found: $ruleId');
+    await (_db.delete(
+      _db.defaultRules,
+    )..where((t) => t.id.equals(ruleId))).go();
+    final rule = _ruleFromRow(rows.single);
+    await _appendEvent('rule.remove', {
+      'ruleId': ruleId,
+      'timerId': rule.timerId,
+      'kind': rule.kind.wireName,
+      'value': rule.value,
+      'repeat': rule.repeat,
+    });
+  });
+
+  /// Refuses malformed rules at the store seam — [addRule]'s contract.
+  /// `value` arrives pre-normalized (null for a global default).
+  void _validateRule(DefaultRuleKind kind, int? value, bool repeat) {
+    if (kind == DefaultRuleKind.globalDefault) return; // no value applies
+    if (value == null) {
+      throw StateError('default rule (${kind.wireName}): value is required');
+    }
+    if (kind == DefaultRuleKind.weekday && repeat && (value < 1 || value > 7)) {
+      throw StateError(
+        'default rule: weekday value must be 1-7 (Monday=1), got $value',
+      );
+    }
+    if (kind == DefaultRuleKind.monthday &&
+        repeat &&
+        (value < 1 || value > 31)) {
+      throw StateError('default rule: monthday value must be 1-31, got $value');
+    }
+    // One-off rules (repeat = false) and every date rule claim a full day.
+    final needsDay =
+        kind == DefaultRuleKind.date ||
+        ((kind == DefaultRuleKind.weekday ||
+                kind == DefaultRuleKind.monthday) &&
+            !repeat);
+    if (needsDay && !_isYyyyMmDd(value)) {
+      throw StateError('default rule: expected a YYYYMMDD day, got $value');
+    }
   }
 
   // ── interval tree ───────────────────────────────────────────────────────
@@ -610,4 +747,14 @@ class DriftStore implements Store {
 
   @override
   Future<void> close() => _db.close();
+}
+
+/// Structural check for the YYYYMMDD day encoding of one-off/date rule
+/// values: a plausible year (≥ 1000), month 1–12, day 1–31 — not a full
+/// calendar validation (a day that never occurs simply never resolves).
+bool _isYyyyMmDd(int value) {
+  final year = value ~/ 10000;
+  final month = (value ~/ 100) % 100;
+  final day = value % 100;
+  return year >= 1000 && month >= 1 && month <= 12 && day >= 1 && day <= 31;
 }

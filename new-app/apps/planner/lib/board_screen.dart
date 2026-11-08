@@ -6,6 +6,7 @@ import 'package:planner_engine/planner_engine.dart';
 
 import 'app_controller.dart';
 import 'bottom_bar.dart';
+import 'defaults_menu.dart';
 import 'editor_controller.dart';
 import 'editor_screen.dart';
 import 'format.dart';
@@ -34,7 +35,7 @@ import 'time_adjust_modal.dart';
 /// (v2 P3.1): every page renders its own [BottomBar], and the same
 /// [BoardScreen] serves as the home board ([BoardBar.main]: Settings ·
 /// Calendar · Library · New Event) and as a Library plan's board
-/// ([BoardBar.plan]: home · back).
+/// ([BoardBar.plan]: home · back · defaults (P3.4)).
 class BoardScreen extends StatefulWidget {
   const BoardScreen(this.controller, {super.key, this.bar = BoardBar.main});
 
@@ -1007,6 +1008,10 @@ class _BoardScreenState extends State<BoardScreen> {
   /// board's mode (tooltip names the CURRENT mode; the default is the
   /// derived one), and `btn-toggle-completed` shows/hides the completed
   /// section (shown by default).
+  ///
+  /// v2 P3.4 — `btn-defaults` opens the plan's default-rules menu
+  /// ([showDefaultsMenu]); it lives on THIS bar only (the board root and
+  /// the Library get no menu in this chunk).
   Widget _planBar(BuildContext context) {
     return BottomBar(
       key: const Key('plan-bar'),
@@ -1020,6 +1025,14 @@ class _BoardScreenState extends State<BoardScreen> {
           buttonKey: const Key('bar-back'),
           icon: Icons.arrow_back,
           onPressed: () => Navigator.of(context).pop(),
+        ),
+        Tooltip(
+          message: 'Defaults',
+          child: BarButton(
+            buttonKey: const Key('btn-defaults'),
+            icon: Icons.rule,
+            onPressed: () => unawaited(showDefaultsMenu(context, controller)),
+          ),
         ),
         Tooltip(
           message: _checklistMode ? 'Checklist mode' : 'Chain mode',

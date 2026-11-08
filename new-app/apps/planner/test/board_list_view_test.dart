@@ -26,7 +26,12 @@ import 'fakes.dart';
 /// the derived default (all-Open → checklist, mixed/duration → chain),
 /// the 3-second sink window (un-checking inside it keeps the row's
 /// place), chain rows never moving, the show/hide-completed toggle in
-/// the plan bar, and run controls present on all-Open plans.
+/// the plan bar, and run controls present on all-Open plans · v2 P3.4:
+/// the plan bar's defaults menu — make-default behind its confirm dialog
+/// (re-confirming stays idempotent), the weekday/monthday flows with
+/// their repeat switches (repeat off = the one-off date), the menu's
+/// active-rule list + remove affordance, and `btn-defaults` on the plan
+/// bar ONLY (board root and Library get no menu).
 ///
 /// Main fixture (saved BEFORE init) — ordinals in parentheses:
 /// `a 'break' 60s manual (0)` · `G(g1 ×2){b 'Cards' 30s auto} (1,2)` ·
@@ -1265,4 +1270,228 @@ void main() {
     await store.close();
   });
 
+  // ── v2 P3.4: default rules (the plan bar's menu) ─────────────
+
+  /// Bounded settle — the dialogs and their drift chains resolve over a
+  /// few microtask hops; the board's ticker hangs pumpAndSettle (same
+  /// rounds as the Library tests' helper).
+  Future<void> settle(WidgetTester tester) async {
+    for (var i = 0; i < 5; i++) {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 120));
+    }
+  }
+
+  /// Opens `btn-defaults`' menu on the plan board.
+  Future<void> openDefaults(WidgetTester tester) async {
+    await tester.tap(find.byKey(const Key('btn-defaults')));
+    await settle(tester);
+    expect(find.byKey(const Key('defaults-menu')), findsOneWidget);
+  }
+
+  testWidgets('make_default_flow_confirms_then_adds_the_global_rule', (
+    tester,
+  ) async {
+    await buildChecklistFixture();
+    await pumpPlanBoard(tester);
+    await openDefaults(tester);
+
+    // The three entries behind one menu button, an empty rule list.
+    expect(find.text('Make the default timer'), findsOneWidget);
+    expect(find.text('Default for a day of the week…'), findsOneWidget);
+    expect(find.text('Default for a day of the month…'), findsOneWidget);
+    expect(find.byKey(const Key('defaults-empty')), findsOneWidget);
+
+    // Cancel: the confirmation popup adds nothing.
+    await tester.tap(find.byKey(const Key('defaults-make-default')));
+    await settle(tester);
+    expect(find.text('Make the default timer?'), findsOneWidget);
+    expect(
+      find.text('Days with no other rule are given this plan.'),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const Key('dialog-cancel')));
+    await settle(tester);
+    expect(await store.rulesFor(controller.timer.id), isEmpty);
+
+    // Confirm: the plan's global default rule lands and the open menu
+    // lists it.
+    await tester.tap(find.byKey(const Key('defaults-make-default')));
+    await settle(tester);
+    await tester.tap(find.byKey(const Key('dialog-confirm')));
+    await settle(tester);
+    final rules = await store.rulesFor(controller.timer.id);
+    expect(rules.single.kind, DefaultRuleKind.globalDefault);
+    expect(rules.single.value, isNull);
+    expect(find.text('Default for all days'), findsOneWidget);
+
+    // Re-adding the same rule is idempotent — through the UI too.
+    await tester.tap(find.byKey(const Key('defaults-make-default')));
+    await settle(tester);
+    await tester.tap(find.byKey(const Key('dialog-confirm')));
+    await settle(tester);
+    expect(await store.rulesFor(controller.timer.id), hasLength(1));
+
+    controller.dispose();
+    await store.close();
+  });
+
+  testWidgets('weekday_flow_repeats_weekly_or_claims_one_date', (tester) async {
+    await buildChecklistFixture(); // clock: t0 = 2026-03-01, a Sunday
+    await pumpPlanBoard(tester);
+    await openDefaults(tester);
+
+    // The picker: the 7 weekday names + "repeats weekly", defaulting on.
+    await tester.tap(find.byKey(const Key('defaults-weekday')));
+    await settle(tester);
+    expect(find.byKey(const Key('weekday-picker')), findsOneWidget);
+    for (final name in [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ]) {
+      expect(find.text(name), findsOneWidget, reason: 'no $name');
+    }
+    expect(
+      tester
+          .widget<Switch>(find.byKey(const Key('switch-repeats-weekly')))
+          .value,
+      isTrue,
+    );
+
+    // Repeat on: Tuesday → a repeating weekday rule (1–7, Monday=1).
+    await tester.tap(find.byKey(const Key('weekday-2')));
+    await settle(tester);
+    var rules = await store.rulesFor(controller.timer.id);
+    expect(rules.single.kind, DefaultRuleKind.weekday);
+    expect(rules.single.value, 2);
+    expect(rules.single.repeat, isTrue);
+    expect(find.text('Every Tuesday'), findsOneWidget);
+
+    // Repeat off: Tuesday claims ONE date — the upcoming occurrence from
+    // the fixture clock (Sunday 2026-03-01 → Tuesday 2026-03-03) — stored
+    // as the rule's YYYYMMDD value (P3.4's "off = that one date").
+    await tester.tap(find.byKey(const Key('defaults-weekday')));
+    await settle(tester);
+    await tester.tap(find.byKey(const Key('switch-repeats-weekly')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('weekday-2')));
+    await settle(tester);
+    rules = await store.rulesFor(controller.timer.id);
+    expect(rules, hasLength(2));
+    final oneOff = rules.last;
+    expect(oneOff.kind, DefaultRuleKind.weekday);
+    expect(oneOff.repeat, isFalse);
+    expect(oneOff.value, 20260303);
+    expect(find.text('On 2026-03-03'), findsOneWidget);
+
+    controller.dispose();
+    await store.close();
+  });
+
+  testWidgets('monthday_flow_repeats_monthly_or_claims_one_date', (
+    tester,
+  ) async {
+    await buildChecklistFixture(); // clock: t0 = 2026-03-01
+    await pumpPlanBoard(tester);
+    await openDefaults(tester);
+
+    // The picker: a 1–31 number picker + "repeats monthly", defaulting on.
+    await tester.tap(find.byKey(const Key('defaults-monthday')));
+    await settle(tester);
+    expect(find.byKey(const Key('monthday-picker')), findsOneWidget);
+    for (final n in [1, 15, 31]) {
+      expect(find.text('$n'), findsOneWidget, reason: 'no $n');
+    }
+    expect(
+      tester
+          .widget<Switch>(find.byKey(const Key('switch-repeats-monthly')))
+          .value,
+      isTrue,
+    );
+
+    // Repeat on: the 15th of every month.
+    await tester.tap(find.byKey(const Key('monthday-15')));
+    await settle(tester);
+    var rules = await store.rulesFor(controller.timer.id);
+    expect(rules.single.kind, DefaultRuleKind.monthday);
+    expect(rules.single.value, 15);
+    expect(rules.single.repeat, isTrue);
+    expect(find.text('Day 15 of every month'), findsOneWidget);
+
+    // Repeat off: the upcoming 15th from the fixture clock → 2026-03-15.
+    await tester.tap(find.byKey(const Key('defaults-monthday')));
+    await settle(tester);
+    await tester.tap(find.byKey(const Key('switch-repeats-monthly')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('monthday-15')));
+    await settle(tester);
+    rules = await store.rulesFor(controller.timer.id);
+    expect(rules, hasLength(2));
+    expect(rules.last.kind, DefaultRuleKind.monthday);
+    expect(rules.last.repeat, isFalse);
+    expect(rules.last.value, 20260315);
+    expect(find.text('On 2026-03-15'), findsOneWidget);
+
+    controller.dispose();
+    await store.close();
+  });
+
+  testWidgets('menu_lists_active_rules_and_removes_them', (tester) async {
+    await buildChecklistFixture();
+    await pumpPlanBoard(tester);
+
+    // Seed through the store — the menu is a view over rulesFor.
+    await store.addRule(
+      timerId: controller.timer.id,
+      kind: DefaultRuleKind.globalDefault,
+    );
+    final weekday = await store.addRule(
+      timerId: controller.timer.id,
+      kind: DefaultRuleKind.weekday,
+      value: 1,
+      repeat: true,
+    );
+    await openDefaults(tester);
+    expect(find.text('Default for all days'), findsOneWidget);
+    expect(find.text('Every Monday'), findsOneWidget);
+
+    // The remove affordance drops the weekday rule; the default stands.
+    await tester.tap(find.byKey(Key('defaults-remove-${weekday.id}')));
+    await settle(tester);
+    final rules = await store.rulesFor(controller.timer.id);
+    expect(rules.map((r) => r.kind), [DefaultRuleKind.globalDefault]);
+    expect(find.text('Every Monday'), findsNothing);
+    expect(find.text('Default for all days'), findsOneWidget);
+
+    controller.dispose();
+    await store.close();
+  });
+
+  testWidgets('btn_defaults_lives_on_the_plan_bar_only', (tester) async {
+    await buildChecklistFixture();
+
+    // The plan board: the menu button joins its bar.
+    await pumpPlanBoard(tester);
+    expect(find.byKey(const Key('btn-defaults')), findsOneWidget);
+
+    // The board root (main bar): no defaults menu (P3.4 placement).
+    await tester.pumpWidget(MaterialApp(home: BoardScreen(controller)));
+    await settle(tester);
+    expect(find.byKey(const Key('main-bar')), findsOneWidget);
+    expect(find.byKey(const Key('btn-defaults')), findsNothing);
+
+    // The Library page: none there either.
+    await tester.tap(find.byKey(const Key('bar-library')));
+    await settle(tester);
+    expect(find.byKey(const Key('library-page')), findsOneWidget);
+    expect(find.byKey(const Key('btn-defaults')), findsNothing);
+
+    controller.dispose();
+    await store.close();
+  });
 }

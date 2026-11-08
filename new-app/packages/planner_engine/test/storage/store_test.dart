@@ -486,6 +486,278 @@ void main() {
     );
   });
 
+  group('schema v4 migration (P3.4)', () {
+    test(
+      'a v3 database gains default_rules; rules read/write after reopen',
+      () async {
+        final dir = Directory.systemTemp.createTempSync('planner_migration_v4');
+        final file = File('${dir.path}/mig4.db');
+
+        // Phase 1: a schemaVersion-3 database — the current shape minus
+        // the default_rules table — with one board + one timer.
+        final v3 = PlannerDb(NativeDatabase(file));
+        await v3.customStatement('DROP TABLE default_rules');
+        await v3.customStatement(
+          "INSERT INTO boards (id, name) VALUES ('b1', 'My Board')",
+        );
+        await v3.customStatement(
+          'INSERT INTO timers '
+          '(id, board_id, name, color, sort_index, created_at, updated_at) '
+          "VALUES ('t1', 'b1', 'Old plan', '#0055ff', 0, 1772000000000, "
+          '1772000000000)',
+        );
+        await v3.customStatement('PRAGMA user_version = 3');
+        await v3.close();
+
+        // Phase 2: reopening under schema v4 runs the 3→4 migration —
+        // the table lands (empty) and accepts new rule writes.
+        final v4 = PlannerDb(NativeDatabase(file));
+        final store4 = DriftStore(v4, clock);
+        expect(await store4.rulesFor('t1'), isEmpty);
+
+        final added = await store4.addRule(
+          timerId: 't1',
+          kind: DefaultRuleKind.monthday,
+          value: 15,
+          repeat: true,
+        );
+        final loaded = await store4.rulesFor('t1');
+        expect(loaded.single.id, added.id);
+        expect(loaded.single.kind, DefaultRuleKind.monthday);
+        expect(loaded.single.value, 15);
+        expect(loaded.single.repeat, isTrue);
+        await store4.close();
+
+        dir.deleteSync(recursive: true);
+      },
+    );
+  });
+
+  group('default rules (P3.4)', () {
+    test(
+      'every kind round-trips (manual enum mapping); re-add is idempotent',
+      () async {
+        final b = await store.createBoard('b');
+        final t = await store.createTimer(
+          boardId: b.id,
+          name: 'Gym',
+          color: '#0055ff',
+        );
+
+        final added = <DefaultRule>[
+          await store.addRule(
+            timerId: t.id,
+            kind: DefaultRuleKind.globalDefault,
+          ),
+          await store.addRule(
+            timerId: t.id,
+            kind: DefaultRuleKind.weekday,
+            value: 1, // Monday
+            repeat: true,
+          ),
+          await store.addRule(
+            timerId: t.id,
+            kind: DefaultRuleKind.weekday,
+            value: 20260303, // one-off: this Tuesday
+          ),
+          await store.addRule(
+            timerId: t.id,
+            kind: DefaultRuleKind.monthday,
+            value: 15,
+            repeat: true,
+          ),
+          await store.addRule(
+            timerId: t.id,
+            kind: DefaultRuleKind.monthday,
+            value: 20260415, // one-off: this 15th
+          ),
+          await store.addRule(
+            timerId: t.id,
+            kind: DefaultRuleKind.date,
+            value: 20260501,
+          ),
+        ];
+
+        // Round-trip: same rows, creation order, every field intact —
+        // and the kind survives the TEXT column (name-based mapping in
+        // both directions, BLOCKERS #2).
+        final loaded = await store.rulesFor(t.id);
+        expect(loaded.map((r) => r.id), added.map((r) => r.id));
+        expect(loaded.map((r) => r.kind), added.map((r) => r.kind));
+        expect(loaded.map((r) => r.value), [
+          null, // a global default stores no value
+          1,
+          20260303,
+          15,
+          20260415,
+          20260501,
+        ]);
+        expect(loaded.map((r) => r.repeat), [
+          false,
+          true,
+          false,
+          true,
+          false,
+          false,
+        ]);
+        // The wire TEXT the schema actually stores (the manual enum map).
+        final raw = await db.select(db.defaultRules).get();
+        expect(raw.map((r) => r.kind), [
+          'default',
+          'weekday',
+          'weekday',
+          'monthday',
+          'monthday',
+          'date',
+        ]);
+
+        // Idempotent re-add: same rule → the SAME row, no new row, and
+        // no second change-log event (a no-op is not a mutation).
+        final againWeekday = await store.addRule(
+          timerId: t.id,
+          kind: DefaultRuleKind.weekday,
+          value: 1,
+          repeat: true,
+        );
+        final againOneOff = await store.addRule(
+          timerId: t.id,
+          kind: DefaultRuleKind.weekday,
+          value: 20260303,
+        );
+        expect(againWeekday.id, added[1].id);
+        expect(againOneOff.id, added[2].id);
+        expect(await store.rulesFor(t.id), hasLength(6));
+        final events = await store.events();
+        expect(events.where((e) => e.kind == 'rule.add'), hasLength(6));
+
+        // Remove drops the row and logs it; a second remove throws
+        // (missing-row ops throw, like the other renames).
+        await store.removeRule(added.first.id);
+        expect(
+          (await store.rulesFor(t.id)).map((r) => r.id),
+          isNot(contains(added.first.id)),
+        );
+        expect(
+          (await store.events()).map((e) => e.kind),
+          containsAllInOrder(<String>['rule.add', 'rule.remove']),
+        );
+        await expectLater(
+          store.removeRule('missing'),
+          throwsA(isA<StateError>()),
+        );
+      },
+    );
+
+    test(
+      'plan deletes cascade to its rules; tree saves never touch them',
+      () async {
+        final b = await store.createBoard('b');
+        final f = await store.createFolder('F');
+        final inFolder = await store.createTimer(
+          boardId: b.id,
+          name: 'Routine',
+          color: '#0055ff',
+          folderId: f.id,
+        );
+        final atRoot = await store.createTimer(
+          boardId: b.id,
+          name: 'List',
+          color: '#0055ff',
+        );
+        await store.addRule(
+          timerId: inFolder.id,
+          kind: DefaultRuleKind.weekday,
+          value: 1,
+          repeat: true,
+        );
+        await store.addRule(
+          timerId: atRoot.id,
+          kind: DefaultRuleKind.globalDefault,
+        );
+
+        // saveTree shares the def/group clear helper with the deletes —
+        // a tree write must NOT wipe the plan's rules.
+        await store.saveTree(
+          atRoot.id,
+          IntervalTree([
+            DefNode(
+              IntervalDef(
+                id: 'a',
+                timerId: atRoot.id,
+                color: '#0055ff',
+                durationSeconds: 10,
+                autoFinish: true,
+              ),
+            ),
+          ]),
+          eventKind: 'tree.save',
+        );
+        expect(await store.rulesFor(atRoot.id), hasLength(1));
+
+        // Folder cascade: the folder's plan loses its rules with it;
+        // the root plan's survive.
+        await store.deleteFolder(f.id);
+        expect(await store.rulesFor(inFolder.id), isEmpty);
+        expect(await store.rulesFor(atRoot.id), hasLength(1));
+
+        // Direct plan delete cascades too.
+        await store.deleteTimer(atRoot.id);
+        expect(await store.rulesFor(atRoot.id), isEmpty);
+      },
+    );
+
+    test('malformed rules are refused at the store', () async {
+      final b = await store.createBoard('b');
+      final t = await store.createTimer(
+        boardId: b.id,
+        name: 'x',
+        color: '#0055ff',
+      );
+
+      await expectLater(
+        store.addRule(
+          timerId: t.id,
+          kind: DefaultRuleKind.weekday,
+          value: 9,
+          repeat: true,
+        ),
+        throwsA(isA<StateError>()), // 1-7 only while repeating
+      );
+      await expectLater(
+        store.addRule(
+          timerId: t.id,
+          kind: DefaultRuleKind.monthday,
+          value: 0,
+          repeat: true,
+        ),
+        throwsA(isA<StateError>()), // 1-31 only while repeating
+      );
+      await expectLater(
+        store.addRule(timerId: t.id, kind: DefaultRuleKind.weekday),
+        throwsA(isA<StateError>()), // value required
+      );
+      await expectLater(
+        store.addRule(timerId: t.id, kind: DefaultRuleKind.date, value: 5),
+        throwsA(isA<StateError>()), // not a YYYYMMDD day
+      );
+      await expectLater(
+        store.addRule(timerId: t.id, kind: DefaultRuleKind.weekday, value: 123),
+        throwsA(isA<StateError>()), // one-off ⇒ a YYYYMMDD day, not 1-7
+      );
+      expect(await store.rulesFor(t.id), isEmpty);
+
+      // A global default carries no value — a stray one is normalized
+      // away ("value: null for default"), not stored.
+      final defaults = await store.addRule(
+        timerId: t.id,
+        kind: DefaultRuleKind.globalDefault,
+        value: 42,
+      );
+      expect(defaults.value, isNull);
+      expect((await store.rulesFor(t.id)).single.value, isNull);
+    });
+  });
+
   group('change log', () {
     test('every mutation appends an ordered, complete event', () async {
       final b = await store.createBoard('tmp');

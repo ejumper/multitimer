@@ -95,6 +95,29 @@ abstract interface class Store {
     required int newIndex,
   });
 
+  // ── default rules (v2 P3.4) ────────────────────────────────────────────
+  /// The plan's default rules in creation order (the menu lists them
+  /// oldest first; resolution itself is order-independent — see
+  /// `resolvePlanFor`).
+  Future<List<DefaultRule>> rulesFor(String timerId);
+
+  /// Adds a default rule for [timerId]. IDEMPOTENT: an identical rule
+  /// (same timer, kind, value, and repeat) already present is returned
+  /// unchanged — no second row, no change-log event. Throws [StateError]
+  /// when [value] is malformed for [kind] (null on a non-default rule,
+  /// weekday outside 1–7 / monthday outside 1–31 while repeating, a
+  /// one-off weekday/monthday/date value that is no YYYYMMDD day).
+  Future<DefaultRule> addRule({
+    required String timerId,
+    required DefaultRuleKind kind,
+    int? value,
+    bool repeat = false,
+  });
+
+  /// Removes the rule — throws [StateError] when [ruleId] is unknown
+  /// (missing-row ops throw, like renameBoard/renameFolder).
+  Future<void> removeRule(String ruleId);
+
   // ── change log ──────────────────────────────────────────────────────────
   /// All events, oldest first (insertion order).
   Future<List<EventLogEntry>> events();

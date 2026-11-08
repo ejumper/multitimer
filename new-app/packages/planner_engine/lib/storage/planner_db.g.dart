@@ -2411,6 +2411,360 @@ class FoldersCompanion extends UpdateCompanion<FolderRow> {
   }
 }
 
+class $DefaultRulesTable extends DefaultRules
+    with TableInfo<$DefaultRulesTable, DefaultRuleRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $DefaultRulesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _timerIdMeta = const VerificationMeta(
+    'timerId',
+  );
+  @override
+  late final GeneratedColumn<String> timerId = GeneratedColumn<String>(
+    'timer_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+    'kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _valueMeta = const VerificationMeta('value');
+  @override
+  late final GeneratedColumn<int> value = GeneratedColumn<int>(
+    'value',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _repeatMeta = const VerificationMeta('repeat');
+  @override
+  late final GeneratedColumn<bool> repeat = GeneratedColumn<bool>(
+    'repeat',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("repeat" IN (0, 1))',
+    ),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, timerId, kind, value, repeat];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'default_rules';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<DefaultRuleRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('timer_id')) {
+      context.handle(
+        _timerIdMeta,
+        timerId.isAcceptableOrUnknown(data['timer_id']!, _timerIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_timerIdMeta);
+    }
+    if (data.containsKey('kind')) {
+      context.handle(
+        _kindMeta,
+        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_kindMeta);
+    }
+    if (data.containsKey('value')) {
+      context.handle(
+        _valueMeta,
+        value.isAcceptableOrUnknown(data['value']!, _valueMeta),
+      );
+    }
+    if (data.containsKey('repeat')) {
+      context.handle(
+        _repeatMeta,
+        repeat.isAcceptableOrUnknown(data['repeat']!, _repeatMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_repeatMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  DefaultRuleRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return DefaultRuleRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      timerId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}timer_id'],
+      )!,
+      kind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}kind'],
+      )!,
+      value: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}value'],
+      ),
+      repeat: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}repeat'],
+      )!,
+    );
+  }
+
+  @override
+  $DefaultRulesTable createAlias(String alias) {
+    return $DefaultRulesTable(attachedDatabase, alias);
+  }
+}
+
+class DefaultRuleRow extends DataClass implements Insertable<DefaultRuleRow> {
+  final String id;
+  final String timerId;
+  final String kind;
+  final int? value;
+  final bool repeat;
+  const DefaultRuleRow({
+    required this.id,
+    required this.timerId,
+    required this.kind,
+    this.value,
+    required this.repeat,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['timer_id'] = Variable<String>(timerId);
+    map['kind'] = Variable<String>(kind);
+    if (!nullToAbsent || value != null) {
+      map['value'] = Variable<int>(value);
+    }
+    map['repeat'] = Variable<bool>(repeat);
+    return map;
+  }
+
+  DefaultRulesCompanion toCompanion(bool nullToAbsent) {
+    return DefaultRulesCompanion(
+      id: Value(id),
+      timerId: Value(timerId),
+      kind: Value(kind),
+      value: value == null && nullToAbsent
+          ? const Value.absent()
+          : Value(value),
+      repeat: Value(repeat),
+    );
+  }
+
+  factory DefaultRuleRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return DefaultRuleRow(
+      id: serializer.fromJson<String>(json['id']),
+      timerId: serializer.fromJson<String>(json['timerId']),
+      kind: serializer.fromJson<String>(json['kind']),
+      value: serializer.fromJson<int?>(json['value']),
+      repeat: serializer.fromJson<bool>(json['repeat']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'timerId': serializer.toJson<String>(timerId),
+      'kind': serializer.toJson<String>(kind),
+      'value': serializer.toJson<int?>(value),
+      'repeat': serializer.toJson<bool>(repeat),
+    };
+  }
+
+  DefaultRuleRow copyWith({
+    String? id,
+    String? timerId,
+    String? kind,
+    Value<int?> value = const Value.absent(),
+    bool? repeat,
+  }) => DefaultRuleRow(
+    id: id ?? this.id,
+    timerId: timerId ?? this.timerId,
+    kind: kind ?? this.kind,
+    value: value.present ? value.value : this.value,
+    repeat: repeat ?? this.repeat,
+  );
+  DefaultRuleRow copyWithCompanion(DefaultRulesCompanion data) {
+    return DefaultRuleRow(
+      id: data.id.present ? data.id.value : this.id,
+      timerId: data.timerId.present ? data.timerId.value : this.timerId,
+      kind: data.kind.present ? data.kind.value : this.kind,
+      value: data.value.present ? data.value.value : this.value,
+      repeat: data.repeat.present ? data.repeat.value : this.repeat,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('DefaultRuleRow(')
+          ..write('id: $id, ')
+          ..write('timerId: $timerId, ')
+          ..write('kind: $kind, ')
+          ..write('value: $value, ')
+          ..write('repeat: $repeat')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, timerId, kind, value, repeat);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is DefaultRuleRow &&
+          other.id == this.id &&
+          other.timerId == this.timerId &&
+          other.kind == this.kind &&
+          other.value == this.value &&
+          other.repeat == this.repeat);
+}
+
+class DefaultRulesCompanion extends UpdateCompanion<DefaultRuleRow> {
+  final Value<String> id;
+  final Value<String> timerId;
+  final Value<String> kind;
+  final Value<int?> value;
+  final Value<bool> repeat;
+  final Value<int> rowid;
+  const DefaultRulesCompanion({
+    this.id = const Value.absent(),
+    this.timerId = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.value = const Value.absent(),
+    this.repeat = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  DefaultRulesCompanion.insert({
+    required String id,
+    required String timerId,
+    required String kind,
+    this.value = const Value.absent(),
+    required bool repeat,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       timerId = Value(timerId),
+       kind = Value(kind),
+       repeat = Value(repeat);
+  static Insertable<DefaultRuleRow> custom({
+    Expression<String>? id,
+    Expression<String>? timerId,
+    Expression<String>? kind,
+    Expression<int>? value,
+    Expression<bool>? repeat,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (timerId != null) 'timer_id': timerId,
+      if (kind != null) 'kind': kind,
+      if (value != null) 'value': value,
+      if (repeat != null) 'repeat': repeat,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  DefaultRulesCompanion copyWith({
+    Value<String>? id,
+    Value<String>? timerId,
+    Value<String>? kind,
+    Value<int?>? value,
+    Value<bool>? repeat,
+    Value<int>? rowid,
+  }) {
+    return DefaultRulesCompanion(
+      id: id ?? this.id,
+      timerId: timerId ?? this.timerId,
+      kind: kind ?? this.kind,
+      value: value ?? this.value,
+      repeat: repeat ?? this.repeat,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (timerId.present) {
+      map['timer_id'] = Variable<String>(timerId.value);
+    }
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
+    }
+    if (value.present) {
+      map['value'] = Variable<int>(value.value);
+    }
+    if (repeat.present) {
+      map['repeat'] = Variable<bool>(repeat.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('DefaultRulesCompanion(')
+          ..write('id: $id, ')
+          ..write('timerId: $timerId, ')
+          ..write('kind: $kind, ')
+          ..write('value: $value, ')
+          ..write('repeat: $repeat, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$PlannerDb extends GeneratedDatabase {
   _$PlannerDb(QueryExecutor e) : super(e);
   $PlannerDbManager get managers => $PlannerDbManager(this);
@@ -2420,6 +2774,7 @@ abstract class _$PlannerDb extends GeneratedDatabase {
   late final $GroupDefsTable groupDefs = $GroupDefsTable(this);
   late final $EventLogTable eventLog = $EventLogTable(this);
   late final $FoldersTable folders = $FoldersTable(this);
+  late final $DefaultRulesTable defaultRules = $DefaultRulesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2431,6 +2786,7 @@ abstract class _$PlannerDb extends GeneratedDatabase {
     groupDefs,
     eventLog,
     folders,
+    defaultRules,
   ];
 }
 
@@ -3738,6 +4094,215 @@ typedef $$FoldersTableProcessedTableManager =
       FolderRow,
       PrefetchHooks Function()
     >;
+typedef $$DefaultRulesTableCreateCompanionBuilder =
+    DefaultRulesCompanion Function({
+      required String id,
+      required String timerId,
+      required String kind,
+      Value<int?> value,
+      required bool repeat,
+      Value<int> rowid,
+    });
+typedef $$DefaultRulesTableUpdateCompanionBuilder =
+    DefaultRulesCompanion Function({
+      Value<String> id,
+      Value<String> timerId,
+      Value<String> kind,
+      Value<int?> value,
+      Value<bool> repeat,
+      Value<int> rowid,
+    });
+
+class $$DefaultRulesTableFilterComposer
+    extends Composer<_$PlannerDb, $DefaultRulesTable> {
+  $$DefaultRulesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get timerId => $composableBuilder(
+    column: $table.timerId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get value => $composableBuilder(
+    column: $table.value,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get repeat => $composableBuilder(
+    column: $table.repeat,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$DefaultRulesTableOrderingComposer
+    extends Composer<_$PlannerDb, $DefaultRulesTable> {
+  $$DefaultRulesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get timerId => $composableBuilder(
+    column: $table.timerId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get value => $composableBuilder(
+    column: $table.value,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get repeat => $composableBuilder(
+    column: $table.repeat,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$DefaultRulesTableAnnotationComposer
+    extends Composer<_$PlannerDb, $DefaultRulesTable> {
+  $$DefaultRulesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get timerId =>
+      $composableBuilder(column: $table.timerId, builder: (column) => column);
+
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<int> get value =>
+      $composableBuilder(column: $table.value, builder: (column) => column);
+
+  GeneratedColumn<bool> get repeat =>
+      $composableBuilder(column: $table.repeat, builder: (column) => column);
+}
+
+class $$DefaultRulesTableTableManager
+    extends
+        RootTableManager<
+          _$PlannerDb,
+          $DefaultRulesTable,
+          DefaultRuleRow,
+          $$DefaultRulesTableFilterComposer,
+          $$DefaultRulesTableOrderingComposer,
+          $$DefaultRulesTableAnnotationComposer,
+          $$DefaultRulesTableCreateCompanionBuilder,
+          $$DefaultRulesTableUpdateCompanionBuilder,
+          (
+            DefaultRuleRow,
+            BaseReferences<_$PlannerDb, $DefaultRulesTable, DefaultRuleRow>,
+          ),
+          DefaultRuleRow,
+          PrefetchHooks Function()
+        > {
+  $$DefaultRulesTableTableManager(_$PlannerDb db, $DefaultRulesTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$DefaultRulesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$DefaultRulesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$DefaultRulesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> timerId = const Value.absent(),
+                Value<String> kind = const Value.absent(),
+                Value<int?> value = const Value.absent(),
+                Value<bool> repeat = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => DefaultRulesCompanion(
+                id: id,
+                timerId: timerId,
+                kind: kind,
+                value: value,
+                repeat: repeat,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String timerId,
+                required String kind,
+                Value<int?> value = const Value.absent(),
+                required bool repeat,
+                Value<int> rowid = const Value.absent(),
+              }) => DefaultRulesCompanion.insert(
+                id: id,
+                timerId: timerId,
+                kind: kind,
+                value: value,
+                repeat: repeat,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$DefaultRulesTable, DefaultRuleRow>(table),
+                  BaseReferences<
+                    _$PlannerDb,
+                    $DefaultRulesTable,
+                    DefaultRuleRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$DefaultRulesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$PlannerDb,
+      $DefaultRulesTable,
+      DefaultRuleRow,
+      $$DefaultRulesTableFilterComposer,
+      $$DefaultRulesTableOrderingComposer,
+      $$DefaultRulesTableAnnotationComposer,
+      $$DefaultRulesTableCreateCompanionBuilder,
+      $$DefaultRulesTableUpdateCompanionBuilder,
+      (
+        DefaultRuleRow,
+        BaseReferences<_$PlannerDb, $DefaultRulesTable, DefaultRuleRow>,
+      ),
+      DefaultRuleRow,
+      PrefetchHooks Function()
+    >;
 
 class $PlannerDbManager {
   final _$PlannerDb _db;
@@ -3754,4 +4319,6 @@ class $PlannerDbManager {
       $$EventLogTableTableManager(_db, _db.eventLog);
   $$FoldersTableTableManager get folders =>
       $$FoldersTableTableManager(_db, _db.folders);
+  $$DefaultRulesTableTableManager get defaultRules =>
+      $$DefaultRulesTableTableManager(_db, _db.defaultRules);
 }

@@ -3,7 +3,8 @@
 /// Tables encode the tree as rows: `parentGroupId` + `sortIndex`/`orderIndex`
 /// columns are derived from [IntervalTree] positions on save and rebuilt into
 /// tree structure on load. `schemaVersion` + drift migrations exist from day
-/// one: v1 = version 1, v2 (P1.1) = version 2, the Library (P3.2) = version 3.
+/// one: v1 = version 1, v2 (P1.1) = version 2, the Library (P3.2) =
+/// version 3, default rules (P3.4) = version 4.
 ///
 /// The database is opened via an injected `QueryExecutor` — the app supplies
 /// the on-disk opener from `storage/impl/` (the engine's only `dart:io`).
@@ -113,14 +114,42 @@ class EventLog extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+/// Default rules (v2 P3.4): a library plan's claims on calendar days.
+/// `kind` is the [DefaultRuleKind] wire TEXT ('default'/'weekday'/
+/// 'monthday'/'date') — mapped by NAME in [DriftStore] (drift's textEnum
+/// breaks codegen, BLOCKERS #2). `value` is null for a global default,
+/// 1–7 (Monday=1) / 1–31 for a REPEATING weekday/monthday rule, and the
+/// local day as YYYYMMDD for a `date` rule AND for any one-off
+/// (repeat = false) weekday/monthday rule — "default for this Tuesday"
+/// without repeat means exactly that date. See [DefaultRule].
+@DataClassName('DefaultRuleRow')
+class DefaultRules extends Table {
+  TextColumn get id => text()();
+  TextColumn get timerId => text()();
+  TextColumn get kind => text()();
+  IntColumn get value => integer().nullable()();
+  BoolColumn get repeat => boolean()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 @DriftDatabase(
-  tables: [Boards, Timers, IntervalDefs, GroupDefs, EventLog, Folders],
+  tables: [
+    Boards,
+    Timers,
+    IntervalDefs,
+    GroupDefs,
+    EventLog,
+    Folders,
+    DefaultRules,
+  ],
 )
 class PlannerDb extends _$PlannerDb {
   PlannerDb(super.e);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -131,6 +160,8 @@ class PlannerDb extends _$PlannerDb {
             await _migrate1To2(m);
           case 3:
             await _migrate2To3(m);
+          case 4:
+            await _migrate3To4(m);
         }
       }
     },
@@ -217,5 +248,19 @@ class PlannerDb extends _$PlannerDb {
       "updated_at = CAST(strftime('%s','now') AS INTEGER) * 1000 "
       'WHERE created_at = 0',
     );
+  }
+
+  /// v4 (P3.4): the `default_rules` table (schema v4). Purely additive —
+  /// presence-guarded like v2→v3, so a test-fabricated "old" database
+  /// carved out of a current-schema file (whose table already exists
+  /// beside `user_version`) migrates cleanly too.
+  Future<void> _migrate3To4(Migrator m) async {
+    final rulesExist = await customSelect(
+      "SELECT name FROM sqlite_master WHERE type = 'table' "
+      "AND name = 'default_rules'",
+    ).get();
+    if (rulesExist.isEmpty) {
+      await m.createTable(defaultRules);
+    }
   }
 }

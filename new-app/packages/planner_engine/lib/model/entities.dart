@@ -96,3 +96,78 @@ class Folder {
   @override
   String toString() => 'Folder($id, $name)';
 }
+
+/// The kinds of default rule a library plan can hold (v2 P3.4 — the
+/// outline's template rules). Wire values are the TEXT names stored in
+/// `default_rules.kind`; drift's `textEnum` breaks codegen (BLOCKERS #2),
+/// so [DriftStore] maps these by name in both directions.
+enum DefaultRuleKind {
+  /// The plan's GLOBAL default: it claims every day no other rule wins.
+  globalDefault('default'),
+
+  /// A claim on a day of the week — [DefaultRule.value] 1–7 (Monday=1)
+  /// while repeating, the concrete date otherwise (see [DefaultRule.value]).
+  weekday('weekday'),
+
+  /// A claim on a day of the month — [DefaultRule.value] 1–31 while
+  /// repeating, the concrete date otherwise.
+  monthday('monthday'),
+
+  /// A claim on ONE specific date ([DefaultRule.value] as YYYYMMDD).
+  date('date');
+
+  const DefaultRuleKind(this.wireName);
+
+  /// The exact TEXT stored in `default_rules.kind`.
+  final String wireName;
+
+  /// Maps a stored TEXT back to its kind — unknown values are corrupt data
+  /// and throw ([DriftStore] reads through this).
+  static DefaultRuleKind fromWireName(String name) {
+    for (final kind in values) {
+      if (kind.wireName == name) return kind;
+    }
+    throw StateError('unknown default rule kind: $name');
+  }
+}
+
+/// A default rule (v2 P3.4): a library plan's claim on calendar days,
+/// resolved by [resolvePlanFor] into the plan a placeholder day renders
+/// (P4.1). One plan may hold several rules; several plans may compete for
+/// the same day.
+///
+/// [value] depends on kind AND repeat:
+/// - `globalDefault`: null.
+/// - `weekday`/`monthday` with `repeat == true`: 1–7 (Monday=1) / 1–31.
+/// - `weekday`/`monthday` with `repeat == false`: the ONE-OFF date the
+///   rule claims, as the local day `YYYYMMDD` — "the default for this
+///   Tuesday" (repeat off) means exactly that date, so the picked day has
+///   to be carried in full (P3.4's repeat toggle: same day every week /
+///   month, off = that one date).
+/// - `date`: the local day as `YYYYMMDD`.
+///
+/// `repeat` is only read for `weekday`/`monthday` (the outline's "same day
+/// every week/month" toggle); `date`/`globalDefault` rules ignore it.
+class DefaultRule {
+  const DefaultRule({
+    required this.id,
+    required this.timerId,
+    required this.kind,
+    this.value,
+    this.repeat = false,
+  });
+
+  /// UUIDv4 string.
+  final String id;
+
+  /// The claiming plan (a timer id).
+  final String timerId;
+  final DefaultRuleKind kind;
+  final int? value;
+  final bool repeat;
+
+  @override
+  String toString() =>
+      'DefaultRule($id, timer=$timerId, ${kind.wireName}, '
+      'value=$value, repeat=$repeat)';
+}
