@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:planner/app_controller.dart';
 import 'package:planner/board_screen.dart';
+import 'package:planner/bottom_bar.dart';
 import 'package:planner/interval_rows.dart';
 import 'package:planner/theme.dart';
 import 'package:planner_engine/planner_engine.dart';
@@ -21,7 +22,11 @@ import 'fakes.dart';
 /// hold · the awaitingWall countdown · the `late` badge · the suspended
 /// row's frozen remaining · the checkbox tap · the dial's absence ·
 /// v2 P2.3: the current row's center-snap (auto-scroll on cursor moves +
-/// the return after a manual scroll gesture).
+/// the return after a manual scroll gesture) · v2 P3.3: checklist mode —
+/// the derived default (all-Open → checklist, mixed/duration → chain),
+/// the 3-second sink window (un-checking inside it keeps the row's
+/// place), chain rows never moving, the show/hide-completed toggle in
+/// the plan bar, and run controls present on all-Open plans.
 ///
 /// Main fixture (saved BEFORE init) — ordinals in parentheses:
 /// `a 'break' 60s manual (0)` · `G(g1 ×2){b 'Cards' 30s auto} (1,2)` ·
@@ -957,6 +962,304 @@ void main() {
     final list = tester.getRect(find.byKey(const Key('interval-list')));
     expect(after, moreOrLessEquals(before, epsilon: 3.0));
     expect(after, moreOrLessEquals(list.center.dy, epsilon: 3.0));
+
+    controller.dispose();
+    await store.close();
+  });
+
+  // ── v2 P3.3: checklist mode ────────────────────────────────
+
+  /// An ALL-OPEN plan (every interval has no duration — the derived
+  /// CHECKLIST shape): three flat defs, manual (auto-finish requires a
+  /// duration).
+  Future<void> buildChecklistFixture() async {
+    clock = FixedClock(t0);
+    db = PlannerDb(NativeDatabase.memory());
+    store = DriftStore(db, clock);
+    final board = await store.createBoard('My Board');
+    final timer = await store.createTimer(
+      boardId: board.id,
+      name: 'Camping list',
+      color: '#00ad6b',
+    );
+    await store.saveTree(
+      timer.id,
+      IntervalTree([
+        DefNode(
+          IntervalDef(
+            id: 'p',
+            timerId: timer.id,
+            name: 'Tent',
+            color: '#0055ff',
+            durationSeconds: null, // Open
+            autoFinish: false,
+          ),
+        ),
+        DefNode(
+          IntervalDef(
+            id: 'q',
+            timerId: timer.id,
+            name: 'Snacks',
+            color: '#ff00b1',
+            durationSeconds: null, // Open
+            autoFinish: false,
+          ),
+        ),
+        DefNode(
+          IntervalDef(
+            id: 'r',
+            timerId: timer.id,
+            name: 'Map',
+            color: '#b8ff00',
+            durationSeconds: null, // Open
+            autoFinish: false,
+          ),
+        ),
+      ]),
+      eventKind: 'tree.save',
+    );
+    controller = AppController(
+      store: store,
+      clock: clock,
+      notifier: RecordingNotifier(),
+      player: RecordingPlayer(),
+      soundsDir: '/sounds',
+      soundListing: () => const [],
+    );
+    await controller.init();
+  }
+
+  /// The plan board (P3.3's mode + visibility buttons live in ITS bar).
+  Future<void> pumpPlanBoard(WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(home: BoardScreen(controller, bar: BoardBar.plan)),
+    );
+  }
+
+  /// A row's top edge in global coordinates — order assertions, no
+  /// goldens.
+  double rowTop(WidgetTester tester, String id) =>
+      tester.getRect(find.byKey(Key('row-$id'))).top;
+
+  testWidgets('checklist_rows_sink_after_the_3s_uncheck_window',
+      (tester) async {
+    await buildChecklistFixture();
+    await pumpPlanBoard(tester);
+
+    // Derived default: an all-Open plan is a checklist (the tooltip
+    // names the mode), with no completed section yet.
+    expect(find.byTooltip('Checklist mode'), findsOneWidget);
+    expect(find.byKey(const Key('completed-section')), findsNothing);
+
+    final topBefore = rowTop(tester, 'p');
+    await tester.tap(find.byKey(const Key('check-p')));
+    await tester.pump();
+
+    // Inside the window the row keeps its place — no section, same spot.
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+    expect(find.byKey(const Key('completed-section')), findsNothing);
+    expect(rowTop(tester, 'p'), moreOrLessEquals(topBefore, epsilon: 1.0));
+
+    // The window elapses → the row sinks UNDER the Completed header,
+    // below every unchecked row.
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const Key('completed-section')), findsOneWidget);
+    expect(find.text('Completed'), findsOneWidget);
+    final headerTop =
+        tester.getRect(find.byKey(const Key('completed-section'))).top;
+    expect(rowTop(tester, 'p'), greaterThan(headerTop));
+    expect(rowTop(tester, 'q'), lessThan(headerTop));
+    expect(rowTop(tester, 'r'), lessThan(headerTop));
+
+    controller.dispose();
+    await store.close();
+  });
+
+  testWidgets('un_check_within_the_window_keeps_the_row_in_place',
+      (tester) async {
+    await buildChecklistFixture();
+    await pumpPlanBoard(tester);
+    final topBefore = rowTop(tester, 'q');
+
+    await tester.tap(find.byKey(const Key('check-q')));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1)); // still inside the window
+    await tester.tap(find.byKey(const Key('check-q'))); // un-check = undo
+    await tester.pump();
+    expect(controller.session.isCompleted('q'), isFalse);
+
+    // Well past the original 3-second mark: the aborted window never
+    // fires — the row never moved and no section appears.
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const Key('completed-section')), findsNothing);
+    expect(rowTop(tester, 'q'), moreOrLessEquals(topBefore, epsilon: 1.0));
+
+    controller.dispose();
+    await store.close();
+  });
+
+  testWidgets('chain_mode_rows_never_move', (tester) async {
+    await buildSimpleFixture(); // two 60s defs → CHAIN (derived)
+    await pumpPlanBoard(tester);
+    expect(find.byTooltip('Chain mode'), findsOneWidget);
+
+    final topBefore = rowTop(tester, 'x');
+    await tester.tap(find.byKey(const Key('check-x')));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // Never a section, never a move — the mark itself stands.
+    expect(find.byKey(const Key('completed-section')), findsNothing);
+    expect(rowTop(tester, 'x'), moreOrLessEquals(topBefore, epsilon: 1.0));
+    expect(controller.session.isCompleted('x'), isTrue);
+
+    controller.dispose();
+    await store.close();
+  });
+
+  testWidgets('derived_default_mixed_plan_is_chain', (tester) async {
+    // The main fixture mixes durations with one Open interval → chain.
+    await pumpPlanBoard(tester);
+    expect(find.byTooltip('Chain mode'), findsOneWidget);
+
+    final topBefore = rowTop(tester, 'a');
+    await tester.tap(find.byKey(const Key('check-a')));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const Key('completed-section')), findsNothing);
+    expect(rowTop(tester, 'a'), moreOrLessEquals(topBefore, epsilon: 1.0));
+
+    controller.dispose();
+    await store.close();
+  });
+
+  testWidgets('btn_checklist_overrides_the_derived_mode', (tester) async {
+    await buildChecklistFixture();
+    await pumpPlanBoard(tester);
+    expect(find.byTooltip('Checklist mode'), findsOneWidget);
+
+    // One tap: the override flips the all-Open plan to chain behavior.
+    await tester.tap(find.byKey(const Key('btn-checklist')));
+    await tester.pump();
+    expect(find.byTooltip('Chain mode'), findsOneWidget);
+
+    final topBefore = rowTop(tester, 'p');
+    await tester.tap(find.byKey(const Key('check-p')));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const Key('completed-section')), findsNothing);
+    expect(rowTop(tester, 'p'), moreOrLessEquals(topBefore, epsilon: 1.0));
+
+    // Flip back: the standing mark has spent its window — it sits in
+    // the completed section right away.
+    await tester.tap(find.byKey(const Key('btn-checklist')));
+    await tester.pump();
+    expect(find.byTooltip('Checklist mode'), findsOneWidget);
+    expect(find.byKey(const Key('completed-section')), findsOneWidget);
+    expect(
+      rowTop(tester, 'p'),
+      greaterThan(
+        tester.getRect(find.byKey(const Key('completed-section'))).top,
+      ),
+    );
+
+    controller.dispose();
+    await store.close();
+  });
+
+  testWidgets('show_hide_completed_toggles_the_section_in_checklist',
+      (tester) async {
+    await buildChecklistFixture();
+    await pumpPlanBoard(tester);
+    expect(find.byKey(const Key('btn-toggle-completed')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('check-p')));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const Key('completed-section')), findsOneWidget);
+    expect(find.byKey(const Key('row-p')), findsOneWidget);
+
+    // Hide: the section (header + sunk rows) goes; live rows stay.
+    await tester.tap(find.byKey(const Key('btn-toggle-completed')));
+    await tester.pump();
+    expect(find.byKey(const Key('completed-section')), findsNothing);
+    expect(find.byKey(const Key('row-p')), findsNothing);
+    expect(find.byKey(const Key('row-q')), findsOneWidget);
+
+    // Show again (default: shown): back it comes.
+    await tester.tap(find.byKey(const Key('btn-toggle-completed')));
+    await tester.pump();
+    expect(find.byKey(const Key('completed-section')), findsOneWidget);
+    expect(find.byKey(const Key('row-p')), findsOneWidget);
+
+    controller.dispose();
+    await store.close();
+  });
+
+  testWidgets('show_hide_completed_hides_rows_immediately_in_chain',
+      (tester) async {
+    await buildSimpleFixture();
+    await pumpPlanBoard(tester);
+    await tester.tap(find.byKey(const Key('check-x')));
+    await tester.pump();
+
+    // Chain: no section ever — the toggle hides the marked row where it
+    // stands, with no sinking delay.
+    await tester.tap(find.byKey(const Key('btn-toggle-completed')));
+    await tester.pump();
+    expect(find.byKey(const Key('completed-section')), findsNothing);
+    expect(find.byKey(const Key('row-x')), findsNothing);
+    expect(find.byKey(const Key('row-y')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('btn-toggle-completed')));
+    await tester.pump();
+    expect(find.byKey(const Key('row-x')), findsOneWidget);
+
+    controller.dispose();
+    await store.close();
+  });
+
+  testWidgets('run_controls_present_on_all_open_plan', (tester) async {
+    await buildChecklistFixture();
+    await pumpPlanBoard(tester);
+
+    // The standard control row survives on an all-Open plan (P3.3
+    // rule 4): adjust, reset, skip — every run control on every timer.
+    expect(find.byKey(const Key('control-row')), findsOneWidget);
+    for (final id in ['btn-adjust', 'btn-reset', 'btn-skip']) {
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('control-row')),
+          matching: find.byKey(Key(id)),
+        ),
+        findsOneWidget,
+        reason: 'run controls stay on all-Open timers ($id)',
+      );
+    }
+    expect(
+      tester.widget<IconButton>(find.byKey(const Key('btn-reset'))).onPressed,
+      isNotNull,
+    );
+
+    // Functional: the readout tap starts the run like on any timer (the
+    // first Open item holds at once — the walk-the-holds semantics).
+    await tester.tap(find.byKey(const Key('readout')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(controller.snapshot.state, isNot(SessionState.notStarted));
+    expect(find.byKey(const Key('control-row')), findsOneWidget);
 
     controller.dispose();
     await store.close();

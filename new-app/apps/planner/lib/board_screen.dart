@@ -67,6 +67,34 @@ class _BoardScreenState extends State<BoardScreen> {
   /// instance"); a build whose cursor differs re-centers post-frame.
   int? _centeredOrdinal;
 
+  // ── v2 P3.3: checklist mode ──────────────────────────────────────────
+
+  /// The board's mode override (P3.3 rule 1): null = the DERIVED default
+  /// ([_derivedChecklist] — all-Open → checklist, any duration → chain).
+  /// Session-only for v2-shallow: reopening the plan board derives fresh.
+  /// TODO(micro): persist the override on the plan once the schema has a
+  /// spare field for it.
+  bool? _checklistOverride;
+
+  /// Whether the completed section renders at all — the plan bar's
+  /// `btn-toggle-completed`, shown by default.
+  bool _showCompleted = true;
+
+  /// Rows past their 3-second un-check window (node ids — a def sinks
+  /// alone, a whole group as one unit): the completed section's members
+  /// while the board is in checklist mode.
+  final Set<String> _sunkNodeIds = {};
+
+  /// Rows checked but still inside the un-check window: node id → the
+  /// pending sink timer. Canceled by an un-check, by [dispose], and
+  /// whenever the board leaves checklist mode.
+  final Map<String, Timer> _sinkTimers = {};
+
+  /// The first checklist build happened: marks that PREDATE this board
+  /// (or this mode) have spent their un-check window elsewhere, so they
+  /// land straight in the completed section instead of waiting again.
+  bool _sinksInitialized = false;
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -204,7 +232,7 @@ class _BoardScreenState extends State<BoardScreen> {
         // row's box, wherever the user has browsed).
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: _treeRows(controller.tree.roots, occurrences, snapshot),
+          children: _listRows(controller.tree.roots, occurrences, snapshot),
         ),
       ),
     );
@@ -304,6 +332,133 @@ class _BoardScreenState extends State<BoardScreen> {
         rows[i],
       ],
     ];
+  }
+
+  /// v2 P3.3 — the top-level row ORDER under the board's mode. CHAIN
+  /// rows never move (sinking would wreck the chain display) — there the
+  /// visibility toggle only HIDES completed rows, immediately. CHECKLIST
+  /// rows split into the live list and the sunk `Completed` section once
+  /// a row's 3-second un-check window has elapsed; inside the window a
+  /// checked row keeps its place (clicking again undoes the check).
+  List<Widget> _listRows(
+    List<IntervalNode> nodes,
+    Map<String, List<int>> occurrences,
+    TimerSnapshot snapshot,
+  ) {
+    _syncSinkState(nodes);
+    if (!_checklistMode) {
+      // Chain: in place forever; hide = drop the marked rows outright.
+      return _treeRows(
+        _showCompleted
+            ? nodes
+            : [for (final n in nodes) if (!_nodeCompleted(n)) n],
+        occurrences,
+        snapshot,
+      );
+    }
+    final live = <IntervalNode>[];
+    final completed = <IntervalNode>[];
+    for (final node in nodes) {
+      if (!_sunkNodeIds.contains(node.id)) {
+        live.add(node); // unchecked OR still inside the un-check window
+      } else if (_showCompleted) {
+        completed.add(node);
+      } // sunk + hidden → dropped (the visibility toggle's job)
+    }
+    final rows = _treeRows(live, occurrences, snapshot);
+    if (completed.isEmpty) return rows;
+    return [
+      ...rows,
+      if (rows.isNotEmpty) const SizedBox(height: 16),
+      const Text(
+        'Completed',
+        key: Key('completed-section'),
+        style: TextStyle(
+          fontFamily: AppFonts.ui,
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: AppColors.dimmed,
+          letterSpacing: 1.5,
+        ),
+      ),
+      const SizedBox(height: 8),
+      ..._treeRows(completed, occurrences, snapshot),
+    ];
+  }
+
+  /// P3.3 rule 1 — the DERIVED default: a plan whose intervals are ALL
+  /// Open (no duration) acts like a task list; a single duration
+  /// anywhere keeps the chain.
+  bool get _derivedChecklist => [
+    for (final node in controller.tree.allNodes)
+      if (node is DefNode) node.def,
+  ].every((d) => d.isOpen);
+
+  /// The effective mode: the derived default unless `btn-checklist`
+  /// flipped it this session.
+  bool get _checklistMode => _checklistOverride ?? _derivedChecklist;
+
+  /// Whether a top-level row is DONE: a def with its completion mark, a
+  /// group whose whole subtree is marked (an empty group never is — its
+  /// circle is decorative).
+  bool _nodeCompleted(IntervalNode node) {
+    final ids = switch (node) {
+      DefNode(:final def) => [def.id],
+      GroupNode(:final children) => _subtree(children, const {}).defIds,
+    };
+    return ids.isNotEmpty && ids.every(controller.session.isCompleted);
+  }
+
+  /// P3.3 — reconcile the sink bookkeeping against the session marks on
+  /// every board build (marks change through the controller, and each
+  /// change notifies): a row checked DURING this checklist session
+  /// starts its 3-second un-check window here; clicking again inside
+  /// the window cancels it, and once it elapses the row joins the
+  /// completed section. Chain mode drops the bookkeeping entirely — its
+  /// rows never move.
+  void _syncSinkState(List<IntervalNode> nodes) {
+    if (!_checklistMode) {
+      for (final timer in _sinkTimers.values) {
+        timer.cancel();
+      }
+      _sinkTimers.clear();
+      _sunkNodeIds.clear();
+      _sinksInitialized = false;
+      return;
+    }
+    if (!_sinksInitialized) {
+      for (final node in nodes) {
+        if (_nodeCompleted(node)) _sunkNodeIds.add(node.id);
+      }
+      _sinksInitialized = true;
+    }
+    final live = <String>{};
+    for (final node in nodes) {
+      final id = node.id;
+      live.add(id);
+      if (_nodeCompleted(node)) {
+        if (_sunkNodeIds.contains(id) || _sinkTimers.containsKey(id)) {
+          continue; // already sunk, or the window is running
+        }
+        _sinkTimers[id] = Timer(const Duration(seconds: 3), () {
+          _sinkTimers.remove(id);
+          if (!mounted) return;
+          setState(() => _sunkNodeIds.add(id));
+        });
+      } else {
+        // Un-checked: abort a running window (the row keeps its place)
+        // or pull the row back out of the completed section.
+        _sinkTimers.remove(id)?.cancel();
+        _sunkNodeIds.remove(id);
+      }
+    }
+    // Rows the editor dropped take their bookkeeping with them.
+    _sinkTimers.removeWhere((id, timer) {
+      if (live.contains(id)) return false;
+      timer.cancel();
+      return true;
+    });
+    _sunkNodeIds.removeWhere((id) => !live.contains(id));
   }
 
   /// One authored interval: completion checkbox | chip card whose duration
@@ -847,6 +1002,11 @@ class _BoardScreenState extends State<BoardScreen> {
 
   /// P3.1 — a plan board's bar (P3.2): home pops to the board root (the
   /// Library goes with it), back pops one level to the Library.
+  ///
+  /// v2 P3.3 — the checklist affordances: `btn-checklist` flips the
+  /// board's mode (tooltip names the CURRENT mode; the default is the
+  /// derived one), and `btn-toggle-completed` shows/hides the completed
+  /// section (shown by default).
   Widget _planBar(BuildContext context) {
     return BottomBar(
       key: const Key('plan-bar'),
@@ -860,6 +1020,21 @@ class _BoardScreenState extends State<BoardScreen> {
           buttonKey: const Key('bar-back'),
           icon: Icons.arrow_back,
           onPressed: () => Navigator.of(context).pop(),
+        ),
+        Tooltip(
+          message: _checklistMode ? 'Checklist mode' : 'Chain mode',
+          child: BarButton(
+            buttonKey: const Key('btn-checklist'),
+            icon: _checklistMode ? Icons.checklist : Icons.link,
+            onPressed: () => setState(() {
+              _checklistOverride = !_checklistMode;
+            }),
+          ),
+        ),
+        BarButton(
+          buttonKey: const Key('btn-toggle-completed'),
+          icon: _showCompleted ? Icons.visibility : Icons.visibility_off,
+          onPressed: () => setState(() => _showCompleted = !_showCompleted),
         ),
       ],
     );
@@ -1070,6 +1245,10 @@ class _BoardScreenState extends State<BoardScreen> {
 
   @override
   void dispose() {
+    for (final timer in _sinkTimers.values) {
+      timer.cancel(); // P3.3: no sink fires on a disposed board
+    }
+    _sinkTimers.clear();
     _listScroll.dispose();
     super.dispose();
   }
