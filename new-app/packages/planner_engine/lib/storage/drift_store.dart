@@ -828,6 +828,27 @@ class DriftStore implements Store {
     return next;
   }
 
+  // ── settings (v2 P5.2) ──────────────────────────────────────────────────
+
+  @override
+  Future<String?> getSetting(String key) async {
+    final row = await (_db.select(
+      _db.settings,
+    )..where((t) => t.key.equals(key))).getSingleOrNull();
+    return row?.value;
+  }
+
+  @override
+  Future<void> setSetting(String key, String value) => _db.transaction(() async {
+    // Upsert by delete+insert (the shape setDayPlan already uses): one
+    // row per key whatever the write history.
+    await (_db.delete(_db.settings)..where((t) => t.key.equals(key))).go();
+    await _db
+        .into(_db.settings)
+        .insert(SettingsCompanion.insert(key: key, value: value));
+    await _appendEvent('setting.set', {'key': key, 'value': value});
+  });
+
   // ── change log ──────────────────────────────────────────────────────────
 
   @override

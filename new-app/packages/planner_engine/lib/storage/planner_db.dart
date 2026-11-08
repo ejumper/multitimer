@@ -4,7 +4,8 @@
 /// columns are derived from [IntervalTree] positions on save and rebuilt into
 /// tree structure on load. `schemaVersion` + drift migrations exist from day
 /// one: v1 = version 1, v2 (P1.1) = version 2, the Library (P3.2) =
-/// version 3, default rules (P3.4) = version 4, days (P4.1) = version 5.
+/// version 3, default rules (P3.4) = version 4, days (P4.1) = version 5,
+/// settings (P5.2) = version 6.
 ///
 /// The database is opened via an injected `QueryExecutor` — the app supplies
 /// the on-disk opener from `storage/impl/` (the engine's only `dart:io`).
@@ -162,6 +163,21 @@ class Days extends Table {
   Set<Column> get primaryKey => {date};
 }
 
+/// App settings (v2 P5.2): a tiny key/value table — `key` is the setting
+/// name (PK), `value` its opaque TEXT payload (booleans as '1'/'0', the
+/// calendar view as its wire name — typed parsing and defaults are the
+/// APP's business, see the app's `SettingsService`; the engine only ever
+/// stores and hands back strings). One row per key; [DriftStore]
+/// upserts on write.
+@DataClassName('SettingRow')
+class Settings extends Table {
+  TextColumn get key => text()();
+  TextColumn get value => text()();
+
+  @override
+  Set<Column> get primaryKey => {key};
+}
+
 @DriftDatabase(
   tables: [
     Boards,
@@ -172,13 +188,14 @@ class Days extends Table {
     Folders,
     DefaultRules,
     Days,
+    Settings,
   ],
 )
 class PlannerDb extends _$PlannerDb {
   PlannerDb(super.e);
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -193,6 +210,8 @@ class PlannerDb extends _$PlannerDb {
             await _migrate3To4(m);
           case 5:
             await _migrate4To5(m);
+          case 6:
+            await _migrate5To6(m);
         }
       }
     },
@@ -325,5 +344,21 @@ class PlannerDb extends _$PlannerDb {
       'origin_plan_id',
       'ALTER TABLE timers ADD COLUMN origin_plan_id TEXT',
     );
+  }
+
+  /// v6 (P5.2): the `settings` key/value table. Purely additive — the
+  /// same presence-guarded pattern as v2→v3/v3→v4/v4→v5: a
+  /// test-fabricated v5 database carved out of a current-schema file
+  /// (settings dropped beside `user_version`) migrates cleanly too, and
+  /// a carve that KEEPS the table is a no-op instead of a duplicate-
+  /// table failure.
+  Future<void> _migrate5To6(Migrator m) async {
+    final settingsExist = await customSelect(
+      "SELECT name FROM sqlite_master WHERE type = 'table' "
+      "AND name = 'settings'",
+    ).get();
+    if (settingsExist.isEmpty) {
+      await m.createTable(settings);
+    }
   }
 }

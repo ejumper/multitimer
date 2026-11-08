@@ -280,15 +280,15 @@ void main() {
       ],
       reason: 'left→right: Settings · Calendar · Library · New Event',
     );
-    // Library is live since P3.1/P3.2 and Calendar since P4.2 (it pushes
-    // the Calendar page), and New Event since P5.1 (it opens the dated
-    // capture — pinned in event_capture_test); Settings stays
-    // present-but-disabled until its chunk.
+    // Library is live since P3.1/P3.2, Calendar since P4.2 (it pushes
+    // the Calendar page), New Event since P5.1 (it opens the dated
+    // capture — pinned in event_capture_test) and Settings since P5.2
+    // (it pushes the Settings page — pinned in settings_screen_test).
     expect(
       tester
           .widget<IconButton>(find.byKey(const Key('bar-settings')))
           .onPressed,
-      isNull,
+      isNotNull,
     );
     expect(
       tester

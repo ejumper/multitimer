@@ -4,15 +4,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:planner/app_controller.dart';
 import 'package:planner/board_screen.dart';
 import 'package:planner/day_navigation.dart';
+import 'package:planner/settings_service.dart';
 import 'package:planner_engine/planner_engine.dart';
 
 import 'fakes.dart';
 
-/// Home navigation widget tests (v2 P4.3): every bottom-bar home button
-/// lands on TODAY'S day board, with the plain pop-to-the-board-root as
-/// the fallback when nothing claims today. (P5.2's "Home = specific
-/// plan" setting plugs into [homeDayDate]; this chunk adds no setting
-/// UI.)
+/// Home navigation widget tests (v2 P4.3, P5.2-completed): every
+/// bottom-bar home button lands on the Home DEFINITION — TODAY'S day
+/// board by default, the configured SPECIFIC PLAN's board when the P5.2
+/// Home setting names one — with the plain pop-to-the-board-root as the
+/// fallback when nothing claims today. ([homeDayDate] consults the
+/// setting; the Settings page itself is pinned in settings_screen_test.)
 ///
 /// Pinned here: home pressed on the LIBRARY and on a PLAN board pops the
 /// stack to the root and pushes today's board — the claimed plan's rows,
@@ -263,6 +265,53 @@ void main() {
       reason: 'nothing claims today → no day board is pushed',
     );
     expect(find.byKey(const Key('day-gutter-left')), findsNothing);
+    expect(find.byKey(const Key('main-bar')), findsOneWidget);
+
+    controller.dispose();
+    await store.close();
+  });
+
+  // ── P5.2: Home = a specific plan ────────────────────────────────────────
+
+  testWidgets('home_lands_on_the_configured_specific_plan_board', (
+    tester,
+  ) async {
+    await buildFixture(); // today → Errands (the date rule)
+    final day0 = today();
+    // The Home setting names ROUTINE — tellable from Errands' rows AND
+    // from the missing day-board gutters.
+    await store.setSetting(kSettingHomePlanId, routine.id);
+    await pumpRootBoard(tester);
+
+    // The seam itself: today IS claimed by Errands, yet Home resolves
+    // to no DAY board — the plan half of the setting owns the answer.
+    expect(await store.resolveDayPlan(day0), errands.id);
+    expect(await homeDayDate(store, day0), isNull);
+    expect(await homePlanId(store), routine.id);
+
+    await openLibrary(tester);
+    await pressHome(tester, find.byKey(const Key('library-bar')));
+
+    // The stack sits on the root with ROUTINE'S plan board over it: the
+    // plan bar, the plan's own rows, and NO day-board gutters — a plan
+    // home is not a day board.
+    expect(find.byKey(const Key('library-page')), findsNothing);
+    expect(find.byKey(const Key('plan-bar')), findsOneWidget);
+    expect(find.byKey(const Key('row-r1')), findsOneWidget);
+    expect(find.byKey(const Key('row-r2')), findsOneWidget);
+    expect(
+      find.byKey(const Key('day-gutter-left')),
+      findsNothing,
+      reason: 'the specific plan\u2019s board is an ordinary plan board',
+    );
+    expect(
+      await store.dayPlanId(day0),
+      isNull,
+      reason: 'opening the plan home never materializes today',
+    );
+
+    // Back from Home = the board root (the pop happened before the push).
+    await pressBack(tester, find.byKey(const Key('plan-bar')));
     expect(find.byKey(const Key('main-bar')), findsOneWidget);
 
     controller.dispose();

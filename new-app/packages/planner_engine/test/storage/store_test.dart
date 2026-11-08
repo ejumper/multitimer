@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:drift/native.dart';
@@ -583,6 +584,83 @@ void main() {
       await store5.close();
 
       dir.deleteSync(recursive: true);
+    });
+  });
+
+  group('schema v6 migration (P5.2)', () {
+    test('a v5 database gains the settings table', () async {
+      final dir = Directory.systemTemp.createTempSync('planner_migration_v6');
+      final file = File('${dir.path}/mig6.db');
+
+      // Phase 1: a schemaVersion-5 database — the current shape minus
+      // the settings table — with one board + one plan.
+      final v5 = PlannerDb(NativeDatabase(file));
+      await v5.customStatement('DROP TABLE settings');
+      await v5.customStatement(
+        "INSERT INTO boards (id, name) VALUES ('b1', 'My Board')",
+      );
+      await v5.customStatement(
+        'INSERT INTO timers '
+        '(id, board_id, name, color, sort_index, created_at, updated_at) '
+        "VALUES ('t1', 'b1', 'Routine', '#0055ff', 0, 1772000000000, "
+        '1772000000000)',
+      );
+      await v5.customStatement('PRAGMA user_version = 5');
+      await v5.close();
+
+      // Phase 2: reopening under schema v6 runs the 5→6 migration — the
+      // table lands (empty), existing rows are untouched, and settings
+      // read/write work end to end on the migrated database.
+      final v6 = PlannerDb(NativeDatabase(file));
+      final store6 = DriftStore(v6, clock);
+      final migrated = (await store6.timersInBoard('b1')).single;
+      expect(migrated.name, 'Routine');
+      expect(await store6.getSetting('home.planId'), isNull);
+
+      await store6.setSetting('home.planId', 't1');
+      expect(await store6.getSetting('home.planId'), 't1');
+      await store6.close();
+
+      // The write SURVIVES a reopen — persisted, not in-memory.
+      final reopened = DriftStore(PlannerDb(NativeDatabase(file)), clock);
+      expect(await reopened.getSetting('home.planId'), 't1');
+      await reopened.close();
+
+      dir.deleteSync(recursive: true);
+    });
+  });
+
+  group('settings round-trip (P5.2)', () {
+    test('get/set: unset → null, upsert keeps one row per key', () async {
+      expect(await store.getSetting('calendar.defaultView'), isNull);
+
+      await store.setSetting('calendar.defaultView', 'week');
+      expect(await store.getSetting('calendar.defaultView'), 'week');
+
+      // Upsert: the same key is REPLACED, never doubled.
+      await store.setSetting('calendar.defaultView', 'month');
+      expect(await store.getSetting('calendar.defaultView'), 'month');
+      expect(await db.select(db.settings).get(), hasLength(1));
+
+      // Keys are independent of each other.
+      await store.setSetting('home.planId', 't-42');
+      expect(await store.getSetting('home.planId'), 't-42');
+      expect(await store.getSetting('calendar.defaultView'), 'month');
+      expect(await db.select(db.settings).get(), hasLength(2));
+    });
+
+    test('every write appends one setting.set change-log event', () async {
+      await store.setSetting('event.overridesDefault', '1');
+      await store.setSetting('event.overridesDefault', '0');
+
+      final settingsEvents = [
+        for (final e in await store.events())
+          if (e.kind == 'setting.set') e,
+      ];
+      expect(settingsEvents, hasLength(2));
+      final payload =
+          jsonDecode(settingsEvents.last.payloadJson) as Map<String, dynamic>;
+      expect(payload, {'key': 'event.overridesDefault', 'value': '0'});
     });
   });
 

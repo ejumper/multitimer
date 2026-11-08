@@ -11,6 +11,7 @@ import 'package:planner/event_capture.dart';
 import 'package:planner/interval_editor.dart';
 import 'package:planner/interval_rows.dart';
 import 'package:planner/keyboard_nav.dart';
+import 'package:planner/settings_service.dart';
 import 'package:planner_engine/planner_engine.dart';
 
 import 'fakes.dart';
@@ -18,7 +19,9 @@ import 'fakes.dart';
 /// P5.1 NEW EVENT quick capture — the pinned widget tests:
 ///
 /// * event-mode layout: Time seeded ON, the `dd mm yy` Date boxes between
-///   the label and the toggles, Overwrite Default Timer FIRST and OFF;
+///   the label and the toggles, Overwrite Default Timer FIRST and OFF
+///   (P5.2 seeds it from the New events override setting — the seeded-ON
+///   flow pins the same toggle);
 /// * **Save** inserts the event at the TOP of the target day's plan and
 ///   closes; **Save & edit timer** additionally opens that day's board
 ///   with the timer editor focused on the new interval;
@@ -278,6 +281,41 @@ void main() {
     // … and both commit buttons replace the plain commit.
     expect(find.byKey(const Key('ie-save')), findsOneWidget);
     expect(find.byKey(const Key('ie-save-edit')), findsOneWidget);
+
+    controller.dispose();
+    await store.close();
+  });
+
+  // ── P5.2: the Overwrite toggle's settings seed ──────────────────────────
+
+  testWidgets('overwrite_toggle_seeds_from_the_settings', (tester) async {
+    // The New events override default ON — the capture must open with
+    // its first option toggle already flipped …
+    await store.setSetting(kSettingEventOverridesDefault, '1');
+    await pumpRootBoard(tester);
+    await openCapture(tester); // settle rounds — the seed lands
+
+    expect(
+      tester.widget<Switch>(find.byKey(const Key('ie-overwrite'))).value,
+      isTrue,
+      reason: 'the setting seeds the capture\u2019s Overwrite toggle',
+    );
+
+    // … and it DRIVES the save: Overwrite ON replaces the day’s plan
+    // with the new single-interval timer.
+    await tester.enterText(find.byKey(const Key('ie-label')), 'Dentist');
+    await tapCommit(tester, 'ie-save');
+
+    expect(find.byType(IntervalEditorScreen), findsNothing, reason: 'closed');
+    final planId = await planIdOf(today());
+    expect(planId, isNotNull);
+    final tree = await store.loadTree(planId!);
+    expect(
+      [for (final n in tree.roots) (n as DefNode).def.name],
+      ['Dentist'],
+      reason: 'overwrite ON replaced the day plan with just the event',
+    );
+    await expectLibraryUntouched();
 
     controller.dispose();
     await store.close();

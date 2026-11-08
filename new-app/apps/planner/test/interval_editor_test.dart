@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:planner/editor_controller.dart';
 import 'package:planner/interval_editor.dart';
+import 'package:planner/settings_service.dart';
 import 'package:planner/theme.dart';
 import 'package:planner_engine/planner_engine.dart';
 
@@ -88,6 +89,15 @@ void main() {
 
   /// The committed def behind [id] in the working tree.
   IntervalDef defOf(String id) => (controller.tree.nodeById(id) as DefNode).def;
+
+  /// Bounded settle — the editor's async P5.2 settings seed lands within
+  /// a few pump rounds (no ticker on this surface).
+  Future<void> settle(WidgetTester tester) async {
+    for (var i = 0; i < 5; i++) {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+  }
 
   // 4. Name-only create: back commits the label with the coerced 60s
   //    default (IntervalDef requires duration > 0).
@@ -500,5 +510,80 @@ void main() {
       (controller.tree.nodeById('g1') as GroupNode).group.repeatCount,
       1,
     );
+  });
+
+  // ── P5.2: the Interval Options defaults seed CREATE ────────────────
+
+  Switch toggleOf(WidgetTester tester, String key) =>
+      tester.widget<Switch>(find.byKey(Key(key)));
+
+  // CREATE reads the configured defaults instead of the hard-coded
+  // P1.5 shapes — and the seeded state is what COMMITS.
+  testWidgets('create_seeds_the_interval_option_defaults_from_settings', (
+    tester,
+  ) async {
+    useTallSurface(tester); // Time default ON grows the editor
+    await store.setSetting(kSettingIntervalAutoFinish, '1');
+    await store.setSetting(kSettingIntervalTime, '1');
+    controller.dispose();
+    controller = await buildEditor(const IntervalTree([]));
+    await pumpEditor(tester);
+    await settle(tester);
+
+    expect(toggleOf(tester, 'ie-autofinish').value, isTrue);
+    expect(toggleOf(tester, 'ie-duration-toggle').value, isTrue); // default
+    expect(toggleOf(tester, 'ie-time-toggle').value, isTrue);
+    expect(
+      find.byKey(const Key('ie-time-hh')),
+      findsOneWidget,
+      reason: 'the Time default ON shows its setter',
+    );
+
+    // The seeded state lands on the committed def.
+    await tester.enterText(find.byKey(const Key('ie-label')), 'Focus');
+    await tester.ensureVisible(find.byKey(const Key('ie-back')));
+    await tester.tap(find.byKey(const Key('ie-back')));
+    await tester.pumpAndSettle();
+
+    final def = (controller.tree.roots.single as DefNode).def;
+    expect(def.name, 'Focus');
+    expect(def.autoFinish, isTrue);
+    expect(def.durationSeconds, 60); // Duration default ON, empty boxes → 60s
+    expect(def.triggerTimeSeconds, 0); // seeded 00:00 boxes
+  });
+
+  // Duration default OFF + Auto-finish default ON is the invalid pair
+  // (the engine contract) — the seed normalizes it: Open, manual, the
+  // Auto-finish cell grayed out like any other Duration-OFF open.
+  testWidgets('duration_default_off_seeds_open_and_normalizes_auto_finish', (
+    tester,
+  ) async {
+    await store.setSetting(kSettingIntervalDuration, '0');
+    await store.setSetting(kSettingIntervalAutoFinish, '1');
+    controller.dispose();
+    controller = await buildEditor(const IntervalTree([]));
+    await pumpEditor(tester);
+    await settle(tester);
+
+    expect(toggleOf(tester, 'ie-duration-toggle').value, isFalse);
+    final autoFinish = toggleOf(tester, 'ie-autofinish');
+    expect(autoFinish.value, isFalse); // normalized off
+    expect(autoFinish.onChanged, isNull); // grayed with Duration OFF
+    expect(find.byKey(const Key('ie-hr')), findsNothing); // Open: no setter
+  });
+
+  // EDIT keeps seeding from the DEF — configured defaults that
+  // contradict it never rewrite an existing interval's shape.
+  testWidgets('edit_still_seeds_from_the_def_not_the_settings', (tester) async {
+    await store.setSetting(kSettingIntervalDuration, '0'); // def HAS one
+    await store.setSetting(kSettingIntervalAutoFinish, '1'); // def is manual
+    await store.setSetting(kSettingIntervalTime, '1'); // def is order-triggered
+    await pumpEditor(tester, defId: 'a'); // break / 60s / manual / no trigger
+    await settle(tester);
+
+    expect(toggleOf(tester, 'ie-duration-toggle').value, isTrue);
+    expect(toggleOf(tester, 'ie-autofinish').value, isFalse);
+    expect(toggleOf(tester, 'ie-time-toggle').value, isFalse);
+    expect(find.byKey(const Key('ie-time-hh')), findsNothing);
   });
 }

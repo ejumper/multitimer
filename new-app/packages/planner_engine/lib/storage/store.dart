@@ -161,6 +161,16 @@ abstract interface class Store {
   /// nothing claims the day).
   Future<int> dayItemCount(DateTime date);
 
+  // ── settings (v2 P5.2) ──────────────────────────────────────────────────
+  /// The stored value for [key], or null when no such setting exists.
+  /// Opaque TEXT — typed parsing and defaults are the APP's business.
+  Future<String?> getSetting(String key);
+
+  /// Upserts [key] to [value] (one row per key — the previous value is
+  /// replaced) inside one transaction and appends one `setting.set`
+  /// change-log event, like every other mutation.
+  Future<void> setSetting(String key, String value);
+
   // ── change log ──────────────────────────────────────────────────────────
   /// All events, oldest first (insertion order).
   Future<List<EventLogEntry>> events();

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:planner/app_controller.dart';
 import 'package:planner/board_screen.dart';
+import 'package:planner/settings_service.dart';
 import 'package:planner/theme.dart';
 import 'package:planner_engine/planner_engine.dart';
 
@@ -446,6 +447,34 @@ void main() {
               .icon as Icon)
           .icon!,
       Icons.calendar_view_week,
+    );
+
+    controller.dispose();
+    await store.close();
+  });
+
+  // ── P5.2: the Calendar default view setting ──────────────────────────
+
+  testWidgets('calendar_opens_in_the_configured_default_view', (tester) async {
+    // "set it to month in the settings" — the INITIAL view comes from
+    // the setting, no toggle tap involved.
+    await store.setSetting(kSettingCalendarDefaultView, kCalendarViewMonth);
+    await pumpBoard(tester);
+    await openCalendar(tester);
+
+    expect(dayRows(), findsNWidgets(daysInMonth(today())));
+    expect(
+      (tester
+              .widget<IconButton>(find.byKey(const Key('bar-view-toggle')))
+              .icon as Icon)
+          .icon!,
+      Icons.calendar_view_month,
+      reason: 'the toggle names the configured view',
+    );
+    // A day outside the default week proves the MONTH range landed.
+    expect(
+      find.byKey(Key('day-${iso(addDays(today(), 7))}')),
+      findsOneWidget,
     );
 
     controller.dispose();

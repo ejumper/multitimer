@@ -6,6 +6,7 @@ import 'package:planner_engine/planner_engine.dart';
 import 'app_controller.dart';
 import 'bottom_bar.dart';
 import 'day_navigation.dart';
+import 'settings_service.dart';
 import 'theme.dart';
 
 /// The Calendar page (v2 P4.2): the outline's calendar view — a LIST OF
@@ -52,8 +53,9 @@ class CalendarScreen extends StatefulWidget {
   State<CalendarScreen> createState() => _CalendarScreenState();
 }
 
-/// Which list the page renders (P4.2: week is the default; a later
-/// settings chunk flips the default).
+/// Which list the page renders (P4.2: week is the default; P5.2's
+/// Calendar default view setting picks the INITIAL one — week when
+/// unset).
 enum _CalendarView { week, month }
 
 class _CalendarScreenState extends State<CalendarScreen> {
@@ -89,10 +91,29 @@ class _CalendarScreenState extends State<CalendarScreen> {
   /// Library's plan-open guard).
   bool _openingDay = false;
 
+  /// Whether the view toggle was pressed before the P5.2 settings read
+  /// landed — the configured default must never clobber a click.
+  bool _viewTouched = false;
+
   @override
   void initState() {
     super.initState();
     _focus = _today;
+    unawaited(_initFromSettings());
+  }
+
+  /// P5.2 — the INITIAL view comes from the Calendar default view
+  /// setting (week when unset), read fresh at open; the count batch
+  /// follows so the first ready frame renders the configured range.
+  Future<void> _initFromSettings() async {
+    final settings = SettingsService(controller.store);
+    await settings.load();
+    if (!mounted || _viewTouched) return;
+    setState(() {
+      _view = settings.calendarDefaultView == kCalendarViewMonth
+          ? _CalendarView.month
+          : _CalendarView.week;
+    });
     unawaited(_reload());
   }
 
@@ -153,6 +174,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
   }
 
   void _toggleView() {
+    _viewTouched = true; // the user chose — the settings seed stands down
     setState(() {
       _view = _view == _CalendarView.week
           ? _CalendarView.month

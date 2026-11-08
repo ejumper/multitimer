@@ -12,6 +12,7 @@ import 'editor_controller.dart';
 import 'event_capture.dart';
 import 'format.dart';
 import 'keyboard_nav.dart';
+import 'settings_service.dart';
 import 'theme.dart';
 
 /// The per-interval editor (P4.3, UI-REFERENCE item 6 minus the keypad,
@@ -38,8 +39,9 @@ import 'theme.dart';
 /// seeds **Time ON** (dated), and between the label field and the option
 /// toggles sit the **Date** boxes (`dd mm yy`, seeded from
 /// [EventCapture.initialDate], validated into a real day at save) and the
-/// first option toggle **Overwrite Default Timer** (OFF until P5.2's
-/// setting seeds this seam). Commit runs through [EventCapture.save]:
+/// first option toggle **Overwrite Default Timer** (seeded at open by
+/// P5.2's New events override default — OFF by default). Commit runs
+/// through [EventCapture.save]:
 /// **Save** — and the header back / Escape, the back-commit rule carries
 /// over — closes on success; **Save & edit timer** additionally opens
 /// that day's board with the timer editor focused on the new interval.
@@ -63,11 +65,12 @@ import 'theme.dart';
 ///   survives.
 ///
 /// Defaults at open: CREATE seeds the timer's color, Auto-finish OFF,
-/// **Duration ON**, **Time OFF** (the hard-coded P1.5 defaults — P5.2
-/// settings will feed this seam), an empty label, `00` boxes, and the
-/// FIRST file of [soundListing] sorted alphabetically as the end alert
-/// (null when the listing is empty — the MultiTimer-faithful default
-/// alert); EDIT seeds everything from the def.
+/// **Duration ON**, **Time OFF** — the P5.2 Interval Options defaults
+/// read from the settings at open ([_seedFromSettings]; an empty
+/// settings table answers exactly these) — an empty label, `00` boxes,
+/// and the FIRST file of [soundListing] sorted alphabetically as the end
+/// alert (null when the listing is empty — the MultiTimer-faithful
+/// default alert); EDIT seeds everything from the def.
 class IntervalEditorScreen extends StatefulWidget {
   const IntervalEditorScreen({
     super.key,
@@ -225,15 +228,21 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
   /// The P1.5 property toggles: Duration (ON = the duration setter shows
   /// and the commit writes a duration; OFF = Open) and Time (ON = the
   /// `HH|MM` setter shows and the commit writes `triggerTimeSeconds`;
-  /// OFF = order-triggered). Hard-coded defaults until P5.2 settings.
+  /// OFF = order-triggered). CREATE seeds them from the P5.2 Interval
+  /// Options defaults (the P1.5 hard-coded shapes — empty settings).
   late bool _durationOn;
   late bool _timeOn;
 
   String? _endAlertSoundFile;
 
-  /// Event mode (P5.1): the "Overwrite Default Timer" toggle — OFF until
-  /// P5.2's settings value seeds this seam.
+  /// Event mode (P5.1): the "Overwrite Default Timer" toggle — seeded at
+  /// open by P5.2's New events override default (OFF by default).
   late bool _overwrite;
+
+  /// Whether the user flipped any of the four option toggles this
+  /// session — the async P5.2 settings seed ([_seedFromSettings]) never
+  /// clobbers a choice made before it lands.
+  bool _optionsTouched = false;
 
   /// The capture's double-tap guard across its async store chain.
   bool _saving = false;
@@ -271,9 +280,10 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
     if (def == null) {
       // CREATE: `00` boxes, the timer's color, Auto-finish OFF (acceptance
       // "Auto-finish off by default"), **Duration ON / Time OFF** (the
-      // hard-coded P1.5 defaults — the P5.2 settings seam feeds these),
-      // and the LAST USED sound as the end alert (falling back to the
-      // first file alphabetically; empty listing → no alert).
+      // P1.5 defaults the P5.2 Interval Options settings overwrite —
+      // [_seedFromSettings] lands the configured values right after
+      // open), and the LAST USED sound as the end alert (falling back to
+      // the first file alphabetically; empty listing → no alert).
       _hr = TextEditingController(text: '00');
       _min = TextEditingController(text: '00');
       _sec = TextEditingController(text: '00');
@@ -321,8 +331,9 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
       _endAlertSoundFile = def.endAlertSoundFile;
     }
     // Event mode (P5.1): the date boxes seed the target day and the
-    // Overwrite toggle starts OFF; interval mode leaves the boxes empty
-    // (they never render without a capture).
+    // Overwrite toggle starts at its configured default (OFF until the
+    // setting says otherwise — [_seedFromSettings]); interval mode leaves
+    // the boxes empty (they never render without a capture).
     final initial = widget.capture?.initialDate;
     _dateDd = TextEditingController(
       text: initial == null ? '' : initial.day.toString().padLeft(2, '0'),
@@ -336,6 +347,35 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
           : (initial.year % 100).toString().padLeft(2, '0'),
     );
     _overwrite = false;
+    unawaited(_seedFromSettings());
+  }
+
+  /// P5.2 — the settings half of the open-time seed, applied once the
+  /// store read lands: CREATE's option toggles take the Interval Options
+  /// defaults, and EVENT MODE's Overwrite toggle takes the New events
+  /// override default. EDIT returns untouched — a settings default never
+  /// rewrites an EXISTING interval's shape (an edit seeds from the def).
+  /// Two rules ride along: EVENT MODE keeps Time ON whatever the Time
+  /// default says (a captured event is dated from the first moment —
+  /// the outline's New Events rule), and Auto-finish is normalized OFF
+  /// when the Duration seed is OFF (the engine's auto-finish-requires-a-
+  /// duration contract — the settings page keeps the pair valid too). A
+  /// toggle the user already flipped is never clobbered.
+  Future<void> _seedFromSettings() async {
+    final store = widget.capture?.source.store ?? widget.controller?.store;
+    // EDIT (and a missing seam — the constructor asserts keep one alive):
+    // seeds from the def, never from the settings — no store read at all.
+    if (store == null || _def != null) return;
+    final settings = SettingsService(store);
+    await settings.load();
+    if (!mounted || _optionsTouched) return;
+    setState(() {
+      _autoFinish = settings.intervalAutoFinish;
+      _durationOn = settings.intervalDuration;
+      if (!_eventMode) _timeOn = settings.intervalTime;
+      if (!_durationOn) _autoFinish = false;
+      if (_eventMode) _overwrite = settings.eventOverridesDefault;
+    });
   }
 
   /// EDIT mode only: the def behind [defId]; not a DefNode → loud failure
@@ -473,13 +513,13 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
           // The engine contract: auto-finish requires a duration — it
           // stays forced off while Duration is OFF (the cell is disabled
           // too, so this is belt and braces).
-          if (_durationOn) setState(() => _autoFinish = !_autoFinish);
+          if (_durationOn) _setAutoFinish(!_autoFinish);
         } else if (id == 'ie-duration-toggle') {
           _setDurationOn(!_durationOn);
         } else if (id == 'ie-time-toggle') {
           _setTimeOn(!_timeOn);
         } else if (id == 'ie-overwrite') {
-          setState(() => _overwrite = !_overwrite);
+          _setOverwrite(!_overwrite);
         }
         return KeyEventResult.handled;
       }
@@ -487,13 +527,13 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
           key == LogicalKeyboardKey.arrowRight) {
         final on = key == LogicalKeyboardKey.arrowRight;
         if (id == 'ie-autofinish') {
-          if (_durationOn) setState(() => _autoFinish = on);
+          if (_durationOn) _setAutoFinish(on);
         } else if (id == 'ie-duration-toggle') {
           _setDurationOn(on);
         } else if (id == 'ie-time-toggle') {
           _setTimeOn(on);
         } else if (id == 'ie-overwrite') {
-          setState(() => _overwrite = on);
+          _setOverwrite(on);
         }
         return KeyEventResult.handled;
       }
@@ -617,7 +657,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
             id: 'ie-overwrite',
             row: 0,
             col: 0,
-            activate: () => setState(() => _overwrite = !_overwrite),
+            activate: () => _setOverwrite(!_overwrite),
           ),
         NavCell(
           id: 'ie-autofinish',
@@ -626,7 +666,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
           // Grays out with Duration OFF (P1.5): an Open interval always
           // holds manually, so the cell is unreachable while disabled.
           enabled: _durationOn,
-          activate: () => setState(() => _autoFinish = !_autoFinish),
+          activate: () => _setAutoFinish(!_autoFinish),
         ),
         NavCell(
           id: 'ie-duration-toggle',
@@ -852,9 +892,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
             value: _autoFinish,
             // Null = disabled: grayed out while Duration is OFF (the
             // engine contract — an Open interval always holds manually).
-            onChanged: _durationOn
-                ? (value) => setState(() => _autoFinish = value)
-                : null,
+            onChanged: _durationOn ? _setAutoFinish : null,
           ),
         ],
       ),
@@ -1163,10 +1201,26 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
   /// so the toggle grays out too. Re-enabling Duration leaves Auto-finish
   /// off (the user re-enables).
   void _setDurationOn(bool on) {
+    _optionsTouched = true; // the user chose — the settings seed stands
     setState(() {
       _durationOn = on;
       if (!on) _autoFinish = false;
     });
+  }
+
+  /// Auto-finish's single mutator (the switch AND both keyboard paths):
+  /// records the user's touch so the P5.2 settings seed stands down,
+  /// then flips.
+  void _setAutoFinish(bool value) {
+    _optionsTouched = true;
+    setState(() => _autoFinish = value);
+  }
+
+  /// Overwrite's single mutator (event mode; the switch AND both keyboard
+  /// paths) — the same touch rule as [_setAutoFinish].
+  void _setOverwrite(bool value) {
+    _optionsTouched = true;
+    setState(() => _overwrite = value);
   }
 
   /// Time toggle (P1.5): ON needs the dated/repeat exclusivity rule — a
@@ -1174,6 +1228,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
   /// shows the reason on screen and leaves the toggle OFF; OFF always
   /// works (it only moves TOWARD the allowed shape).
   void _setTimeOn(bool on) {
+    _optionsTouched = true; // the user chose — the settings seed stands
     if (on && !_timeOn) {
       final reason = _repeatConflictReason();
       if (reason != null) {
@@ -1450,7 +1505,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
             Switch(
               key: const Key('ie-overwrite'),
               value: _overwrite,
-              onChanged: (value) => setState(() => _overwrite = value),
+              onChanged: _setOverwrite,
             ),
           ],
         ),

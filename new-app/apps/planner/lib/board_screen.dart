@@ -17,6 +17,7 @@ import 'interval_editor.dart';
 import 'interval_rows.dart';
 import 'keyboard_nav.dart';
 import 'library_screen.dart';
+import 'settings_screen.dart';
 import 'theme.dart';
 import 'time_adjust_modal.dart';
 
@@ -1048,11 +1049,10 @@ class _BoardScreenState extends State<BoardScreen> {
 
   /// P3.1 — the board's bottom bar (the MAIN bar): Settings · Calendar ·
   /// Library · New Event, left to right. Library is live since P3.2,
-  /// Calendar since P4.2 (it pushes [CalendarScreen]) and New Event since
-  /// P5.1 (it opens the dated-interval capture, [_openNewEvent]);
-  /// Settings stays present-but-disabled until its phase
-  /// (TODO(micro): default hidden-until-live — the P5.3 chunk completes
-  /// the styling).
+  /// Calendar since P4.2 (it pushes [CalendarScreen]), New Event since
+  /// P5.1 (it opens the dated-interval capture, [_openNewEvent]) and
+  /// Settings since P5.2 (it pushes [SettingsScreen]; P5.3 completes the
+  /// bar's styling).
   ///
   /// Library: tap opens the Library page; right-click is its quick action
   /// — save the currently open timer as a new plan in a folder (P3.2).
@@ -1064,7 +1064,7 @@ class _BoardScreenState extends State<BoardScreen> {
         BarButton(
           buttonKey: const Key('bar-settings'),
           icon: Icons.settings,
-          onPressed: null, // TODO(micro): Settings page (P5.2)
+          onPressed: () => unawaited(_openSettings(context)),
         ),
         BarButton(
           buttonKey: const Key('bar-calendar'),
@@ -1173,6 +1173,14 @@ class _BoardScreenState extends State<BoardScreen> {
   Future<void> _openLibrary(BuildContext context) =>
       Navigator.of(context)
           .push(AppPageRoute<void>(builder: (_) => LibraryScreen(controller)));
+
+  /// P5.2 — the Settings page: same push pattern as the Library and the
+  /// Calendar (the board stays the route root underneath; the Settings
+  /// page renders its own home-only bar).
+  Future<void> _openSettings(BuildContext context) =>
+      Navigator.of(context).push(
+        AppPageRoute<void>(builder: (_) => SettingsScreen(controller)),
+      );
 
   /// P4.2 — the Calendar page: same push pattern as the Library (the
   /// board stays the route root underneath; the Calendar renders its own
