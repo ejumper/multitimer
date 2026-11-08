@@ -281,8 +281,9 @@ void main() {
       reason: 'left→right: Settings · Calendar · Library · New Event',
     );
     // Library is live since P3.1/P3.2 and Calendar since P4.2 (it pushes
-    // the Calendar page); Settings and New Event stay present-but-
-    // disabled until their chunks.
+    // the Calendar page), and New Event since P5.1 (it opens the dated
+    // capture — pinned in event_capture_test); Settings stays
+    // present-but-disabled until its chunk.
     expect(
       tester
           .widget<IconButton>(find.byKey(const Key('bar-settings')))
@@ -303,7 +304,7 @@ void main() {
       tester
           .widget<IconButton>(find.byKey(const Key('bar-new-event')))
           .onPressed,
-      isNull,
+      isNotNull,
     );
     expect(find.byKey(const Key('bar-home')), findsNothing); // page-local
     expect(find.byKey(const Key('bar-new-list')), findsNothing);

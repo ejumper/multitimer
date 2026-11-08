@@ -11,7 +11,9 @@ import 'day_navigation.dart';
 import 'defaults_menu.dart';
 import 'editor_controller.dart';
 import 'editor_screen.dart';
+import 'event_capture.dart';
 import 'format.dart';
+import 'interval_editor.dart';
 import 'interval_rows.dart';
 import 'keyboard_nav.dart';
 import 'library_screen.dart';
@@ -1038,32 +1040,17 @@ class _BoardScreenState extends State<BoardScreen> {
   /// readout's right-click and Escape share this path. P4.1: the editor's
   /// commit resolves its target through the controller (timerForWrite),
   /// so on a date-bound board the edit materializes the day's copy and
-  /// lands there — opening the editor itself stays read-only.
-  Future<void> _openEditor(BuildContext context) async {
-    final tree = await controller.store.loadTree(controller.timer.id);
-    if (!context.mounted) return;
-    await Navigator.of(context).push(
-      AppPageRoute<void>(
-        builder: (_) => EditorScreen(
-          controller: EditorController(
-            store: controller.store,
-            timer: controller.timer,
-            initialTree: tree,
-            resolveTimer: controller.timerForWrite,
-          ),
-          soundsDir: controller.soundsDir,
-          soundListing: controller.soundListing,
-          player: controller.player,
-          onDone: () => controller.applyTreeEdit(), // tweaks #8: keep the run
-        ),
-      ),
-    );
-  }
+  /// lands there — opening the editor itself stays read-only. P5.1: the
+  /// shared [openPlanEditor] seam (Save & edit timer focuses its new
+  /// interval through [focusDefId]).
+  Future<void> _openEditor(BuildContext context) =>
+      openPlanEditor(context, controller);
 
   /// P3.1 — the board's bottom bar (the MAIN bar): Settings · Calendar ·
-  /// Library · New Event, left to right. Library is live since P3.2 and
-  /// Calendar since P4.2 (it pushes [CalendarScreen]); Settings and New
-  /// Event stay present-but-disabled until their phase
+  /// Library · New Event, left to right. Library is live since P3.2,
+  /// Calendar since P4.2 (it pushes [CalendarScreen]) and New Event since
+  /// P5.1 (it opens the dated-interval capture, [_openNewEvent]);
+  /// Settings stays present-but-disabled until its phase
   /// (TODO(micro): default hidden-until-live — the P5.3 chunk completes
   /// the styling).
   ///
@@ -1077,7 +1064,7 @@ class _BoardScreenState extends State<BoardScreen> {
         BarButton(
           buttonKey: const Key('bar-settings'),
           icon: Icons.settings,
-          onPressed: null, // TODO(micro): Settings page (P5.1)
+          onPressed: null, // TODO(micro): Settings page (P5.2)
         ),
         BarButton(
           buttonKey: const Key('bar-calendar'),
@@ -1097,11 +1084,29 @@ class _BoardScreenState extends State<BoardScreen> {
         BarButton(
           buttonKey: const Key('bar-new-event'),
           icon: Icons.add,
-          onPressed: null, // TODO(micro): New Event capture (P5.1)
+          onPressed: () => unawaited(_openNewEvent(context)),
         ),
       ],
     );
   }
+
+  /// P5.1 — NEW EVENT quick capture: the interval editor in EVENT MODE
+  /// (dated Time seeded ON, the Date boxes, the Overwrite Default Timer
+  /// toggle, and the Save / Save & edit timer buttons) over this board's
+  /// controller through [EventCapture]. The capture writes the TARGET
+  /// DAY's plan — never this board's tree — so opening it stays
+  /// read-only, like every other editor open.
+  Future<void> _openNewEvent(BuildContext context) =>
+      Navigator.of(context).push(
+        AppPageRoute<void>(
+          builder: (_) => IntervalEditorScreen(
+            capture: EventCapture(source: controller),
+            soundsDir: controller.soundsDir,
+            soundListing: controller.soundListing,
+            player: controller.player,
+          ),
+        ),
+      );
 
   /// P3.1 — a plan board's bar (P3.2): home lands on TODAY'S day board
   /// (P4.3 — falling back to the board root when nothing claims today;
@@ -1620,4 +1625,40 @@ class _StateChip extends StatelessWidget {
       ],
     );
   }
+}
+
+/// Opens the timer editor over [controller]'s freshly loaded tree (P4.3's
+/// board path, extracted for P5.1): the commit resolves through the
+/// controller ([AppController.timerForWrite] — a date-bound board
+/// materializes its day's copy first) and [onDone] reloads the board's
+/// session after Done, so a live run survives the edit. Opening itself
+/// stays read-only.
+///
+/// [focusDefId] (P5.1 Save & edit timer) lands the editor focused on one
+/// interval — its row cell takes the keyboard focus and the row joins the
+/// selection.
+Future<void> openPlanEditor(
+  BuildContext context,
+  AppController controller, {
+  String? focusDefId,
+}) async {
+  final tree = await controller.store.loadTree(controller.timer.id);
+  if (!context.mounted) return;
+  await Navigator.of(context).push(
+    AppPageRoute<void>(
+      builder: (_) => EditorScreen(
+        controller: EditorController(
+          store: controller.store,
+          timer: controller.timer,
+          initialTree: tree,
+          resolveTimer: controller.timerForWrite,
+        ),
+        soundsDir: controller.soundsDir,
+        soundListing: controller.soundListing,
+        player: controller.player,
+        focusDefId: focusDefId,
+        onDone: () => controller.applyTreeEdit(), // tweaks #8: keep the run
+      ),
+    ),
+  );
 }

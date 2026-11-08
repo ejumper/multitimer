@@ -46,6 +46,7 @@ class EditorScreen extends StatefulWidget {
     required this.soundListing,
     required this.player,
     this.onDone,
+    this.focusDefId,
   });
 
   final EditorController controller;
@@ -58,6 +59,12 @@ class EditorScreen extends StatefulWidget {
 
   /// Invoked after a successful commit, just before the route pops.
   final VoidCallback? onDone;
+
+  /// P5.1's Save & edit timer: focus this interval at open — its row
+  /// cell takes the keyboard focus (the ring) and the row joins the
+  /// selection, so the editor lands ON the just-captured event. Null =
+  /// the normal open (name field focused).
+  final String? focusDefId;
 
 
   @override
@@ -114,6 +121,12 @@ class _EditorScreenState extends State<EditorScreen> {
   @override
   void initState() {
     super.initState();
+    // P5.1's Save & edit timer: the new interval IS the reason the editor
+    // opened — select it up front so the first build already shows it.
+    final focusId = widget.focusDefId;
+    if (focusId != null && controller.tree.allIds.contains(focusId)) {
+      controller.selectOnly(focusId);
+    }
     // Hand real text focus to the name field when its section is entered.
     _nav.onSectionChanged = (id) {
       // The router retakes focus on every section change (a text field
@@ -122,9 +135,20 @@ class _EditorScreenState extends State<EditorScreen> {
       if (id == 'name') _nameFocus.requestFocus();
     };
     // Tweaks #1: the editor opens with the name field focused (the section
-    // handoff above gives the TextField real text focus).
+    // handoff above gives the TextField real text focus) — UNLESS a
+    // focusDefId landed it on the new interval's row instead.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      final wanted = widget.focusDefId;
+      if (wanted != null) {
+        final si = _nav.sections.indexWhere((s) => s.id == 'intervals');
+        if (si >= 0) {
+          _nav.focusSection(si);
+          _nav.focusCell('rect-$wanted');
+          _navFocus.requestFocus();
+          return;
+        }
+      }
       final i = _nav.sections.indexWhere((s) => s.id == 'name');
       if (i >= 0) _nav.focusSection(i);
     });

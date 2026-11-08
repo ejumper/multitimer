@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:planner_engine/planner_engine.dart';
 
@@ -64,6 +66,56 @@ Future<void> openDayBoard(
       ),
     ),
   );
+}
+
+/// P5.1 — SAVE & EDIT TIMER: like [openDayBoard], but the timer editor
+/// lands ON the just-captured interval — the day board pushes first
+/// (owning the controller through its route), the editor straight on top
+/// with [defId] selected and focused ([openPlanEditor]). The
+/// returned future resolves when the EDITOR pops; the day board stays
+/// underneath (back walks it like any pushed day). Disposed with its
+/// route if the caller's context dies during init, exactly like
+/// [openDayBoard].
+Future<void> openDayBoardEditor(
+  BuildContext context,
+  AppController source, {
+  required DateTime date,
+  required String defId,
+}) async {
+  final dayController = AppController(
+    store: source.store,
+    clock: source.clock,
+    notifier: source.notifier,
+    player: source.player,
+    soundsDir: source.soundsDir,
+    soundListing: source.soundListing,
+  );
+  await dayController.init(dayDate: date);
+  if (!context.mounted) {
+    dayController.dispose();
+    return;
+  }
+  final nav = Navigator.of(context);
+  final page = nav.context; // the navigator's context outlives the pop
+  if (!page.mounted) {
+    dayController.dispose();
+    return;
+  }
+  // The board lands FIRST — its route owns the controller — and the editor
+  // goes on top at once: its pop reveals the day board, and the board's
+  // own pop disposes the controller.
+  unawaited(
+    nav.push<void>(
+      AppPageRoute<void>(
+        builder: (_) => BoardScreen(
+          dayController,
+          bar: BoardBar.plan,
+          ownsController: true, // disposed when the route is gone
+        ),
+      ),
+    ),
+  );
+  await openPlanEditor(page, dayController, focusDefId: defId);
 }
 
 /// P4.3 — what every bottom bar's `bar-home` does: land on TODAY'S day

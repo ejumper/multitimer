@@ -31,6 +31,10 @@ abstract interface class Store {
     required String name,
     required String color,
     String? folderId,
+    // P5.1: a capture-created day plan is DAY-OWNED from birth (YYYYMMDD
+    // day number) — it lives under its day, never in the Library, and the
+    // lazy fork's idempotence guard finds it instead of re-forking.
+    int? dayDate,
   });
   Future<void> updateTimer(String id, {String? name, String? color});
   Future<void> deleteTimer(String id);

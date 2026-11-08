@@ -1,11 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:planner_engine/planner_engine.dart';
 
 import 'adapters/ports.dart';
 import 'alert_selector.dart';
+import 'day_navigation.dart';
 import 'duration_utils.dart';
 import 'editor_controller.dart';
+import 'event_capture.dart';
 import 'format.dart';
 import 'keyboard_nav.dart';
 import 'theme.dart';
@@ -28,6 +32,20 @@ import 'theme.dart';
 ///   writes seconds since midnight from the `HH|MM` boxes (no seconds
 ///   box — decided default). Turning Time ON inside a repeating group is
 ///   blocked with the exclusivity reason shown on screen.
+///
+/// EVENT MODE (P5.1, `capture != null`): the main bar's New Event opens
+/// this screen with an [EventCapture] and NO [EditorController] — CREATE
+/// seeds **Time ON** (dated), and between the label field and the option
+/// toggles sit the **Date** boxes (`dd mm yy`, seeded from
+/// [EventCapture.initialDate], validated into a real day at save) and the
+/// first option toggle **Overwrite Default Timer** (OFF until P5.2's
+/// setting seeds this seam). Commit runs through [EventCapture.save]:
+/// **Save** — and the header back / Escape, the back-commit rule carries
+/// over — closes on success; **Save & edit timer** additionally opens
+/// that day's board with the timer editor focused on the new interval.
+/// An overlap (or an invalid date) shows the reason and LEAVES THE
+/// EDITOR OPEN; a clean write lands in the TARGET DAY's plan (the
+/// controller's tree is never touched in event mode).
 ///
 /// LOCAL BUFFERING: every field lives in this widget's state — nothing is
 /// pushed to the [controller] until back is tapped ([_commitBack]):
@@ -53,15 +71,27 @@ import 'theme.dart';
 class IntervalEditorScreen extends StatefulWidget {
   const IntervalEditorScreen({
     super.key,
-    required this.controller,
+    this.controller,
     this.defId,
     required this.soundsDir,
     required this.soundListing,
     required this.player,
-  });
+    this.capture,
+  }) : assert(
+         controller != null || capture != null,
+         'an EditorController (interval edit) or an EventCapture (P5.1 '
+         'capture) is required',
+       ),
+       assert(capture == null || defId == null, 'event mode is CREATE only'),
+       assert(
+         controller == null || capture == null,
+         'interval edit and event capture are exclusive',
+       );
 
   /// Working-copy controller the back-commit lands in (one undo step).
-  final EditorController controller;
+  /// NULL in event mode ([capture] set) — the capture never touches a
+  /// working copy.
+  final EditorController? controller;
 
   /// Def being edited, looked up once at open; null = CREATE mode.
   final String? defId;
@@ -74,6 +104,11 @@ class IntervalEditorScreen extends StatefulWidget {
 
   /// Preview player handed to the alert selector.
   final SoundPlayer player;
+
+  /// P5.1 New Event capture — non-null = EVENT MODE (see the class doc):
+  /// the save lands in the TARGET DAY's plan through this seam instead of
+  /// [controller]'s working tree.
+  final EventCapture? capture;
 
   @override
   State<IntervalEditorScreen> createState() => _IntervalEditorScreenState();
@@ -141,6 +176,33 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
     );
   }
 
+  /// Event mode (P5.1): the `dd mm yy` date-box focus nodes.
+  final FocusNode _dateDdFocus = FocusNode();
+  final FocusNode _dateMmFocus = FocusNode();
+  final FocusNode _dateYyFocus = FocusNode();
+
+  /// The date boxes in cycle order (same model as [_boxFocus]).
+  List<FocusNode> get _dateBoxFocus => [
+    _dateDdFocus,
+    _dateMmFocus,
+    _dateYyFocus,
+  ];
+
+  /// The active date box (the stepped-control anchor, like [_activeBox]).
+  int _activeDateBox = 0;
+
+  /// Focus a date box and select its value (typing replaces).
+  void _focusDateBox(int i) {
+    _activeDateBox = i.clamp(0, 2);
+    _nav.focusCell(['ie-date-dd', 'ie-date-mm', 'ie-date-yy'][_activeDateBox]);
+    final node = _dateBoxFocus[_activeDateBox];
+    node.requestFocus();
+    final box = [_dateDd, _dateMm, _dateYy][_activeDateBox];
+    box.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: box.text.length,
+    );
+  }
 
   late final TextEditingController _hr;
   late final TextEditingController _min;
@@ -149,6 +211,12 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
   /// The wall-time boxes (P1.5): 24-hour `HH|MM`, no seconds box.
   late final TextEditingController _timeHh;
   late final TextEditingController _timeMm;
+
+  /// The event-mode date boxes (P5.1): `dd mm yy`, seeded from the
+  /// capture's initial day (empty in interval mode — never rendered).
+  late final TextEditingController _dateDd;
+  late final TextEditingController _dateMm;
+  late final TextEditingController _dateYy;
 
   /// Local buffers — see the class doc for the commit rules.
   late String _color;
@@ -163,6 +231,17 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
 
   String? _endAlertSoundFile;
 
+  /// Event mode (P5.1): the "Overwrite Default Timer" toggle — OFF until
+  /// P5.2's settings value seeds this seam.
+  late bool _overwrite;
+
+  /// The capture's double-tap guard across its async store chain.
+  bool _saving = false;
+
+  /// True when the screen runs in EVENT MODE (see the class doc): the
+  /// save writes through [widget.capture], never [widget.controller].
+  bool get _eventMode => widget.capture != null;
+
   @override
   void initState() {
     super.initState();
@@ -175,6 +254,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
       // then hands it on where the section wants it.
       _navFocus.requestFocus();
       if (id == 'name') _nameFocus.requestFocus();
+      if (id == 'date') _focusDateBox(_activeDateBox);
       if (id == 'duration') _focusBox(_activeBox);
       if (id == 'time') _focusTimeBox(_activeTimeBox);
     };
@@ -199,12 +279,14 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
       _sec = TextEditingController(text: '00');
       _timeHh = TextEditingController(text: '00');
       _timeMm = TextEditingController(text: '00');
-      _color = widget.controller.color;
+      _color = widget.controller?.color ?? widget.capture!.source.timer.color;
       _autoFinish = false;
       _durationOn = true;
-      _timeOn = false;
+      // P1.5's default is Time OFF — EVENT MODE (P5.1) seeds it ON: a
+      // captured event is dated from the first moment.
+      _timeOn = _eventMode;
       final files = [...widget.soundListing()]..sort();
-      _endAlertSoundFile = widget.controller.lastSound ??
+      _endAlertSoundFile = widget.controller?.lastSound ??
           (files.isEmpty ? null : files.first);
     } else {
       // EDIT: seed everything from the def; boxes via the split inverse,
@@ -238,12 +320,30 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
       _timeOn = def.isDated;
       _endAlertSoundFile = def.endAlertSoundFile;
     }
+    // Event mode (P5.1): the date boxes seed the target day and the
+    // Overwrite toggle starts OFF; interval mode leaves the boxes empty
+    // (they never render without a capture).
+    final initial = widget.capture?.initialDate;
+    _dateDd = TextEditingController(
+      text: initial == null ? '' : initial.day.toString().padLeft(2, '0'),
+    );
+    _dateMm = TextEditingController(
+      text: initial == null ? '' : initial.month.toString().padLeft(2, '0'),
+    );
+    _dateYy = TextEditingController(
+      text: initial == null
+          ? ''
+          : (initial.year % 100).toString().padLeft(2, '0'),
+    );
+    _overwrite = false;
   }
 
   /// EDIT mode only: the def behind [defId]; not a DefNode → loud failure
   /// (the UI only ever opens chips, never groups).
   IntervalDef _lookupDef(String defId) {
-    final node = widget.controller.tree.nodeById(defId);
+    // A def can only be edited in interval mode — the constructor's
+    // asserts keep a capture (controller == null) out of EDIT mode.
+    final node = widget.controller!.tree.nodeById(defId);
     if (node is! DefNode) {
       throw StateError('IntervalEditorScreen: $defId is not a DefNode');
     }
@@ -260,11 +360,17 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
     _secFocus.dispose();
     _timeHhFocus.dispose();
     _timeMmFocus.dispose();
+    _dateDdFocus.dispose();
+    _dateMmFocus.dispose();
+    _dateYyFocus.dispose();
     _hr.dispose();
     _min.dispose();
     _sec.dispose();
     _timeHh.dispose();
     _timeMm.dispose();
+    _dateDd.dispose();
+    _dateMm.dispose();
+    _dateYy.dispose();
     super.dispose();
   }
 
@@ -292,6 +398,12 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
                   _header(),
                   const SizedBox(height: 10),
                   _identityCard(),
+                  if (_eventMode) ...[
+                    const SizedBox(height: 10),
+                    _dateCard(),
+                    const SizedBox(height: 10),
+                    _overwriteToggleCard(),
+                  ],
                   const SizedBox(height: 10),
                   _autoFinishCard(),
                   const SizedBox(height: 10),
@@ -308,6 +420,10 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
                   ],
                   const SizedBox(height: 10),
                   _alertRow(),
+                  if (_eventMode) ...[
+                    const SizedBox(height: 14),
+                    _saveButtons(),
+                  ],
                 ],
               ),
                   ),
@@ -362,6 +478,8 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
           _setDurationOn(!_durationOn);
         } else if (id == 'ie-time-toggle') {
           _setTimeOn(!_timeOn);
+        } else if (id == 'ie-overwrite') {
+          setState(() => _overwrite = !_overwrite);
         }
         return KeyEventResult.handled;
       }
@@ -374,11 +492,27 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
           _setDurationOn(on);
         } else if (id == 'ie-time-toggle') {
           _setTimeOn(on);
+        } else if (id == 'ie-overwrite') {
+          setState(() => _overwrite = on);
         }
         return KeyEventResult.handled;
       }
     }
 
+    // The date boxes (event mode) mirror the duration keys: Enter cycles
+    // the boxes, Up/Down adjusts the focused one (Ctrl = 10) inside its
+    // own field range — dd 0..31, mm 0..12, yy 0..99.
+    final inDate = _nav.section.id == 'date';
+    if (inDate && (key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter)) {
+      _cycleDateBox(shift ? -1 : 1);
+      return KeyEventResult.handled;
+    }
+    if (inDate && !alt && (key == LogicalKeyboardKey.arrowUp ||
+        key == LogicalKeyboardKey.arrowDown)) {
+      _adjustDateBox(key == LogicalKeyboardKey.arrowUp ? 1 : -1, ctrl ? 10 : 1);
+      return KeyEventResult.handled;
+    }
     if (inDuration && (key == LogicalKeyboardKey.enter ||
         key == LogicalKeyboardKey.numpadEnter)) {
       _cycleBox(shift ? -1 : 1);
@@ -453,10 +587,41 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
       NavSection(id: 'name', cells: [
         NavCell(id: 'name', row: 0, col: 0, activate: _nameFocus.requestFocus),
       ]),
+      // Event mode (P5.1): the date boxes get their own Tab section,
+      // between the label and the toggles — the duration-box grid model.
+      if (_eventMode)
+        NavSection(id: 'date', cells: [
+          NavCell(
+            id: 'ie-date-dd',
+            row: 0,
+            col: 0,
+            activate: () => _focusDateBox(0),
+          ),
+          NavCell(
+            id: 'ie-date-mm',
+            row: 0,
+            col: 1,
+            activate: () => _focusDateBox(1),
+          ),
+          NavCell(
+            id: 'ie-date-yy',
+            row: 0,
+            col: 2,
+            activate: () => _focusDateBox(2),
+          ),
+        ]),
       NavSection(id: 'toggles', cells: [
+        // The Overwrite toggle is the FIRST option toggle (event mode).
+        if (_eventMode)
+          NavCell(
+            id: 'ie-overwrite',
+            row: 0,
+            col: 0,
+            activate: () => setState(() => _overwrite = !_overwrite),
+          ),
         NavCell(
           id: 'ie-autofinish',
-          row: 0,
+          row: _eventMode ? 1 : 0,
           col: 0,
           // Grays out with Duration OFF (P1.5): an Open interval always
           // holds manually, so the cell is unreachable while disabled.
@@ -465,13 +630,13 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
         ),
         NavCell(
           id: 'ie-duration-toggle',
-          row: 1,
+          row: _eventMode ? 2 : 1,
           col: 0,
           activate: () => _setDurationOn(!_durationOn),
         ),
         NavCell(
           id: 'ie-time-toggle',
-          row: 2,
+          row: _eventMode ? 3 : 2,
           col: 0,
           activate: () => _setTimeOn(!_timeOn),
         ),
@@ -515,6 +680,22 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
       NavSection(id: 'endalert', cells: [
         NavCell(id: 'ie-alert-row', row: 0, col: 0, activate: _openAlertSelector),
       ]),
+      // Event mode (P5.1): the two commit buttons are the last section.
+      if (_eventMode)
+        NavSection(id: 'commit', cells: [
+          NavCell(
+            id: 'ie-save',
+            row: 0,
+            col: 0,
+            activate: () => unawaited(_saveEvent(editAfter: false)),
+          ),
+          NavCell(
+            id: 'ie-save-edit',
+            row: 0,
+            col: 1,
+            activate: () => unawaited(_saveEvent(editAfter: true)),
+          ),
+        ]),
     ];
   }
 
@@ -1010,9 +1191,12 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
   /// roots; a def outside any repeating group is fine).
   String? _repeatConflictReason() {
     final defId = widget.defId;
-    if (defId == null) return null; // CREATE: appended at the roots
-    final parentId = widget.controller.tree.parentOf(defId);
-    return widget.controller.insideRepeatingGroup(parentId)
+    final controller = widget.controller;
+    // CREATE lands at the roots and event mode has no def to edit (its
+    // asserts keep defId null) — neither can repeat-conflict.
+    if (defId == null || controller == null) return null;
+    final parentId = controller.tree.parentOf(defId);
+    return controller.insideRepeatingGroup(parentId)
         ? kDatedInRepeatingGroupReason
         : null;
   }
@@ -1126,8 +1310,281 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
     );
   }
 
-  /// Back-commit — the screen's ONLY write path, as documented on the
-  /// class: `hasName` = non-blank label, `hasDur` = Duration ON with a
+  // ── P5.1 event mode: date boxes, overwrite, the two commit buttons ───
+
+  /// The date boxes as a real local day, or null when they don't spell
+  /// one — the save refuses with [kEventBadDateReason] until they do.
+  DateTime? _parsedEventDate() =>
+      parseEventDate(_dateDd.text, _dateMm.text, _dateYy.text);
+
+  /// Enter/Shift+Enter within the date section: focus the next/prev box
+  /// (wrapping) so typing lands there.
+  void _cycleDateBox(int delta) {
+    _focusDateBox((_activeDateBox + delta) % _dateBoxFocus.length);
+  }
+
+  /// Up/Down within the date section: adjust the focused box by [delta]
+  /// units (Ctrl = 10), clamped to its own field range — dd 0..31 (0 is
+  /// an invalid day the hint and the save both catch), mm 0..12, yy 0..99
+  /// (dates never carry upward).
+  void _adjustDateBox(int sign, int amount) {
+    final boxes = [_dateDd, _dateMm, _dateYy];
+    final idx = _dateBoxFocus.indexWhere((f) => f.hasFocus);
+    if (idx >= 0) _activeDateBox = idx;
+    final i = _activeDateBox;
+    final max = [31, 12, 99][i];
+    final next = ((int.tryParse(boxes[i].text) ?? 0) + sign * amount)
+        .clamp(0, max);
+    boxes[i].text = next.toString().padLeft(2, '0');
+    // Keep the selection valid (a stale selection fails the framework's
+    // TextEditingValue.isValid check on the next key message).
+    boxes[i].selection = TextSelection.collapsed(
+      offset: boxes[i].text.length,
+    );
+  }
+
+  /// Event-mode Date card (P5.1): the `dd mm yy` boxes over the live
+  /// hint — the validated day (`Sun 1 Mar 2026`), or `invalid date` while
+  /// the boxes don't spell one.
+  Widget _dateCard() {
+    final date = _parsedEventDate();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: AppDecorations.card,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'Date',
+            key: Key('ie-date-title'),
+            style: TextStyle(
+              fontFamily: AppFonts.ui,
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: AppColors.text,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _durationBox(
+                key: const Key('ie-date-dd'),
+                navId: 'ie-date-dd',
+                controller: _dateDd,
+                unit: 'dd',
+                focusNode: _dateDdFocus,
+              ),
+              _durationBox(
+                key: const Key('ie-date-mm'),
+                navId: 'ie-date-mm',
+                controller: _dateMm,
+                unit: 'mm',
+                focusNode: _dateMmFocus,
+              ),
+              _durationBox(
+                key: const Key('ie-date-yy'),
+                navId: 'ie-date-yy',
+                controller: _dateYy,
+                unit: 'yy',
+                focusNode: _dateYyFocus,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            date == null ? 'invalid date' : formatEventDate(date),
+            key: const Key('ie-date-hint'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontFamily: AppFonts.ui,
+              fontSize: 13,
+              color: AppColors.dimmed,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Overwrite Default Timer toggle (P5.1's FIRST option toggle): ON =
+  /// the day's plan is REPLACED by a new single-interval timer holding
+  /// this event; OFF = the event is inserted at the top of the day's plan
+  /// as resolved. Starts OFF — P5.2's setting seeds this seam.
+  Widget _overwriteToggleCard() {
+    return FocusRing(
+      focused: _nav.isFocused('ie-overwrite'),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: AppDecorations.card,
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Overwrite Default Timer',
+                    key: Key('ie-overwrite-title'),
+                    style: TextStyle(
+                      fontFamily: AppFonts.ui,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.text,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _overwrite
+                        ? 'Replaces this day\u2019s plan with just this event'
+                        : 'Adds as the first interval of the day\u2019s plan',
+                    style: const TextStyle(
+                      fontFamily: AppFonts.ui,
+                      fontSize: 12,
+                      color: AppColors.dimmed,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Switch(
+              key: const Key('ie-overwrite'),
+              value: _overwrite,
+              onChanged: (value) => setState(() => _overwrite = value),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Event mode's two commit buttons (they replace the plain commit): the
+  /// Save flow closes on success ([_saveEvent]); Save & edit timer
+  /// additionally lands on that day's board with the timer editor focused
+  /// on the new interval.
+  Widget _saveButtons() {
+    return Row(
+      children: [
+        Expanded(
+          child: _saveButton(
+            'ie-save',
+            'Save',
+            () => unawaited(_saveEvent(editAfter: false)),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _saveButton(
+            'ie-save-edit',
+            'Save & edit timer',
+            () => unawaited(_saveEvent(editAfter: true)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// One commit pill (the timer editor's Done style, doubled for the
+  /// two-button row); [id] doubles as the keyboard-cell id.
+  Widget _saveButton(String id, String label, VoidCallback onPressed) {
+    return FocusRing(
+      focused: _nav.isFocused(id),
+      child: TextButton(
+        key: Key(id),
+        style: TextButton.styleFrom(
+          backgroundColor: AppColors.card,
+          foregroundColor: AppColors.text,
+          side: const BorderSide(
+            color: AppColors.cardBorder,
+            width: AppDecorations.borderWidth,
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          shape: const StadiumBorder(),
+        ),
+        onPressed: onPressed,
+        child: Text(
+          label,
+          style: const TextStyle(
+            fontFamily: AppFonts.ui,
+            color: AppColors.text,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// A brief on-screen reason (the app's SnackBar pattern — the P1.5
+  /// authoring refusals use the same shape).
+  void _showReason(String message) {
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// P5.1 — the event-mode save behind BOTH commit buttons (and behind
+  /// back / Escape, per the back-commit rule): validate the date boxes,
+  /// refuse overlaps, then land the dated interval as the FIRST interval
+  /// of the target day's plan. A refusal shows the reason and LEAVES THE
+  /// EDITOR OPEN — only a clean write closes it; [editAfter] additionally
+  /// opens that day's board with the timer editor focused on the new
+  /// interval (Save & edit timer).
+  Future<void> _saveEvent({required bool editAfter}) async {
+    final capture = widget.capture;
+    if (capture == null || _saving) return;
+    final date = _parsedEventDate();
+    if (date == null) {
+      _showReason(kEventBadDateReason);
+      return;
+    }
+    final parsed = _parsed();
+    final hasName = _label.text.trim().isNotEmpty;
+    final hasDur = _durationOn && parsed > Duration.zero;
+    final hasTime = _timeOn;
+    if (!hasName && !hasDur && !hasTime) {
+      _showReason(kEventNothingToSaveReason);
+      return;
+    }
+    _saving = true;
+    final CaptureResult result;
+    try {
+      result = await capture.save(
+        name: hasName ? _label.text.trim() : null,
+        color: _color,
+        // IntervalDef requires > 0 — Duration ON with emptied boxes keeps
+        // the plain-create 60s default; Duration OFF is Open (null).
+        durationSeconds: _durationOn ? (hasDur ? parsed.inSeconds : 60) : null,
+        autoFinish: _autoFinish,
+        endAlertSoundFile: _endAlertSoundFile,
+        triggerTimeSeconds: hasTime ? _timeSeconds() : null,
+        date: date,
+        overwrite: _overwrite,
+      );
+    } finally {
+      _saving = false;
+    }
+    if (!mounted) return;
+    final blocked = result.blockedReason;
+    if (blocked != null) {
+      _showReason(blocked); // overlap refusal — stay open, write nothing
+      return;
+    }
+    final nav = Navigator.of(context);
+    nav.pop(); // Save closes …
+    if (!editAfter) return;
+    final page = nav.context; // … and the navigator outlives the pop
+    if (!page.mounted) return;
+    await openDayBoardEditor(
+      page,
+      capture.source,
+      date: date,
+      defId: result.defId!,
+    );
+  }
+
+  /// Back-commit — in EVENT MODE back / Escape run the plain Save (the
+  /// first commit flow, [_saveEvent]); in interval mode this is the
+  /// screen's ONLY write path, as documented on the class: `hasName` =
+  /// non-blank label, `hasDur` = Duration ON with a
   /// non-zero box total, `hasTime` = Time ON (the wall trigger itself is
   /// content — a dated interval is an interval). The toggles ride along:
   /// Duration OFF saves `durationSeconds: null` (Open), Time OFF saves
@@ -1141,8 +1598,17 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
   ///   one [EditorController.replaceDef] step, keeping the previous
   ///   duration when the boxes were emptied but a label remains.
   ///
-  /// The route pops either way.
+  /// The route pops either way — in EVENT MODE it pops ONLY on a clean
+  /// save (a refusal keeps the editor open with the reason).
   void _commitBack() {
+    if (_eventMode) {
+      unawaited(_saveEvent(editAfter: false)); // back = the plain Save
+      return;
+    }
+    final controller = widget.controller;
+    if (controller == null) {
+      throw StateError('IntervalEditorScreen: no controller in interval mode');
+    }
     final parsed = _parsed();
     final hasName = _label.text.trim().isNotEmpty;
     final hasDur = _durationOn && parsed > Duration.zero;
@@ -1150,7 +1616,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
     final defId = widget.defId;
     if (defId == null) {
       if (hasName || hasDur || hasTime) {
-        widget.controller.addInterval(
+        controller.addInterval(
           name: hasName ? _label.text.trim() : null,
           color: _color,
           // IntervalDef requires > 0 — a name-only create with Duration
@@ -1171,7 +1637,7 @@ class _IntervalEditorScreenState extends State<IntervalEditorScreen> {
           _durationOn != (def.durationSeconds != null) ||
           _timeOn != def.isDated;
       if (hasName || hasDur || hasTime || togglesTouched) {
-        widget.controller.replaceDef(
+        controller.replaceDef(
           defId,
           IntervalDef(
             id: defId,

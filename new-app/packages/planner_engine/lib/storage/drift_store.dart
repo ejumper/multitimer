@@ -122,6 +122,7 @@ class DriftStore implements Store {
     required String name,
     required String color,
     String? folderId,
+    int? dayDate,
   }) => _db.transaction(() async {
     // Land on TOP of the folder's ordered plans (the "new list" rule,
     // P3.2): ascending sort order, so one below the current minimum.
@@ -145,6 +146,7 @@ class DriftStore implements Store {
       sortIndex: sortIndex,
       createdAt: nowMs,
       updatedAt: nowMs,
+      dayDate: dayDate,
     );
     await _db
         .into(_db.timers)
@@ -158,6 +160,7 @@ class DriftStore implements Store {
             sortIndex: sortIndex,
             createdAt: nowMs,
             updatedAt: nowMs,
+            dayDate: Value(dayDate),
           ),
         );
     await _appendEvent('timer.create', {
