@@ -65,20 +65,42 @@ class AppController extends ChangeNotifier {
   /// then its first interval timer (creating `Interval timer` when empty),
   /// loads the timer's tree into a fresh session, and starts the 1 Hz
   /// ticker.
-  Future<void> init() async {
+  ///
+  /// [timerId] binds the controller to ONE timer (P3.2's plan board): the
+  /// board containing that timer owns the controller instead of the boot
+  /// default. An unknown id falls back to the default boot behavior.
+  Future<void> init({String? timerId}) async {
     final boards = await store.allBoards();
-    board = boards.isEmpty
-        ? await store.createBoard('My Board')
-        : boards.first;
+    // Chosen into a local first: the `board` field initializes exactly
+    // once (a late field must not be written twice).
+    var chosen = boards.isEmpty ? await store.createBoard('My Board') : boards.first;
 
-    final timers = await store.timersInBoard(board.id);
-    timer = timers.isEmpty
-        ? await store.createTimer(
-            boardId: board.id,
-            name: 'Interval timer',
-            color: '#0055ff',
-          )
-        : timers.first;
+    IntervalTimer? bound;
+    if (timerId != null) {
+      for (final b in boards) {
+        final match = (await store.timersInBoard(b.id))
+            .where((t) => t.id == timerId);
+        if (match.isNotEmpty) {
+          chosen = b;
+          bound = match.first;
+          break;
+        }
+      }
+    }
+    board = chosen;
+
+    if (bound != null) {
+      timer = bound;
+    } else {
+      final timers = await store.timersInBoard(board.id);
+      timer = timers.isEmpty
+          ? await store.createTimer(
+              boardId: board.id,
+              name: 'Interval timer',
+              color: '#0055ff',
+            )
+          : timers.first;
+    }
 
     await _buildSession();
 
@@ -216,7 +238,8 @@ class AppController extends ChangeNotifier {
     final applied = session.adjustCurrent(deltaSeconds);
     if (applied) {
       final after = snapshot;
-      final leftHold = before.state == SessionState.awaitingAdvance &&
+      final leftHold =
+          before.state == SessionState.awaitingAdvance &&
           after.state != SessionState.awaitingAdvance;
       final moved = after.ordinal != before.ordinal;
       if (leftHold || moved) {

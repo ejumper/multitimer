@@ -872,7 +872,7 @@ void main() {
   /// viewport (forced overflow for the scroll tests).
   Future<void> pumpShortBoard(WidgetTester tester) async {
     // A genuinely short window — the rows must overflow the viewport.
-    tester.view.physicalSize = const Size(900, 300);
+    tester.view.physicalSize = const Size(900, 430);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -894,9 +894,16 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300)); // snap-back
     final firstRow = tester.getRect(find.byKey(const Key('row-a')));
     final listRect = tester.getRect(find.byKey(const Key('interval-list')));
-    expect(firstRow.top, moreOrLessEquals(listRect.top, epsilon: 3.0));
+    // The row sits at the TOP edge (the plan's clamp) — allowing the
+    // list's 4px vertical padding inset.
+    expect(
+      firstRow.top - listRect.top,
+      moreOrLessEquals(4, epsilon: 2),
+      reason: 'the first row reaches the top edge, never a fake center',
+    );
 
     // Walk to a MIDDLE row (ordinal 3 = 'Wrap'): skip ×3, then one build
     // — the auto-scroll re-centers it in the viewport.
@@ -906,6 +913,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300)); // snap-back
 
     final row = tester.getRect(find.byKey(const Key('row-d')));
     final list = tester.getRect(find.byKey(const Key('interval-list')));
@@ -924,6 +932,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300)); // snap-back
 
     final position =
         tester.state<ScrollableState>(find.byType(Scrollable)).position;
@@ -942,6 +951,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300)); // snap-back
 
     final after = tester.getRect(find.byKey(const Key('row-d'))).center.dy;
     final list = tester.getRect(find.byKey(const Key('interval-list')));

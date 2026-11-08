@@ -1,16 +1,17 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:planner_engine/planner_engine.dart';
 
 import 'app_controller.dart';
+import 'bottom_bar.dart';
 import 'editor_controller.dart';
 import 'editor_screen.dart';
 import 'format.dart';
 import 'interval_rows.dart';
 import 'keyboard_nav.dart';
+import 'library_screen.dart';
 import 'theme.dart';
 import 'time_adjust_modal.dart';
 
@@ -29,11 +30,18 @@ import 'time_adjust_modal.dart';
 /// dial is GONE (P2.1): the list is the board.
 ///
 /// No menu/gear buttons in the header: multi-board switching and settings
-/// are out of v1 scope.
+/// are out of v1 scope — they arrive as bottom-bar buttons instead
+/// (v2 P3.1): every page renders its own [BottomBar], and the same
+/// [BoardScreen] serves as the home board ([BoardBar.main]: Settings ·
+/// Calendar · Library · New Event) and as a Library plan's board
+/// ([BoardBar.plan]: home · back).
 class BoardScreen extends StatefulWidget {
-  const BoardScreen(this.controller, {super.key});
+  const BoardScreen(this.controller, {super.key, this.bar = BoardBar.main});
 
   final AppController controller;
+
+  /// Which bottom bar this board renders (P3.1's page-contextual bars).
+  final BoardBar bar;
 
   @override
   State<BoardScreen> createState() => _BoardScreenState();
@@ -135,7 +143,9 @@ class _BoardScreenState extends State<BoardScreen> {
         ],
         // The next-interval caption is gone (acceptance: it was MultiTimer's
         // advance button stand-in — the '>' control replaced it).
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
+        _buildBar(context),
+        const SizedBox(height: 16),
       ],
     );
   }
@@ -184,15 +194,18 @@ class _BoardScreenState extends State<BoardScreen> {
     return NotificationListener<ScrollNotification>(
       key: _listKey,
       onNotification: _onListScrollNotification,
-      child: ListView(
+      child: SingleChildScrollView(
         key: const Key('interval-list'),
         controller: _listScroll,
-        // The interval list is hand-authored and short: a generous cache
-        // keeps every row built so the centering math can always measure
-        // the current row, wherever the user has browsed.
-        scrollCacheExtent: const ScrollCacheExtent.pixels(2000),
         padding: const EdgeInsets.symmetric(vertical: 4),
-        children: _treeRows(controller.tree.roots, occurrences, snapshot),
+        // The interval list is hand-authored and short: a plain Column
+        // keeps EVERY row built (a lazy delegate would drop off-screen
+        // rows — and the centering math must always find the current
+        // row's box, wherever the user has browsed).
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: _treeRows(controller.tree.roots, occurrences, snapshot),
+        ),
       ),
     );
   }
@@ -238,10 +251,21 @@ class _BoardScreenState extends State<BoardScreen> {
     }
     final rowTop = rowBox.localToGlobal(Offset.zero).dy;
     final listTop = listBox.localToGlobal(Offset.zero).dy;
-    final target = (position.pixels +
-            (rowTop - listTop) +
-            rowBox.size.height / 2 -
-            listBox.size.height / 2)
+    // The row's position in content coordinates and the centered target.
+    final rowOffset = position.pixels + (rowTop - listTop);
+    final rowHeight = rowBox.size.height;
+    final viewport = listBox.size.height;
+    var target = rowOffset + rowHeight / 2 - viewport / 2;
+    // Edge clamps: a row that FITS stays fully visible — the first row can
+    // only reach the top edge ("it will be at the top"), the last the
+    // bottom. Degenerate case (row taller than the viewport): the
+    // closest-to-center wins over the edge rules.
+    if (rowHeight <= viewport) {
+      target = target
+          .clamp(rowOffset + rowHeight - viewport, rowOffset)
+          .toDouble();
+    }
+    target = target
         .clamp(position.minScrollExtent, position.maxScrollExtent)
         .toDouble();
     // Already there — this also absorbs our own return animations ending.
@@ -266,8 +290,12 @@ class _BoardScreenState extends State<BoardScreen> {
       for (final node in nodes)
         switch (node) {
           DefNode(:final def) => _defRow(def, occurrences, snapshot),
-          GroupNode(:final group, :final children) =>
-            _groupRow(group, children, occurrences, snapshot),
+          GroupNode(:final group, :final children) => _groupRow(
+            group,
+            children,
+            occurrences,
+            snapshot,
+          ),
         },
     ];
     return [
@@ -295,7 +323,8 @@ class _BoardScreenState extends State<BoardScreen> {
     final suspendedAt = snapshot.suspendedOrdinal;
     final isSuspended = suspendedAt != null && ordinals.contains(suspendedAt);
     final completed = controller.session.isCompleted(def.id);
-    final passed = cursor != null &&
+    final passed =
+        cursor != null &&
         ordinals.isNotEmpty &&
         !isSuspended &&
         ordinals.every((o) => o < cursor);
@@ -389,11 +418,7 @@ class _BoardScreenState extends State<BoardScreen> {
   /// occurrence's effective duration), the suspended occurrence's frozen
   /// `<left>/<total>`, else the authored shape (`15:30` / duration /
   /// `open` — [rowShape]).
-  String _defTime(
-    IntervalDef def,
-    List<int> ordinals,
-    TimerSnapshot snapshot,
-  ) {
+  String _defTime(IntervalDef def, List<int> ordinals, TimerSnapshot snapshot) {
     final cursor = snapshot.ordinal;
     if (cursor != null && ordinals.contains(cursor)) {
       if (snapshot.state == SessionState.awaitingAdvance) return 'wait';
@@ -471,7 +496,8 @@ class _BoardScreenState extends State<BoardScreen> {
     final isSuspended = suspendedAt != null && ordinals.contains(suspendedAt);
     final completed =
         defIds.isNotEmpty && defIds.every(controller.session.isCompleted);
-    final passed = cursor != null &&
+    final passed =
+        cursor != null &&
         ordinals.isNotEmpty &&
         !isSuspended &&
         ordinals.every((o) => o < cursor);
@@ -562,8 +588,8 @@ class _BoardScreenState extends State<BoardScreen> {
       total += planned;
       if (o == cursor) {
         final left = switch (snapshot.state) {
-          SessionState.running || SessionState.paused =>
-            snapshot.remaining?.inMilliseconds ?? planned,
+          SessionState.running ||
+          SessionState.paused => snapshot.remaining?.inMilliseconds ?? planned,
           SessionState.awaitingAdvance => 0, // held AT zero: consumed
           SessionState.awaitingWall => planned, // not fired: nothing elapsed
           SessionState.notStarted => planned,
@@ -662,7 +688,7 @@ class _BoardScreenState extends State<BoardScreen> {
     final items = controller.instances.map((i) => i.defId).toSet();
     if (items.isEmpty) return null;
     final missed = items
-       .where((id) => !controller.session.isCompleted(id))
+        .where((id) => !controller.session.isCompleted(id))
         .length;
     if (missed == 0 || missed == items.length) return null;
     return missed;
@@ -684,8 +710,7 @@ class _BoardScreenState extends State<BoardScreen> {
         key: const Key('control-row'),
         mainAxisSize: MainAxisSize.min,
         children: [
-          _HoverIconButton(
-            circularRing: true,
+          BarButton(
             buttonKey: const Key('btn-adjust'),
             icon: Icons.schedule,
             focused: _nav.isFocused('btn-adjust'),
@@ -694,16 +719,14 @@ class _BoardScreenState extends State<BoardScreen> {
           gap,
           // v2 P2.2: the hold's second slot is the "not completed"
           // decision (the interval-list shortcut steps aside here).
-          _HoverIconButton(
-            circularRing: true,
+          BarButton(
             buttonKey: const Key('btn-not-completed'),
             icon: Icons.remove_done,
             focused: _nav.isFocused('btn-not-completed'),
             onPressed: () => controller.resolveHold(completed: false),
           ),
           gap,
-          _HoverIconButton(
-            circularRing: true,
+          BarButton(
             buttonKey: const Key('btn-reset'),
             icon: Icons.close_outlined,
             color: AppColors.danger, // destructive (greyscale-UI rule)
@@ -711,8 +734,7 @@ class _BoardScreenState extends State<BoardScreen> {
             onPressed: () => _showResetDialog(context),
           ),
           gap,
-          _HoverIconButton(
-            circularRing: true,
+          BarButton(
             buttonKey: const Key('btn-silence'),
             icon: Icons.alarm_off,
             focused: _nav.isFocused('btn-silence'),
@@ -725,16 +747,14 @@ class _BoardScreenState extends State<BoardScreen> {
       key: const Key('control-row'),
       mainAxisSize: MainAxisSize.min,
       children: [
-        _HoverIconButton(
-          circularRing: true,
+        BarButton(
           buttonKey: const Key('btn-adjust'),
           icon: Icons.schedule,
           focused: _nav.isFocused('btn-adjust'),
           onPressed: canSkip ? () => _openAdjust(context) : null,
         ),
         gap,
-        _HoverIconButton(
-          circularRing: true,
+        BarButton(
           buttonKey: const Key('btn-reset'),
           icon: Icons.close_outlined,
           color: AppColors.danger, // destructive (greyscale-UI rule)
@@ -742,8 +762,7 @@ class _BoardScreenState extends State<BoardScreen> {
           onPressed: () => _showResetDialog(context),
         ),
         gap,
-        _HoverIconButton(
-          circularRing: true,
+        BarButton(
           buttonKey: const Key('btn-skip'),
           icon: Icons.chevron_right,
           focused: _nav.isFocused('btn-skip'),
@@ -785,6 +804,78 @@ class _BoardScreenState extends State<BoardScreen> {
     );
   }
 
+  /// P3.1 — the board's bottom bar (the MAIN bar): Settings · Calendar ·
+  /// Library · New Event, left to right. Only Library is live in these
+  /// chunks; the other three are present-but-disabled until their phase
+  /// (TODO(micro): default hidden-until-live — the P5.3 chunk completes
+  /// the styling).
+  ///
+  /// Library: tap opens the Library page; right-click is its quick action
+  /// — save the currently open timer as a new plan in a folder (P3.2).
+  Widget _mainBar(BuildContext context) {
+    return BottomBar(
+      key: const Key('main-bar'),
+      buttons: [
+        BarButton(
+          buttonKey: const Key('bar-settings'),
+          icon: Icons.settings,
+          onPressed: null, // TODO(micro): Settings page (P5.1)
+        ),
+        BarButton(
+          buttonKey: const Key('bar-calendar'),
+          icon: Icons.calendar_month,
+          onPressed: null, // TODO(micro): Calendar page (P4.2)
+        ),
+        GestureDetector(
+          key: const Key('bar-library-actions'),
+          onSecondaryTapDown: (_) =>
+              unawaited(saveTimerToFolder(context, controller)),
+          child: BarButton(
+            buttonKey: const Key('bar-library'),
+            icon: Icons.local_library,
+            onPressed: () => unawaited(_openLibrary(context)),
+          ),
+        ),
+        BarButton(
+          buttonKey: const Key('bar-new-event'),
+          icon: Icons.add,
+          onPressed: null, // TODO(micro): New Event capture (P5.1)
+        ),
+      ],
+    );
+  }
+
+  /// P3.1 — a plan board's bar (P3.2): home pops to the board root (the
+  /// Library goes with it), back pops one level to the Library.
+  Widget _planBar(BuildContext context) {
+    return BottomBar(
+      key: const Key('plan-bar'),
+      buttons: [
+        BarButton(
+          buttonKey: const Key('bar-home'),
+          icon: Icons.home,
+          onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
+        ),
+        BarButton(
+          buttonKey: const Key('bar-back'),
+          icon: Icons.arrow_back,
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBar(BuildContext context) => switch (widget.bar) {
+    BoardBar.main => _mainBar(context),
+    BoardBar.plan => _planBar(context),
+  };
+
+  /// P3.1 — the Library page: a full screen pushed over the board (the
+  /// board stays the route root underneath).
+  Future<void> _openLibrary(BuildContext context) =>
+      Navigator.of(context)
+          .push(AppPageRoute<void>(builder: (_) => LibraryScreen(controller)));
+
   /// Reset confirmation: nothing happens without an explicit confirm —
   /// Cancel and the barrier tap just dismiss.
   void _showResetDialog(BuildContext context) {
@@ -796,23 +887,26 @@ class _BoardScreenState extends State<BoardScreen> {
         // Enter activates, Escape = Cancel (DismissIntent pops).
         final nav = ScreenNav(
           sections: [
-            NavSection(id: 'actions', cells: [
-              NavCell(
-                id: 'dialog-cancel',
-                row: 0,
-                col: 0,
-                activate: () => Navigator.of(dialogContext).pop(),
-              ),
-              NavCell(
-                id: 'dialog-confirm',
-                row: 0,
-                col: 1,
-                activate: () {
-                  controller.reset();
-                  Navigator.of(dialogContext).pop();
-                },
-              ),
-            ]),
+            NavSection(
+              id: 'actions',
+              cells: [
+                NavCell(
+                  id: 'dialog-cancel',
+                  row: 0,
+                  col: 0,
+                  activate: () => Navigator.of(dialogContext).pop(),
+                ),
+                NavCell(
+                  id: 'dialog-confirm',
+                  row: 0,
+                  col: 1,
+                  activate: () {
+                    controller.reset();
+                    Navigator.of(dialogContext).pop();
+                  },
+                ),
+              ],
+            ),
           ],
         )..focusSection(0);
         return NavKeyboard(
@@ -870,11 +964,7 @@ class _BoardScreenState extends State<BoardScreen> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
-              Icons.double_arrow,
-              size: 18,
-              color: AppColors.text,
-            ),
+            const Icon(Icons.double_arrow, size: 18, color: AppColors.text),
             const SizedBox(width: 4),
             const Text(
               'tap to continue',
@@ -991,57 +1081,63 @@ class _BoardScreenState extends State<BoardScreen> {
     if (state == SessionState.awaitingAdvance) {
       // The limbo row (tweaks #5) mirrors the row's second mode.
       return [
-        NavSection(id: 'controls', cells: [
+        NavSection(
+          id: 'controls',
+          cells: [
+            NavCell(
+              id: 'btn-adjust',
+              row: 0,
+              col: 0,
+              activate: () => _openAdjust(context),
+            ),
+            NavCell(
+              id: 'btn-not-completed',
+              row: 0,
+              col: 1,
+              activate: () => controller.resolveHold(completed: false),
+            ),
+            NavCell(
+              id: 'btn-reset',
+              row: 0,
+              col: 2,
+              activate: () => _showResetDialog(context),
+            ),
+            NavCell(
+              id: 'btn-silence',
+              row: 0,
+              col: 3,
+              activate: () => controller.silenceAlarm(),
+            ),
+          ],
+        ),
+      ];
+    }
+    return [
+      NavSection(
+        id: 'controls',
+        cells: [
           NavCell(
             id: 'btn-adjust',
             row: 0,
             col: 0,
+            enabled: canSkip,
             activate: () => _openAdjust(context),
-          ),
-          NavCell(
-            id: 'btn-not-completed',
-            row: 0,
-            col: 1,
-            activate: () => controller.resolveHold(completed: false),
           ),
           NavCell(
             id: 'btn-reset',
             row: 0,
-            col: 2,
+            col: 1,
             activate: () => _showResetDialog(context),
           ),
           NavCell(
-            id: 'btn-silence',
+            id: 'btn-skip',
             row: 0,
-            col: 3,
-            activate: () => controller.silenceAlarm(),
+            col: 2,
+            enabled: canSkip,
+            activate: () => controller.skipNext(),
           ),
-        ]),
-      ];
-    }
-    return [
-      NavSection(id: 'controls', cells: [
-        NavCell(
-          id: 'btn-adjust',
-          row: 0,
-          col: 0,
-          enabled: canSkip,
-          activate: () => _openAdjust(context),
-        ),
-        NavCell(
-          id: 'btn-reset',
-          row: 0,
-          col: 1,
-          activate: () => _showResetDialog(context),
-        ),
-        NavCell(
-          id: 'btn-skip',
-          row: 0,
-          col: 2,
-          enabled: canSkip,
-          activate: () => controller.skipNext(),
-        ),
-      ]),
+        ],
+      ),
     ];
   }
 }
@@ -1189,67 +1285,6 @@ class _PulseState extends State<_Pulse> with SingleTickerProviderStateMixin {
     opacity: _controller.drive(Tween<double>(begin: 0.35, end: 1.0)),
     child: widget.child,
   );
-}
-
-/// Control-row icon button: NO resting background — a circular HOVER
-/// highlight appears on hover and is "just a touch bigger" than the icon
-/// (acceptance). The hover circle shows even when the action is disabled
-/// (the "next" button was the complaint), and there is no tooltip text.
-class _HoverIconButton extends StatefulWidget {
-  const _HoverIconButton({
-    required this.buttonKey,
-    required this.icon,
-    required this.onPressed,
-    this.color = AppColors.text,
-    this.focused = false,
-    this.circularRing = true,
-  });
-
-  /// Lives on the INNER IconButton (tests address the button by key).
-  final Key buttonKey;
-  final IconData icon;
-  final VoidCallback? onPressed;
-  final Color color;
-
-  /// Keyboard-focus ring (acceptance keyboard navigation).
-  final bool focused;
-
-  /// Round buttons get a circular ring.
-  final bool circularRing;
-
-  @override
-  State<_HoverIconButton> createState() => _HoverIconButtonState();
-}
-
-class _HoverIconButtonState extends State<_HoverIconButton> {
-  bool _hovering = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovering = true),
-      onExit: (_) => setState(() => _hovering = false),
-      child: Container(
-        width: 46,
-        height: 46,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: _hovering || widget.focused
-              ? Colors.white.withValues(alpha: 0.08)
-              : null,
-        ),
-        child: FocusRing(
-          focused: widget.focused,
-          circular: widget.circularRing,
-          child: IconButton(
-            key: widget.buttonKey,
-            icon: Icon(widget.icon, size: 26, color: widget.color),
-            onPressed: widget.onPressed,
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 /// Grey vertical-bar + letters state chip appended to the big line.

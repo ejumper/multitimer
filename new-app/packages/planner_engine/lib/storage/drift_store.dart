@@ -104,6 +104,10 @@ class DriftStore implements Store {
           boardId: r.boardId,
           name: r.name,
           color: r.color,
+          folderId: r.folderId,
+          sortIndex: r.sortIndex,
+          createdAt: r.createdAt,
+          updatedAt: r.updatedAt,
         ),
     ];
   }
@@ -113,33 +117,54 @@ class DriftStore implements Store {
     required String boardId,
     required String name,
     required String color,
-  }) async {
+    String? folderId,
+  }) => _db.transaction(() async {
+    // Land on TOP of the folder's ordered plans (the "new list" rule,
+    // P3.2): ascending sort order, so one below the current minimum.
+    final siblings =
+        await (_db.select(_db.timers)
+              ..where(
+                (t) => folderId == null
+                    ? t.folderId.isNull()
+                    : t.folderId.equals(folderId),
+              )
+              ..orderBy([(t) => OrderingTerm.asc(t.sortIndex)]))
+            .get();
+    final sortIndex = siblings.isEmpty ? 0 : siblings.first.sortIndex - 1;
+    final nowMs = _nowMs();
     final timer = IntervalTimer(
       id: newId(),
       boardId: boardId,
       name: name,
       color: color,
+      folderId: folderId,
+      sortIndex: sortIndex,
+      createdAt: nowMs,
+      updatedAt: nowMs,
     );
-    await _db.transaction(() async {
-      await _db
-          .into(_db.timers)
-          .insert(
-            TimersCompanion.insert(
-              id: timer.id,
-              boardId: timer.boardId,
-              name: timer.name,
-              color: timer.color,
-            ),
-          );
-      await _appendEvent('timer.create', {
-        'timerId': timer.id,
-        'boardId': boardId,
-        'name': name,
-        'color': color,
-      });
+    await _db
+        .into(_db.timers)
+        .insert(
+          TimersCompanion.insert(
+            id: timer.id,
+            boardId: timer.boardId,
+            name: timer.name,
+            color: timer.color,
+            folderId: Value(folderId),
+            sortIndex: sortIndex,
+            createdAt: nowMs,
+            updatedAt: nowMs,
+          ),
+        );
+    await _appendEvent('timer.create', {
+      'timerId': timer.id,
+      'boardId': boardId,
+      'name': name,
+      'color': color,
+      'folderId': folderId,
     });
     return timer;
-  }
+  });
 
   @override
   Future<void> updateTimer(String id, {String? name, String? color}) async {
@@ -153,6 +178,8 @@ class DriftStore implements Store {
         TimersCompanion(
           name: name == null ? const Value.absent() : Value(name),
           color: color == null ? const Value.absent() : Value(color),
+          // The Library row's modified stamp (P3.2): a rename/edit bumps it.
+          updatedAt: Value(_nowMs()),
         ),
       );
       await _appendEvent('timer.update', {'timerId': id, ...changes});
@@ -163,10 +190,16 @@ class DriftStore implements Store {
   Future<void> deleteTimer(String id) async {
     await _db.transaction(() async {
       await _deleteTimerRows(id);
+      // The plan itself — without this the delete is a silent no-op and
+      // the plan survives its own deletion (P3.2 bug caught by tests).
+      await (_db.delete(_db.timers)..where((t) => t.id.equals(id))).go();
       await _appendEvent('timer.delete', {'timerId': id});
     });
   }
 
+  /// Clears a timer's defs + groups. Also used by saveTree as its
+  /// clear-before-insert step — the TIMERS row itself is the callers'
+  /// business (deleteTimer deletes it; the cascades delete theirs in bulk).
   Future<void> _deleteTimerRows(String timerId) async {
     await (_db.delete(
       _db.intervalDefs,
@@ -174,6 +207,118 @@ class DriftStore implements Store {
     await (_db.delete(
       _db.groupDefs,
     )..where((t) => t.timerId.equals(timerId))).go();
+  }
+
+  // ── library folders (v2 P3.2) ─────────────────────────────────────────
+
+  @override
+  Future<List<Folder>> allFolders() async {
+    final rows = await (_db.select(
+      _db.folders,
+    )..orderBy([(t) => OrderingTerm.asc(t.sortIndex)])).get();
+    return [for (final r in rows) Folder(id: r.id, name: r.name)];
+  }
+
+  @override
+  Future<Folder> createFolder(String name) async {
+    return _db.transaction(() async {
+      final rows = await _db.select(_db.folders).get();
+      var next = 0;
+      for (final r in rows) {
+        if (r.sortIndex + 1 > next) next = r.sortIndex + 1;
+      }
+      final folder = Folder(id: newId(), name: name);
+      await _db
+          .into(_db.folders)
+          .insert(
+            FoldersCompanion.insert(id: folder.id, name: name, sortIndex: next),
+          );
+      await _appendEvent('folder.create', {
+        'folderId': folder.id,
+        'name': name,
+      });
+      return folder;
+    });
+  }
+
+  @override
+  Future<void> renameFolder(String id, String name) async {
+    await _db.transaction(() async {
+      final rows = await (_db.select(
+        _db.folders,
+      )..where((t) => t.id.equals(id))).get();
+      if (rows.isEmpty) throw StateError('folder not found: $id');
+      await (_db.update(_db.folders)..where((t) => t.id.equals(id))).write(
+        FoldersCompanion(name: Value(name)),
+      );
+      await _appendEvent('folder.rename', {'folderId': id, 'name': name});
+    });
+  }
+
+  @override
+  Future<void> deleteFolder(String id) async {
+    await _db.transaction(() async {
+      // Cascade, logged per plan exactly like deleteBoard's timers: the
+      // change log stays complete for a future sync consumer.
+      final timers = await (_db.select(
+        _db.timers,
+      )..where((t) => t.folderId.equals(id))).get();
+      for (final t in timers) {
+        await _deleteTimerRows(t.id);
+        await _appendEvent('timer.delete', {'timerId': t.id});
+      }
+      await (_db.delete(_db.timers)..where((t) => t.folderId.equals(id))).go();
+      await (_db.delete(_db.folders)..where((t) => t.id.equals(id))).go();
+      await _appendEvent('folder.delete', {'folderId': id});
+    });
+  }
+
+  @override
+  Future<void> moveTimer({
+    required String timerId,
+    required String? toFolderId,
+    required int toIndex,
+  }) async {
+    await _db.transaction(() async {
+      final rows = await _db.select(_db.timers).get();
+      final matches = rows.where((r) => r.id == timerId);
+      if (matches.isEmpty) throw StateError('timer not found: $timerId');
+      final moved = matches.first;
+
+      List<String> idsIn(String? folderId) {
+        final children =
+            rows
+                .where((r) => r.folderId == folderId && r.id != timerId)
+                .toList()
+              ..sort((a, b) => a.sortIndex.compareTo(b.sortIndex));
+        return [for (final r in children) r.id];
+      }
+
+      final sameFolder = moved.folderId == toFolderId;
+      final sourceIds = idsIn(moved.folderId);
+      final targetIds = sameFolder ? [...sourceIds] : idsIn(toFolderId);
+      final at = toIndex.clamp(0, targetIds.length);
+      targetIds.insert(at, timerId);
+
+      Future<void> renumber(List<String> ids, String? folderId) async {
+        for (var i = 0; i < ids.length; i++) {
+          await (_db.update(
+            _db.timers,
+          )..where((t) => t.id.equals(ids[i]))).write(
+            TimersCompanion(folderId: Value(folderId), sortIndex: Value(i)),
+          );
+        }
+      }
+
+      await renumber(targetIds, toFolderId);
+      if (!sameFolder) await renumber(sourceIds, moved.folderId);
+
+      await _appendEvent('timer.move', {
+        'timerId': timerId,
+        'toFolderId': toFolderId,
+        'toIndex': at,
+      });
+    });
   }
 
   // ── interval tree ───────────────────────────────────────────────────────
@@ -296,6 +441,13 @@ class DriftStore implements Store {
       }
       for (final r in groupRows) {
         await _db.into(_db.groupDefs).insert(r);
+      }
+      // The modified stamp (P3.2): authored writes bump it — EXCEPT
+      // completion marks (`run.mark`), which are execution, not authoring
+      // (the Library row's date must not churn while a list is in use).
+      if (eventKind != 'run.mark') {
+        await (_db.update(_db.timers)..where((t) => t.id.equals(timerId)))
+            .write(TimersCompanion(updatedAt: Value(_nowMs())));
       }
       await _appendEvent(eventKind, {'timerId': timerId, ...eventPayload});
     });

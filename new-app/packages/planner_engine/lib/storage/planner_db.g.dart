@@ -248,8 +248,61 @@ class $TimersTable extends Timers with TableInfo<$TimersTable, TimerRow> {
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _folderIdMeta = const VerificationMeta(
+    'folderId',
+  );
   @override
-  List<GeneratedColumn> get $columns => [id, boardId, name, color];
+  late final GeneratedColumn<String> folderId = GeneratedColumn<String>(
+    'folder_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _sortIndexMeta = const VerificationMeta(
+    'sortIndex',
+  );
+  @override
+  late final GeneratedColumn<int> sortIndex = GeneratedColumn<int>(
+    'sort_index',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<int> createdAt = GeneratedColumn<int>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    boardId,
+    name,
+    color,
+    folderId,
+    sortIndex,
+    createdAt,
+    updatedAt,
+  ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -291,6 +344,36 @@ class $TimersTable extends Timers with TableInfo<$TimersTable, TimerRow> {
     } else if (isInserting) {
       context.missing(_colorMeta);
     }
+    if (data.containsKey('folder_id')) {
+      context.handle(
+        _folderIdMeta,
+        folderId.isAcceptableOrUnknown(data['folder_id']!, _folderIdMeta),
+      );
+    }
+    if (data.containsKey('sort_index')) {
+      context.handle(
+        _sortIndexMeta,
+        sortIndex.isAcceptableOrUnknown(data['sort_index']!, _sortIndexMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sortIndexMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
     return context;
   }
 
@@ -316,6 +399,22 @@ class $TimersTable extends Timers with TableInfo<$TimersTable, TimerRow> {
         DriftSqlType.string,
         data['${effectivePrefix}color'],
       )!,
+      folderId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}folder_id'],
+      ),
+      sortIndex: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sort_index'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
     );
   }
 
@@ -330,11 +429,19 @@ class TimerRow extends DataClass implements Insertable<TimerRow> {
   final String boardId;
   final String name;
   final String color;
+  final String? folderId;
+  final int sortIndex;
+  final int createdAt;
+  final int updatedAt;
   const TimerRow({
     required this.id,
     required this.boardId,
     required this.name,
     required this.color,
+    this.folderId,
+    required this.sortIndex,
+    required this.createdAt,
+    required this.updatedAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -343,6 +450,12 @@ class TimerRow extends DataClass implements Insertable<TimerRow> {
     map['board_id'] = Variable<String>(boardId);
     map['name'] = Variable<String>(name);
     map['color'] = Variable<String>(color);
+    if (!nullToAbsent || folderId != null) {
+      map['folder_id'] = Variable<String>(folderId);
+    }
+    map['sort_index'] = Variable<int>(sortIndex);
+    map['created_at'] = Variable<int>(createdAt);
+    map['updated_at'] = Variable<int>(updatedAt);
     return map;
   }
 
@@ -352,6 +465,12 @@ class TimerRow extends DataClass implements Insertable<TimerRow> {
       boardId: Value(boardId),
       name: Value(name),
       color: Value(color),
+      folderId: folderId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(folderId),
+      sortIndex: Value(sortIndex),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
     );
   }
 
@@ -365,6 +484,10 @@ class TimerRow extends DataClass implements Insertable<TimerRow> {
       boardId: serializer.fromJson<String>(json['boardId']),
       name: serializer.fromJson<String>(json['name']),
       color: serializer.fromJson<String>(json['color']),
+      folderId: serializer.fromJson<String?>(json['folderId']),
+      sortIndex: serializer.fromJson<int>(json['sortIndex']),
+      createdAt: serializer.fromJson<int>(json['createdAt']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
     );
   }
   @override
@@ -375,6 +498,10 @@ class TimerRow extends DataClass implements Insertable<TimerRow> {
       'boardId': serializer.toJson<String>(boardId),
       'name': serializer.toJson<String>(name),
       'color': serializer.toJson<String>(color),
+      'folderId': serializer.toJson<String?>(folderId),
+      'sortIndex': serializer.toJson<int>(sortIndex),
+      'createdAt': serializer.toJson<int>(createdAt),
+      'updatedAt': serializer.toJson<int>(updatedAt),
     };
   }
 
@@ -383,11 +510,19 @@ class TimerRow extends DataClass implements Insertable<TimerRow> {
     String? boardId,
     String? name,
     String? color,
+    Value<String?> folderId = const Value.absent(),
+    int? sortIndex,
+    int? createdAt,
+    int? updatedAt,
   }) => TimerRow(
     id: id ?? this.id,
     boardId: boardId ?? this.boardId,
     name: name ?? this.name,
     color: color ?? this.color,
+    folderId: folderId.present ? folderId.value : this.folderId,
+    sortIndex: sortIndex ?? this.sortIndex,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
   );
   TimerRow copyWithCompanion(TimersCompanion data) {
     return TimerRow(
@@ -395,6 +530,10 @@ class TimerRow extends DataClass implements Insertable<TimerRow> {
       boardId: data.boardId.present ? data.boardId.value : this.boardId,
       name: data.name.present ? data.name.value : this.name,
       color: data.color.present ? data.color.value : this.color,
+      folderId: data.folderId.present ? data.folderId.value : this.folderId,
+      sortIndex: data.sortIndex.present ? data.sortIndex.value : this.sortIndex,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
 
@@ -404,13 +543,26 @@ class TimerRow extends DataClass implements Insertable<TimerRow> {
           ..write('id: $id, ')
           ..write('boardId: $boardId, ')
           ..write('name: $name, ')
-          ..write('color: $color')
+          ..write('color: $color, ')
+          ..write('folderId: $folderId, ')
+          ..write('sortIndex: $sortIndex, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, boardId, name, color);
+  int get hashCode => Object.hash(
+    id,
+    boardId,
+    name,
+    color,
+    folderId,
+    sortIndex,
+    createdAt,
+    updatedAt,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -418,7 +570,11 @@ class TimerRow extends DataClass implements Insertable<TimerRow> {
           other.id == this.id &&
           other.boardId == this.boardId &&
           other.name == this.name &&
-          other.color == this.color);
+          other.color == this.color &&
+          other.folderId == this.folderId &&
+          other.sortIndex == this.sortIndex &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
 }
 
 class TimersCompanion extends UpdateCompanion<TimerRow> {
@@ -426,12 +582,20 @@ class TimersCompanion extends UpdateCompanion<TimerRow> {
   final Value<String> boardId;
   final Value<String> name;
   final Value<String> color;
+  final Value<String?> folderId;
+  final Value<int> sortIndex;
+  final Value<int> createdAt;
+  final Value<int> updatedAt;
   final Value<int> rowid;
   const TimersCompanion({
     this.id = const Value.absent(),
     this.boardId = const Value.absent(),
     this.name = const Value.absent(),
     this.color = const Value.absent(),
+    this.folderId = const Value.absent(),
+    this.sortIndex = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   TimersCompanion.insert({
@@ -439,16 +603,27 @@ class TimersCompanion extends UpdateCompanion<TimerRow> {
     required String boardId,
     required String name,
     required String color,
+    this.folderId = const Value.absent(),
+    required int sortIndex,
+    required int createdAt,
+    required int updatedAt,
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        boardId = Value(boardId),
        name = Value(name),
-       color = Value(color);
+       color = Value(color),
+       sortIndex = Value(sortIndex),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
   static Insertable<TimerRow> custom({
     Expression<String>? id,
     Expression<String>? boardId,
     Expression<String>? name,
     Expression<String>? color,
+    Expression<String>? folderId,
+    Expression<int>? sortIndex,
+    Expression<int>? createdAt,
+    Expression<int>? updatedAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -456,6 +631,10 @@ class TimersCompanion extends UpdateCompanion<TimerRow> {
       if (boardId != null) 'board_id': boardId,
       if (name != null) 'name': name,
       if (color != null) 'color': color,
+      if (folderId != null) 'folder_id': folderId,
+      if (sortIndex != null) 'sort_index': sortIndex,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -465,6 +644,10 @@ class TimersCompanion extends UpdateCompanion<TimerRow> {
     Value<String>? boardId,
     Value<String>? name,
     Value<String>? color,
+    Value<String?>? folderId,
+    Value<int>? sortIndex,
+    Value<int>? createdAt,
+    Value<int>? updatedAt,
     Value<int>? rowid,
   }) {
     return TimersCompanion(
@@ -472,6 +655,10 @@ class TimersCompanion extends UpdateCompanion<TimerRow> {
       boardId: boardId ?? this.boardId,
       name: name ?? this.name,
       color: color ?? this.color,
+      folderId: folderId ?? this.folderId,
+      sortIndex: sortIndex ?? this.sortIndex,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -491,6 +678,18 @@ class TimersCompanion extends UpdateCompanion<TimerRow> {
     if (color.present) {
       map['color'] = Variable<String>(color.value);
     }
+    if (folderId.present) {
+      map['folder_id'] = Variable<String>(folderId.value);
+    }
+    if (sortIndex.present) {
+      map['sort_index'] = Variable<int>(sortIndex.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<int>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -504,6 +703,10 @@ class TimersCompanion extends UpdateCompanion<TimerRow> {
           ..write('boardId: $boardId, ')
           ..write('name: $name, ')
           ..write('color: $color, ')
+          ..write('folderId: $folderId, ')
+          ..write('sortIndex: $sortIndex, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1951,6 +2154,263 @@ class EventLogCompanion extends UpdateCompanion<EventLogRow> {
   }
 }
 
+class $FoldersTable extends Folders with TableInfo<$FoldersTable, FolderRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $FoldersTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sortIndexMeta = const VerificationMeta(
+    'sortIndex',
+  );
+  @override
+  late final GeneratedColumn<int> sortIndex = GeneratedColumn<int>(
+    'sort_index',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, name, sortIndex];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'folders';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<FolderRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('sort_index')) {
+      context.handle(
+        _sortIndexMeta,
+        sortIndex.isAcceptableOrUnknown(data['sort_index']!, _sortIndexMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sortIndexMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  FolderRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return FolderRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      sortIndex: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sort_index'],
+      )!,
+    );
+  }
+
+  @override
+  $FoldersTable createAlias(String alias) {
+    return $FoldersTable(attachedDatabase, alias);
+  }
+}
+
+class FolderRow extends DataClass implements Insertable<FolderRow> {
+  final String id;
+  final String name;
+  final int sortIndex;
+  const FolderRow({
+    required this.id,
+    required this.name,
+    required this.sortIndex,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['name'] = Variable<String>(name);
+    map['sort_index'] = Variable<int>(sortIndex);
+    return map;
+  }
+
+  FoldersCompanion toCompanion(bool nullToAbsent) {
+    return FoldersCompanion(
+      id: Value(id),
+      name: Value(name),
+      sortIndex: Value(sortIndex),
+    );
+  }
+
+  factory FolderRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return FolderRow(
+      id: serializer.fromJson<String>(json['id']),
+      name: serializer.fromJson<String>(json['name']),
+      sortIndex: serializer.fromJson<int>(json['sortIndex']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'name': serializer.toJson<String>(name),
+      'sortIndex': serializer.toJson<int>(sortIndex),
+    };
+  }
+
+  FolderRow copyWith({String? id, String? name, int? sortIndex}) => FolderRow(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    sortIndex: sortIndex ?? this.sortIndex,
+  );
+  FolderRow copyWithCompanion(FoldersCompanion data) {
+    return FolderRow(
+      id: data.id.present ? data.id.value : this.id,
+      name: data.name.present ? data.name.value : this.name,
+      sortIndex: data.sortIndex.present ? data.sortIndex.value : this.sortIndex,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('FolderRow(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('sortIndex: $sortIndex')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, name, sortIndex);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is FolderRow &&
+          other.id == this.id &&
+          other.name == this.name &&
+          other.sortIndex == this.sortIndex);
+}
+
+class FoldersCompanion extends UpdateCompanion<FolderRow> {
+  final Value<String> id;
+  final Value<String> name;
+  final Value<int> sortIndex;
+  final Value<int> rowid;
+  const FoldersCompanion({
+    this.id = const Value.absent(),
+    this.name = const Value.absent(),
+    this.sortIndex = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  FoldersCompanion.insert({
+    required String id,
+    required String name,
+    required int sortIndex,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       name = Value(name),
+       sortIndex = Value(sortIndex);
+  static Insertable<FolderRow> custom({
+    Expression<String>? id,
+    Expression<String>? name,
+    Expression<int>? sortIndex,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (name != null) 'name': name,
+      if (sortIndex != null) 'sort_index': sortIndex,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  FoldersCompanion copyWith({
+    Value<String>? id,
+    Value<String>? name,
+    Value<int>? sortIndex,
+    Value<int>? rowid,
+  }) {
+    return FoldersCompanion(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      sortIndex: sortIndex ?? this.sortIndex,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (sortIndex.present) {
+      map['sort_index'] = Variable<int>(sortIndex.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('FoldersCompanion(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('sortIndex: $sortIndex, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$PlannerDb extends GeneratedDatabase {
   _$PlannerDb(QueryExecutor e) : super(e);
   $PlannerDbManager get managers => $PlannerDbManager(this);
@@ -1959,6 +2419,7 @@ abstract class _$PlannerDb extends GeneratedDatabase {
   late final $IntervalDefsTable intervalDefs = $IntervalDefsTable(this);
   late final $GroupDefsTable groupDefs = $GroupDefsTable(this);
   late final $EventLogTable eventLog = $EventLogTable(this);
+  late final $FoldersTable folders = $FoldersTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -1969,6 +2430,7 @@ abstract class _$PlannerDb extends GeneratedDatabase {
     intervalDefs,
     groupDefs,
     eventLog,
+    folders,
   ];
 }
 
@@ -2110,6 +2572,10 @@ typedef $$TimersTableCreateCompanionBuilder = TimersCompanion Function({
   required String boardId,
   required String name,
   required String color,
+  Value<String?> folderId,
+  required int sortIndex,
+  required int createdAt,
+  required int updatedAt,
   Value<int> rowid,
 });
 typedef $$TimersTableUpdateCompanionBuilder = TimersCompanion Function({
@@ -2117,6 +2583,10 @@ typedef $$TimersTableUpdateCompanionBuilder = TimersCompanion Function({
   Value<String> boardId,
   Value<String> name,
   Value<String> color,
+  Value<String?> folderId,
+  Value<int> sortIndex,
+  Value<int> createdAt,
+  Value<int> updatedAt,
   Value<int> rowid,
 });
 
@@ -2145,6 +2615,26 @@ class $$TimersTableFilterComposer extends Composer<_$PlannerDb, $TimersTable> {
 
   ColumnFilters<String> get color => $composableBuilder(
     column: $table.color,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get folderId => $composableBuilder(
+    column: $table.folderId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get sortIndex => $composableBuilder(
+    column: $table.sortIndex,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -2177,6 +2667,26 @@ class $$TimersTableOrderingComposer
     column: $table.color,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get folderId => $composableBuilder(
+    column: $table.folderId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get sortIndex => $composableBuilder(
+    column: $table.sortIndex,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$TimersTableAnnotationComposer
@@ -2199,6 +2709,18 @@ class $$TimersTableAnnotationComposer
 
   GeneratedColumn<String> get color =>
       $composableBuilder(column: $table.color, builder: (column) => column);
+
+  GeneratedColumn<String> get folderId =>
+      $composableBuilder(column: $table.folderId, builder: (column) => column);
+
+  GeneratedColumn<int> get sortIndex =>
+      $composableBuilder(column: $table.sortIndex, builder: (column) => column);
+
+  GeneratedColumn<int> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
 }
 
 class $$TimersTableTableManager
@@ -2233,12 +2755,20 @@ class $$TimersTableTableManager
                 Value<String> boardId = const Value.absent(),
                 Value<String> name = const Value.absent(),
                 Value<String> color = const Value.absent(),
+                Value<String?> folderId = const Value.absent(),
+                Value<int> sortIndex = const Value.absent(),
+                Value<int> createdAt = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => TimersCompanion(
                 id: id,
                 boardId: boardId,
                 name: name,
                 color: color,
+                folderId: folderId,
+                sortIndex: sortIndex,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -2247,12 +2777,20 @@ class $$TimersTableTableManager
                 required String boardId,
                 required String name,
                 required String color,
+                Value<String?> folderId = const Value.absent(),
+                required int sortIndex,
+                required int createdAt,
+                required int updatedAt,
                 Value<int> rowid = const Value.absent(),
               }) => TimersCompanion.insert(
                 id: id,
                 boardId: boardId,
                 name: name,
                 color: color,
+                folderId: folderId,
+                sortIndex: sortIndex,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -3037,6 +3575,169 @@ typedef $$EventLogTableProcessedTableManager =
       EventLogRow,
       PrefetchHooks Function()
     >;
+typedef $$FoldersTableCreateCompanionBuilder = FoldersCompanion Function({
+  required String id,
+  required String name,
+  required int sortIndex,
+  Value<int> rowid,
+});
+typedef $$FoldersTableUpdateCompanionBuilder = FoldersCompanion Function({
+  Value<String> id,
+  Value<String> name,
+  Value<int> sortIndex,
+  Value<int> rowid,
+});
+
+class $$FoldersTableFilterComposer
+    extends Composer<_$PlannerDb, $FoldersTable> {
+  $$FoldersTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get sortIndex => $composableBuilder(
+    column: $table.sortIndex,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$FoldersTableOrderingComposer
+    extends Composer<_$PlannerDb, $FoldersTable> {
+  $$FoldersTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get sortIndex => $composableBuilder(
+    column: $table.sortIndex,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$FoldersTableAnnotationComposer
+    extends Composer<_$PlannerDb, $FoldersTable> {
+  $$FoldersTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<int> get sortIndex =>
+      $composableBuilder(column: $table.sortIndex, builder: (column) => column);
+}
+
+class $$FoldersTableTableManager
+    extends
+        RootTableManager<
+          _$PlannerDb,
+          $FoldersTable,
+          FolderRow,
+          $$FoldersTableFilterComposer,
+          $$FoldersTableOrderingComposer,
+          $$FoldersTableAnnotationComposer,
+          $$FoldersTableCreateCompanionBuilder,
+          $$FoldersTableUpdateCompanionBuilder,
+          (FolderRow, BaseReferences<_$PlannerDb, $FoldersTable, FolderRow>),
+          FolderRow,
+          PrefetchHooks Function()
+        > {
+  $$FoldersTableTableManager(_$PlannerDb db, $FoldersTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$FoldersTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$FoldersTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$FoldersTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<int> sortIndex = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => FoldersCompanion(
+                id: id,
+                name: name,
+                sortIndex: sortIndex,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String name,
+                required int sortIndex,
+                Value<int> rowid = const Value.absent(),
+              }) => FoldersCompanion.insert(
+                id: id,
+                name: name,
+                sortIndex: sortIndex,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$FoldersTable, FolderRow>(table),
+                  BaseReferences<_$PlannerDb, $FoldersTable, FolderRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$FoldersTableProcessedTableManager =
+    ProcessedTableManager<
+      _$PlannerDb,
+      $FoldersTable,
+      FolderRow,
+      $$FoldersTableFilterComposer,
+      $$FoldersTableOrderingComposer,
+      $$FoldersTableAnnotationComposer,
+      $$FoldersTableCreateCompanionBuilder,
+      $$FoldersTableUpdateCompanionBuilder,
+      (FolderRow, BaseReferences<_$PlannerDb, $FoldersTable, FolderRow>),
+      FolderRow,
+      PrefetchHooks Function()
+    >;
 
 class $PlannerDbManager {
   final _$PlannerDb _db;
@@ -3051,4 +3752,6 @@ class $PlannerDbManager {
       $$GroupDefsTableTableManager(_db, _db.groupDefs);
   $$EventLogTableTableManager get eventLog =>
       $$EventLogTableTableManager(_db, _db.eventLog);
+  $$FoldersTableTableManager get folders =>
+      $$FoldersTableTableManager(_db, _db.folders);
 }
