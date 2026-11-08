@@ -6,6 +6,7 @@ import 'package:planner_engine/planner_engine.dart';
 import 'app_controller.dart';
 import 'bottom_bar.dart';
 import 'day_navigation.dart';
+import 'edge_chevrons.dart';
 import 'settings_service.dart';
 import 'theme.dart';
 
@@ -29,12 +30,14 @@ import 'theme.dart';
 /// range.
 ///
 /// Navigation (rule 3): hover-revealed chevrons at the vertical center of
-/// the left/right window edges — the touch-map's swipe replacement. They
-/// live in SIDE GUTTERS laid out BESIDE the reading column (never over
-/// the day list): left = previous week/month, right = next. Tapping a day
-/// row opens THAT DAY'S BOARD through [AppController.init]'s `dayDate`
-/// seam — a read-only open (P4.1; the fork happens on the day board's
-/// first write — P4.3 completes the day-board story).
+/// the left/right window edges — the touch-map's swipe replacement,
+/// rendered by the shared [EdgeChevron] widget (P5.3 — the day boards
+/// use the same component). They live in SIDE GUTTERS laid out BESIDE
+/// the reading column (never over the day list): left = previous
+/// week/month, right = next. Tapping a day row opens THAT DAY'S BOARD
+/// through [AppController.init]'s `dayDate` seam — a read-only open
+/// (P4.1; the fork happens on the day board's first write — P4.3
+/// completes the day-board story).
 ///
 /// Own bar (P3.1's page-contextual bars): **home** (today's day board —
 /// P4.3, falling back to the board root when nothing claims today) ·
@@ -42,12 +45,24 @@ import 'theme.dart';
 /// month-grid picker: the shown month's day numbers in a simple
 /// 7-column grid with month stepping; picking a day sets the shown range
 /// + the highlight).
+///
+/// P5.3 — [openNonDefaultView] is the main bar Calendar button's QUICK
+/// ACTION: the page opens on the view the default-view setting does NOT
+/// configure (week ⇄ month).
 class CalendarScreen extends StatefulWidget {
-  const CalendarScreen(this.controller, {super.key});
+  const CalendarScreen(this.controller, {
+    super.key,
+    this.openNonDefaultView = false,
+  });
 
   /// The board's controller — the store/clock seam the page reads days
   /// through and day boards are opened from.
   final AppController controller;
+
+  /// P5.3 quick action: open on the NON-default view — the opposite of
+  /// [kSettingCalendarDefaultView]'s answer. False = the configured
+  /// default (the plain button's open).
+  final bool openNonDefaultView;
 
   @override
   State<CalendarScreen> createState() => _CalendarScreenState();
@@ -79,10 +94,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
   /// First load finished — the one loading frame (the Library's rule).
   bool _ready = false;
 
-  /// Edge-chevron hover state (the reveal).
-  bool _hoverLeft = false;
-  bool _hoverRight = false;
-
   /// [_reload] generation: a stale count batch (a range change mid-
   /// flight) is dropped instead of overwriting the newer range's counts.
   int _reloadGeneration = 0;
@@ -103,16 +114,18 @@ class _CalendarScreenState extends State<CalendarScreen> {
   }
 
   /// P5.2 — the INITIAL view comes from the Calendar default view
-  /// setting (week when unset), read fresh at open; the count batch
-  /// follows so the first ready frame renders the configured range.
+  /// setting (week when unset), read fresh at open; P5.3's quick action
+  /// ([openNonDefaultView]) flips it to the OTHER view — the outline's
+  /// "opens to the non-default view". The count batch follows so the
+  /// first ready frame renders the range the view settled on.
   Future<void> _initFromSettings() async {
     final settings = SettingsService(controller.store);
     await settings.load();
     if (!mounted || _viewTouched) return;
+    final defaultMonth = settings.calendarDefaultView == kCalendarViewMonth;
+    final month = widget.openNonDefaultView ? !defaultMonth : defaultMonth;
     setState(() {
-      _view = settings.calendarDefaultView == kCalendarViewMonth
-          ? _CalendarView.month
-          : _CalendarView.week;
+      _view = month ? _CalendarView.month : _CalendarView.week;
     });
     unawaited(_reload());
   }
@@ -308,46 +321,16 @@ class _CalendarScreenState extends State<CalendarScreen> {
     );
   }
 
-  /// One window-edge gutter (56px, touching the window edge): the mouse
-  /// region REVEALS its chevron — hidden until the pointer enters the
-  /// strip, [AnimatedOpacity] for the fade. The button sits at the
+  /// One window-edge gutter — the shared [EdgeChevron] (P5.3): the
+  /// mouse REVEALS its chevron in the strip, the button sits at the
   /// gutter's vertical center, outside the reading column.
-  Widget _edgeNav({required bool left}) {
-    final revealed = left ? _hoverLeft : _hoverRight;
-    return MouseRegion(
-      key: Key(left ? 'cal-gutter-left' : 'cal-gutter-right'),
-      onEnter: (_) => setState(() {
-        if (left) {
-          _hoverLeft = true;
-        } else {
-          _hoverRight = true;
-        }
-      }),
-      onExit: (_) => setState(() {
-        if (left) {
-          _hoverLeft = false;
-        } else {
-          _hoverRight = false;
-        }
-      }),
-      child: SizedBox(
-        width: 56,
-        child: Align(
-          alignment: Alignment.center,
-          child: AnimatedOpacity(
-            key: Key(left ? 'cal-prev-reveal' : 'cal-next-reveal'),
-            opacity: revealed ? 1.0 : 0.0,
-            duration: const Duration(milliseconds: 150),
-            child: BarButton(
-              buttonKey: Key(left ? 'cal-prev' : 'cal-next'),
-              icon: left ? Icons.chevron_left : Icons.chevron_right,
-              onPressed: () => _page(left ? -1 : 1),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget _edgeNav({required bool left}) => EdgeChevron(
+    left: left,
+    gutterKey: Key(left ? 'cal-gutter-left' : 'cal-gutter-right'),
+    revealKey: Key(left ? 'cal-prev-reveal' : 'cal-next-reveal'),
+    buttonKey: Key(left ? 'cal-prev' : 'cal-next'),
+    onPressed: () => _page(left ? -1 : 1),
+  );
 
   /// The day list — a plain Column inside a scroll view so EVERY shown
   /// day is BUILT (the board's list-view rule: month view renders up to
@@ -383,7 +366,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
       behavior: HitTestBehavior.opaque,
       onTap: () => unawaited(_openDay(day)),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        // The Library plan rows' padding — one row vocabulary (P5.3).
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         clipBehavior: Clip.antiAlias, // the fill must not square corners
         decoration: highlighted ? _highlightDecoration : AppDecorations.card,
         child: Row(

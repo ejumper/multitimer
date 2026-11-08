@@ -31,7 +31,13 @@ import 'fakes.dart';
 /// (re-confirming stays idempotent), the weekday/monthday flows with
 /// their repeat switches (repeat off = the one-off date), the menu's
 /// active-rule list + remove affordance, and `btn-defaults` on the plan
-/// bar ONLY (board root and Library get no menu).
+/// bar ONLY (board root and Library get no menu) · v2 P5.3: the plan
+/// bar's SLOT ORDER (the merged outline bar — home · back · new item ·
+/// delete mode · checklist · show/hide completed · defaults, the two
+/// new buttons included), new item opening the interval editor in CREATE
+/// mode and saving a new interval into the plan (blank = cancel), and
+/// delete mode — tap row → confirm → the item is gone from the tree AND
+/// the store.
 ///
 /// Main fixture (saved BEFORE init) — ordinals in parentheses:
 /// `a 'break' 60s manual (0)` · `G(g1 ×2){b 'Cards' 30s auto} (1,2)` ·
@@ -1490,6 +1496,157 @@ void main() {
     await settle(tester);
     expect(find.byKey(const Key('library-page')), findsOneWidget);
     expect(find.byKey(const Key('btn-defaults')), findsNothing);
+
+    controller.dispose();
+    await store.close();
+  });
+
+  // ── P5.3: the plan bar's new item + delete mode ─────────────────
+
+  testWidgets('plan_bar_slot_order_pins_the_merged_outline_bar', (
+    tester,
+  ) async {
+    await pumpPlanBoard(tester);
+
+    final buttons = find.descendant(
+      of: find.byKey(const Key('plan-bar')),
+      matching: find.byType(IconButton),
+    );
+    expect(buttons, findsNWidgets(7));
+    expect(
+      [for (final w in tester.widgetList<IconButton>(buttons)) w.key!],
+      const [
+        Key('bar-home'),
+        Key('bar-back'),
+        Key('bar-new-item'),
+        Key('bar-delete-item'),
+        Key('btn-checklist'),
+        Key('btn-toggle-completed'),
+        Key('btn-defaults'),
+      ],
+      reason: 'left→right: home · back · new item · delete mode · '
+          'checklist · show/hide completed · defaults (P5.3)',
+    );
+    // Both NEW buttons are live.
+    expect(
+      tester
+          .widget<IconButton>(find.byKey(const Key('bar-new-item')))
+          .onPressed,
+      isNotNull,
+    );
+    expect(
+      tester
+          .widget<IconButton>(find.byKey(const Key('bar-delete-item')))
+          .onPressed,
+      isNotNull,
+    );
+
+    controller.dispose();
+    await store.close();
+  });
+
+  testWidgets('new_item_opens_the_interval_editor_and_saves_into_the_plan', (
+    tester,
+  ) async {
+    await pumpPlanBoard(tester);
+    final before = await store.loadTree(controller.timer.id);
+
+    await tester.tap(find.byKey(const Key('bar-new-item')));
+    await settle(tester);
+    // The INTERVAL editor in CREATE mode over the plan — not the event
+    // capture (no Date/Overwrite fields), not the timer editor (no Done
+    // step: back IS the save).
+    expect(find.byKey(const Key('ie-back')), findsOneWidget);
+    expect(find.byKey(const Key('ie-label')), findsOneWidget);
+    expect(find.byKey(const Key('ie-overwrite')), findsNothing);
+    expect(find.byKey(const Key('editor-done')), findsNothing);
+
+    await tester.enterText(find.byKey(const Key('ie-label')), 'Water plants');
+    await tester.ensureVisible(find.byKey(const Key('ie-back')));
+    await tester.tap(find.byKey(const Key('ie-back')));
+    await settle(tester);
+
+    // Saved into the plan AND rendered on the board (the commit reloaded
+    // the session through the write seam).
+    expect(find.byKey(const Key('ie-back')), findsNothing);
+    final after = await store.loadTree(controller.timer.id);
+    expect(after.roots, hasLength(before.roots.length + 1));
+    final added = after.roots.last as DefNode;
+    expect(added.def.name, 'Water plants');
+    expect(controller.tree.roots.any((n) => n.id == added.id), isTrue);
+    expect(find.byKey(Key('row-${added.id}')), findsOneWidget);
+
+    // A blank create is a cancel — nothing lands.
+    await tester.tap(find.byKey(const Key('bar-new-item')));
+    await settle(tester);
+    expect(find.byKey(const Key('ie-back')), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const Key('ie-back')));
+    await tester.tap(find.byKey(const Key('ie-back')));
+    await settle(tester);
+    expect(
+      (await store.loadTree(controller.timer.id)).roots,
+      hasLength(after.roots.length),
+      reason: 'an empty CREATE writes nothing',
+    );
+    expect(find.byKey(const Key('ie-back')), findsNothing);
+
+    controller.dispose();
+    await store.close();
+  });
+
+  testWidgets('delete_mode_tap_confirm_deletes_from_tree_and_store', (
+    tester,
+  ) async {
+    await pumpPlanBoard(tester);
+
+    // Arm delete mode — the button tints danger while armed (the
+    // Library delete-list rule).
+    await tester.tap(find.byKey(const Key('bar-delete-item')));
+    await tester.pump();
+    final icon = tester
+        .widgetList<Icon>(
+          find.descendant(
+            of: find.byKey(const Key('bar-delete-item')),
+            matching: find.byType(Icon),
+          ),
+        )
+        .first;
+    expect(icon.color, AppColors.danger);
+
+    // Tap the ROW → the confirm dialog (Cancel keeps the item).
+    await tester.tap(find.byKey(Key('row-a')));
+    await settle(tester);
+    expect(find.text('Delete item?'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.textContaining('break'),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const Key('dialog-cancel')));
+    await settle(tester);
+    expect(find.byKey(Key('row-a')), findsOneWidget);
+
+    // Confirm → the item is gone from the TREE (the board adopted the
+    // shortened tree) and from the STORE.
+    await tester.tap(find.byKey(Key('row-a')));
+    await settle(tester);
+    await tester.tap(find.byKey(const Key('dialog-confirm')));
+    await settle(tester);
+    expect(find.byKey(Key('row-a')), findsNothing);
+    expect(controller.tree.roots.any((n) => n.id == 'a'), isFalse);
+    final tree = await store.loadTree(controller.timer.id);
+    expect(tree.roots.any((n) => n.id == 'a'), isFalse);
+    expect(tree.roots, hasLength(4)); // g1, d, w, o remain
+
+    // Disarm (explicit toggle) → plain taps ask nothing again.
+    await tester.tap(find.byKey(const Key('bar-delete-item')));
+    await tester.pump();
+    await tester.tap(find.byKey(Key('row-d')));
+    await settle(tester);
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(find.byKey(Key('row-d')), findsOneWidget);
 
     controller.dispose();
     await store.close();

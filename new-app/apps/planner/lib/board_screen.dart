@@ -9,6 +9,7 @@ import 'bottom_bar.dart';
 import 'calendar_screen.dart';
 import 'day_navigation.dart';
 import 'defaults_menu.dart';
+import 'edge_chevrons.dart';
 import 'editor_controller.dart';
 import 'editor_screen.dart';
 import 'event_capture.dart';
@@ -39,14 +40,17 @@ import 'time_adjust_modal.dart';
 /// are out of v1 scope — they arrive as bottom-bar buttons instead
 /// (v2 P3.1): every page renders its own [BottomBar], and the same
 /// [BoardScreen] serves as the home board ([BoardBar.main]: Settings ·
-/// Calendar · Library · New Event) and as a Library plan's board
-/// ([BoardBar.plan]: home · back · defaults (P3.4)).
+/// Calendar · Library · New Event — Calendar and Library carry their
+/// P5.3 right-click quick actions) and as a Library plan's board
+/// ([BoardBar.plan]: home · back · new item · delete mode · checklist ·
+/// show/hide completed · defaults).
 ///
 /// P4.3 — bound to a calendar day (`controller.dayDate`), the board also
-/// renders the calendar's hover-revealed edge GUTTERS: chevrons at the
-/// window edges' vertical center that step to the previous/next day (the
-/// day swiping — a plain plan board builds none), and its plan-bar Home
-/// lands on today's day board ([openHome]).
+/// renders the calendar's hover-revealed edge GUTTERS (the shared
+/// [EdgeChevron] widget, P5.3): chevrons at the window edges' vertical
+/// center that step to the previous/next day (the day swiping — a plain
+/// plan board builds none), and its plan-bar Home lands on today's day
+/// board ([openHome]).
 class BoardScreen extends StatefulWidget {
   const BoardScreen(this.controller, {
     super.key,
@@ -116,11 +120,16 @@ class _BoardScreenState extends State<BoardScreen> {
   /// land straight in the completed section instead of waiting again.
   bool _sinksInitialized = false;
 
-  // ── v2 P4.3: day boards — the step chevrons ───────────────────────────
+  // ── v2 P5.3: the plan bar's delete mode ─────────────────────────────────
 
-  /// Edge-chevron hover state (the reveal) — date-bound boards only.
-  bool _hoverLeft = false;
-  bool _hoverRight = false;
+  /// Delete mode (the plan bar's `bar-delete-item` toggle): while armed,
+  /// a plain tap on an interval ROW asks for confirmation and deletes
+  /// that item from the plan's tree (the completion circle stands down
+  /// with it so the tap never half-hits). Explicit toggle — it survives
+  /// deletes until tapped again (the Library's delete-list rule).
+  bool _deleteMode = false;
+
+  // ── v2 P4.3: day boards — the step chevrons ───────────────────────────
 
   /// The async init/push double-tap guard of the day-step chevrons (the
   /// calendar's day-open guard, [openDayBoard]).
@@ -164,47 +173,18 @@ class _BoardScreenState extends State<BoardScreen> {
   );
 
   /// P4.3's day swiping — one window-edge gutter beside the reading
-  /// column (the calendar's chevron pattern, mirrored): the mouse region
-  /// REVEALS its chevron — hidden until the pointer enters the strip,
-  /// [AnimatedOpacity] for the fade — at the gutter's vertical center.
-  /// Present ONLY on date-bound boards ([build] builds no gutters
-  /// otherwise): left steps to the PREVIOUS day, right to the NEXT.
-  Widget _edgeNav({required bool left}) {
-    final revealed = left ? _hoverLeft : _hoverRight;
-    return MouseRegion(
-      key: Key(left ? 'day-gutter-left' : 'day-gutter-right'),
-      onEnter: (_) => setState(() {
-        if (left) {
-          _hoverLeft = true;
-        } else {
-          _hoverRight = true;
-        }
-      }),
-      onExit: (_) => setState(() {
-        if (left) {
-          _hoverLeft = false;
-        } else {
-          _hoverRight = false;
-        }
-      }),
-      child: SizedBox(
-        width: 56,
-        child: Align(
-          alignment: Alignment.center,
-          child: AnimatedOpacity(
-            key: Key(left ? 'day-prev-reveal' : 'day-next-reveal'),
-            opacity: revealed ? 1.0 : 0.0,
-            duration: const Duration(milliseconds: 150),
-            child: BarButton(
-              buttonKey: Key(left ? 'day-prev' : 'day-next'),
-              icon: left ? Icons.chevron_left : Icons.chevron_right,
-              onPressed: () => unawaited(_stepDay(left ? -1 : 1)),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  /// column: the shared [EdgeChevron] (P5.3 — same component as the
+  /// calendar), whose mouse region REVEALS its chevron at the gutter's
+  /// vertical center. Present ONLY on date-bound boards ([build] builds
+  /// no gutters otherwise): left steps to the PREVIOUS day, right to the
+  /// NEXT.
+  Widget _edgeNav({required bool left}) => EdgeChevron(
+    left: left,
+    gutterKey: Key(left ? 'day-gutter-left' : 'day-gutter-right'),
+    revealKey: Key(left ? 'day-prev-reveal' : 'day-next-reveal'),
+    buttonKey: Key(left ? 'day-prev' : 'day-next'),
+    onPressed: () => unawaited(_stepDay(left ? -1 : 1)),
+  );
 
   /// P4.3 — the chevron press: push the NEIGHBOURING day's board over
   /// this one (one open at a time — the init/push double-tap guard).
@@ -595,7 +575,9 @@ class _BoardScreenState extends State<BoardScreen> {
           RowCircle(
             key: Key('check-${def.id}'),
             checked: completed,
-            onTap: ordinals.isEmpty
+            // P5.3: delete mode owns the row's plain taps — the circle
+            // stands down so a tap anywhere asks to delete.
+            onTap: ordinals.isEmpty || _deleteMode
                 ? null
                 : () => controller.toggleMark(ordinals.first),
           ),
@@ -649,6 +631,11 @@ class _BoardScreenState extends State<BoardScreen> {
       // occurrence — direct, no confirmation (the interval-picker
       // overlay is gone).
       onSecondaryTapDown: (_) => _jumpToRow(ordinals),
+      // P5.3: while delete mode is armed a plain tap asks to delete the
+      // item (null = the normal board, where only the checkbox reacts).
+      onTap: _deleteMode
+          ? () => unawaited(_confirmDeleteRow(DefNode(def)))
+          : null,
       child: row,
     );
   }
@@ -757,7 +744,7 @@ class _BoardScreenState extends State<BoardScreen> {
         !isSuspended &&
         ordinals.every((o) => o < cursor);
 
-    return Opacity(
+    final row = Opacity(
       key: Key('row-${group.id}'),
       opacity: (completed || passed) ? AppColors.dimmed.a : 1.0,
       child: Row(
@@ -801,6 +788,15 @@ class _BoardScreenState extends State<BoardScreen> {
           ),
         ],
       ),
+    );
+    if (!_deleteMode) return row;
+    // P5.3 delete mode: the group's own tap asks to delete it (a nested
+    // child row wins the tap through its own detector, so children delete
+    // themselves, not the group).
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => unawaited(_confirmDeleteRow(GroupNode(group, children))),
+      child: row,
     );
   }
 
@@ -1054,9 +1050,12 @@ class _BoardScreenState extends State<BoardScreen> {
   /// Settings since P5.2 (it pushes [SettingsScreen]; P5.3 completes the
   /// bar's styling).
   ///
-  /// Library: tap opens the Library page; right-click is its quick action
-  /// — save the currently open timer as a new plan in a folder (P3.2).
-  /// Calendar: tap opens the Calendar page (P4.2).
+  /// P5.3 QUICK ACTIONS (right click, [BarButton.onSecondaryTap]):
+  /// Calendar opens on the NON-default view (week ⇄ month —
+  /// [_openCalendar]'s flag over the P5.2 setting); Library saves the
+  /// currently open timer into a folder ([saveTimerToFolder], P3.2's
+  /// picker, kept). Settings and New Event take NO quick action — the
+  /// outline defines none for them.
   Widget _mainBar(BuildContext context) {
     return BottomBar(
       key: const Key('main-bar'),
@@ -1070,16 +1069,15 @@ class _BoardScreenState extends State<BoardScreen> {
           buttonKey: const Key('bar-calendar'),
           icon: Icons.calendar_month,
           onPressed: () => unawaited(_openCalendar(context)),
+          onSecondaryTap: () =>
+              unawaited(_openCalendar(context, openNonDefaultView: true)),
         ),
-        GestureDetector(
-          key: const Key('bar-library-actions'),
-          onSecondaryTapDown: (_) =>
+        BarButton(
+          buttonKey: const Key('bar-library'),
+          icon: Icons.local_library,
+          onPressed: () => unawaited(_openLibrary(context)),
+          onSecondaryTap: () =>
               unawaited(saveTimerToFolder(context, controller)),
-          child: BarButton(
-            buttonKey: const Key('bar-library'),
-            icon: Icons.local_library,
-            onPressed: () => unawaited(_openLibrary(context)),
-          ),
         ),
         BarButton(
           buttonKey: const Key('bar-new-event'),
@@ -1121,6 +1119,14 @@ class _BoardScreenState extends State<BoardScreen> {
   /// v2 P3.4 — `btn-defaults` opens the plan's default-rules menu
   /// ([showDefaultsMenu]); it lives on THIS bar only (the board root and
   /// the Library get no menu in this chunk).
+  ///
+  /// P5.3 — the outline's merged task/temp-board bar, slot order pinned
+  /// by test: **home · back · new item · delete mode · checklist ·
+  /// show/hide completed · defaults menu**. `bar-new-item` opens the
+  /// interval editor in CREATE mode for this plan
+  /// ([openPlanEditor]'s `createInterval` seam); `bar-delete-item` arms
+  /// delete mode (tinted danger while armed) — a tap on a row then asks
+  /// to delete it ([_confirmDeleteRow]).
   Widget _planBar(BuildContext context) {
     return BottomBar(
       key: const Key('plan-bar'),
@@ -1137,11 +1143,23 @@ class _BoardScreenState extends State<BoardScreen> {
           onPressed: () => Navigator.of(context).pop(),
         ),
         Tooltip(
-          message: 'Defaults',
+          message: 'New item',
           child: BarButton(
-            buttonKey: const Key('btn-defaults'),
-            icon: Icons.rule,
-            onPressed: () => unawaited(showDefaultsMenu(context, controller)),
+            buttonKey: const Key('bar-new-item'),
+            icon: Icons.add,
+            onPressed: () => unawaited(
+              openPlanEditor(context, controller, createInterval: true),
+            ),
+          ),
+        ),
+        Tooltip(
+          message: 'Delete mode',
+          child: BarButton(
+            buttonKey: const Key('bar-delete-item'),
+            icon: Icons.delete_outline,
+            // Destructive while armed (the Library delete-list rule).
+            color: _deleteMode ? AppColors.danger : AppColors.text,
+            onPressed: () => setState(() => _deleteMode = !_deleteMode),
           ),
         ),
         Tooltip(
@@ -1159,9 +1177,62 @@ class _BoardScreenState extends State<BoardScreen> {
           icon: _showCompleted ? Icons.visibility : Icons.visibility_off,
           onPressed: () => setState(() => _showCompleted = !_showCompleted),
         ),
+        Tooltip(
+          message: 'Defaults',
+          child: BarButton(
+            buttonKey: const Key('btn-defaults'),
+            icon: Icons.rule,
+            onPressed: () => unawaited(showDefaultsMenu(context, controller)),
+          ),
+        ),
       ],
     );
   }
+
+  /// P5.3 — delete mode's confirm-then-write for the tapped ROW (a def
+  /// or a whole group subtree). Cancel — or the barrier — keeps the
+  /// item; confirm runs the write through the seam: the target timer
+  /// resolves FIRST ([AppController.timerForWrite] — a date-bound day
+  /// materializes its own copy before anything is touched, P4.1), the
+  /// engine's tree op deletes through [Store.deleteNodes], and
+  /// [AppController.applyTreeEdit] rebuilds the run over the shortened
+  /// tree. A REFUSED tree op lands as a SnackBar reason (the authoring-
+  /// rule reason pattern) instead of surfacing as a crash.
+  Future<void> _confirmDeleteRow(IntervalNode node) async {
+    final (title, message) = _deleteCopy(node);
+    final confirmed = await showConfirmDialog(
+      context,
+      title: title,
+      message: message,
+    );
+    if (!confirmed || !mounted) return;
+    try {
+      final target = await controller.timerForWrite();
+      await controller.store.deleteNodes(
+        timerId: target.id,
+        nodeIds: [node.id],
+      );
+      await controller.applyTreeEdit();
+    } on TreeOpException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  /// The confirm dialog's copy for [node] (English UI copy; the schema
+  /// gives groups no name, so they read as “the group”).
+  (String, String) _deleteCopy(IntervalNode node) => switch (node) {
+    DefNode(:final def) => (
+      'Delete item?',
+      'The item "${def.name ?? 'Interval'}" will be deleted from this plan.',
+    ),
+    GroupNode() => (
+      'Delete group?',
+      'The group and its items will be deleted from this plan.',
+    ),
+  };
 
   Widget _buildBar(BuildContext context) => switch (widget.bar) {
     BoardBar.main => _mainBar(context),
@@ -1184,11 +1255,20 @@ class _BoardScreenState extends State<BoardScreen> {
 
   /// P4.2 — the Calendar page: same push pattern as the Library (the
   /// board stays the route root underneath; the Calendar renders its own
-  /// bar).
-  Future<void> _openCalendar(BuildContext context) =>
-      Navigator.of(context).push(
-        AppPageRoute<void>(builder: (_) => CalendarScreen(controller)),
-      );
+  /// bar). [openNonDefaultView] (P5.3) is the Calendar button's QUICK
+  /// ACTION: open on the view the default-view setting does NOT
+  /// configure (the calendar applies the flip at open).
+  Future<void> _openCalendar(
+    BuildContext context, {
+    bool openNonDefaultView = false,
+  }) => Navigator.of(context).push(
+    AppPageRoute<void>(
+      builder: (_) => CalendarScreen(
+        controller,
+        openNonDefaultView: openNonDefaultView,
+      ),
+    ),
+  );
 
   /// Reset confirmation: nothing happens without an explicit confirm —
   /// Cancel and the barrier tap just dismiss.
@@ -1645,22 +1725,51 @@ class _StateChip extends StatelessWidget {
 /// [focusDefId] (P5.1 Save & edit timer) lands the editor focused on one
 /// interval — its row cell takes the keyboard focus and the row joins the
 /// selection.
+///
+/// P5.3 NEW ITEM — [createInterval] opens the INTERVAL EDITOR in CREATE
+/// mode instead (the plan bar's `bar-new-item`): no timer-editor step,
+/// the interval editor's back-commit IS the save — the working copy
+/// commits through the same write seam and [controller] reloads, so the
+/// new interval lands in the plan and on the board. A blank create is a
+/// cancel (CREATE pushes no undo step → nothing is written).
 Future<void> openPlanEditor(
   BuildContext context,
   AppController controller, {
   String? focusDefId,
+  bool createInterval = false,
 }) async {
   final tree = await controller.store.loadTree(controller.timer.id);
   if (!context.mounted) return;
+  final working = EditorController(
+    store: controller.store,
+    timer: controller.timer,
+    initialTree: tree,
+    resolveTimer: controller.timerForWrite,
+  );
+  if (createInterval) {
+    await Navigator.of(context).push(
+      AppPageRoute<void>(
+        builder: (_) => IntervalEditorScreen(
+          controller: working,
+          soundsDir: controller.soundsDir,
+          soundListing: controller.soundListing,
+          player: controller.player,
+        ),
+      ),
+    );
+    if (working.canUndo) {
+      // The CREATE back-commit landed in the working copy — persist it
+      // and bring the board up to date (a live run adopts the new
+      // schedule, exactly like the timer editor's Done).
+      await working.commit();
+      await controller.applyTreeEdit();
+    }
+    return;
+  }
   await Navigator.of(context).push(
     AppPageRoute<void>(
       builder: (_) => EditorScreen(
-        controller: EditorController(
-          store: controller.store,
-          timer: controller.timer,
-          initialTree: tree,
-          resolveTimer: controller.timerForWrite,
-        ),
+        controller: working,
         soundsDir: controller.soundsDir,
         soundListing: controller.soundListing,
         player: controller.player,

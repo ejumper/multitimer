@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:planner/app_controller.dart';
 import 'package:planner/board_screen.dart';
+import 'package:planner/edge_chevrons.dart';
 import 'package:planner/settings_service.dart';
 import 'package:planner/theme.dart';
 import 'package:planner_engine/planner_engine.dart';
@@ -26,7 +27,8 @@ import 'fakes.dart';
 /// month · tapping a day opens THAT DAY'S board through the `dayDate`
 /// seam (read-only); back returns to the Calendar, home lands on
 /// TODAY'S day board (P4.3 — falling back to the board root when
-/// nothing claims today).
+/// nothing claims today) · the chevrons render through the ONE shared
+/// [EdgeChevron] component (P5.3).
 ///
 /// Fixture (saved BEFORE init): `Errands` (3 Open intervals, created
 /// first so the boot board binds IT) and `Routine` (2 intervals, count
@@ -767,6 +769,25 @@ void main() {
     await settle(tester);
     expect(find.byKey(const Key('plan-bar')), findsNothing);
     expect(find.byKey(const Key('main-bar')), findsOneWidget);
+
+    controller.dispose();
+    await store.close();
+  });
+
+  // ── P5.3: one shared chevron component ────────────────────────────────
+
+  testWidgets('edge_chevrons_render_through_the_shared_component', (
+    tester,
+  ) async {
+    await pumpBoard(tester);
+    await openCalendar(tester);
+
+    // One [EdgeChevron] per window edge — the same widget the day boards
+    // build (its reveal behavior itself is pinned by the hover tests
+    // above, unchanged).
+    expect(find.byType(EdgeChevron), findsNWidgets(2));
+    expect(find.byKey(const Key('cal-gutter-left')), findsOneWidget);
+    expect(find.byKey(const Key('cal-prev-reveal')), findsOneWidget);
 
     controller.dispose();
     await store.close();

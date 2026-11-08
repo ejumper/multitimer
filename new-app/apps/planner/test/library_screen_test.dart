@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:planner/app_controller.dart';
 import 'package:planner/board_screen.dart';
+import 'package:planner/settings_service.dart';
 import 'package:planner_engine/planner_engine.dart';
 
 import 'fakes.dart';
@@ -19,7 +20,9 @@ import 'fakes.dart';
 /// cascade) · drag reorder within a folder · a plan row opens its own
 /// board bound to that timer (back → Library, home → board root) ·
 /// save-to-folder (right-click on the board's Library button) copies into
-/// the chosen folder with completion marks cleared.
+/// the chosen folder with completion marks cleared · P5.3 quick actions:
+/// right-click Calendar opens the NON-default view (week ⇄ month),
+/// right-click Settings / New Event fires NOTHING.
 ///
 /// Fixtures (saved BEFORE init) — dates derive from [t0] through the
 /// same local conversion the row uses ([dayOf]):
@@ -725,6 +728,89 @@ void main() {
 
     final sourceTree = await store.loadTree(controller.timer.id);
     expect((sourceTree.nodeById('a') as DefNode).def.completed, isTrue);
+
+    controller.dispose();
+    await store.close();
+  });
+
+  // ── P5.3: the other main-bar quick actions ─────────────────────────
+
+  testWidgets('right_click_calendar_opens_the_non_default_view', (
+    tester,
+  ) async {
+    await pumpBoard(tester);
+
+    // Default view = week (the unset setting) → the quick action opens
+    // MONTH (the toggle icon names the CURRENT view).
+    await tester.tap(
+      find.byKey(const Key('bar-calendar')),
+      buttons: kSecondaryMouseButton,
+    );
+    await settle(tester);
+    expect(find.byKey(const Key('calendar-page')), findsOneWidget);
+    expect(
+      (tester.widget<IconButton>(find.byKey(const Key('bar-view-toggle'))).icon
+              as Icon)
+          .icon,
+      Icons.calendar_view_month,
+      reason: 'non-default = the opposite of the configured week',
+    );
+
+    // Home back to the board root (this fixture claims no day → Home =
+    // pop to root).
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const Key('calendar-bar')),
+        matching: find.byKey(const Key('bar-home')),
+      ),
+    );
+    await settle(tester);
+    expect(find.byKey(const Key('main-bar')), findsOneWidget);
+
+    // Configure the default as MONTH → the quick action opens WEEK.
+    await store.setSetting(kSettingCalendarDefaultView, kCalendarViewMonth);
+    await tester.tap(
+      find.byKey(const Key('bar-calendar')),
+      buttons: kSecondaryMouseButton,
+    );
+    await settle(tester);
+    expect(find.byKey(const Key('calendar-page')), findsOneWidget);
+    expect(
+      (tester.widget<IconButton>(find.byKey(const Key('bar-view-toggle'))).icon
+              as Icon)
+          .icon,
+      Icons.calendar_view_week,
+      reason: 'with month configured, the quick action lands on week',
+    );
+
+    controller.dispose();
+    await store.close();
+  });
+
+  testWidgets('right_click_settings_and_new_event_do_nothing', (
+    tester,
+  ) async {
+    await pumpBoard(tester);
+
+    // Settings: no quick action — the page must NOT open.
+    await tester.tap(
+      find.byKey(const Key('bar-settings')),
+      buttons: kSecondaryMouseButton,
+    );
+    await settle(tester);
+    expect(find.byKey(const Key('settings-page')), findsNothing);
+    expect(find.byKey(const Key('main-bar')), findsOneWidget);
+
+    // New Event: no quick action — no capture editor, no dialog.
+    await tester.tap(
+      find.byKey(const Key('bar-new-event')),
+      buttons: kSecondaryMouseButton,
+    );
+    await settle(tester);
+    expect(find.byKey(const Key('ie-label')), findsNothing);
+    expect(find.byKey(const Key('ie-save-edit')), findsNothing);
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(find.byKey(const Key('main-bar')), findsOneWidget);
 
     controller.dispose();
     await store.close();

@@ -6,6 +6,7 @@ import 'package:planner/app_controller.dart';
 import 'package:planner/board_screen.dart';
 import 'package:planner/bottom_bar.dart';
 import 'package:planner/day_navigation.dart';
+import 'package:planner/edge_chevrons.dart';
 import 'package:planner/interval_rows.dart';
 import 'package:planner/theme.dart';
 import 'package:planner_engine/planner_engine.dart';
@@ -22,7 +23,9 @@ import 'fakes.dart';
 /// render parity: a day board renders IDENTICALLY before and after the
 /// check that materializes it — same rows, same state, same keys across
 /// forked renders — so the user cannot tell which one they are looking
-/// at.
+/// at. P5.3 adds: the chevrons render through the ONE shared
+/// [EdgeChevron] component (the reveal rules themselves stay pinned
+/// above, unchanged).
 ///
 /// Fixture (saved BEFORE init): `Routine` (`r1 Breakfast 600s`,
 /// `r2 Stretch` Open — mixed → chain mode) claiming EVERY day via a
@@ -520,6 +523,38 @@ void main() {
     expect(rowIds(tester), ids, reason: 'the copy keeps its ids across opens');
 
     reopened.dispose();
+    controller.dispose();
+    await store.close();
+  });
+
+  // ── P5.3: one shared chevron component ────────────────────────────────
+
+  testWidgets('chevron_gutters_render_through_the_shared_component', (
+    tester,
+  ) async {
+    // The board root: no gutters, so no shared chevrons either.
+    await pumpRootBoard(tester);
+    expect(find.byType(EdgeChevron), findsNothing);
+
+    // A plain Library plan board: none either.
+    final plan = makeController();
+    await plan.init(timerId: chores.id);
+    await tester.pumpWidget(
+      MaterialApp(home: BoardScreen(plan, bar: BoardBar.plan)),
+    );
+    await tester.pump();
+    expect(find.byType(EdgeChevron), findsNothing);
+
+    // A DAY board: one shared component per edge, keys intact (the hover
+    // reveal itself is pinned by the tests above).
+    final day = await pumpDayBoard(tester, today());
+    plan.dispose(); // its tree is gone — safe to drop now
+    expect(find.byType(EdgeChevron), findsNWidgets(2));
+    expect(find.byKey(const Key('day-gutter-left')), findsOneWidget);
+    expect(find.byKey(const Key('day-prev-reveal')), findsOneWidget);
+    expect(find.byKey(const Key('day-prev')), findsOneWidget);
+
+    day.dispose();
     controller.dispose();
     await store.close();
   });

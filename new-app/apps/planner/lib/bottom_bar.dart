@@ -47,11 +47,18 @@ class BottomBar extends StatelessWidget {
 /// Which bar a [BoardScreen] renders (P3.1): the board is both the home
 /// screen and the plan board a Library plan opens into.
 enum BoardBar {
-  /// Home: Settings · Calendar · Library · New Event.
+  /// Home: Settings · Calendar · Library · New Event — each with its
+  /// P5.3 quick action where the outline defines one (right-click
+  /// Calendar = the non-default view, right-click Library =
+  /// save-to-folder; Settings and New Event have none).
   main,
 
-  /// A plan board or day board: home (today's day board — P4.3) · back
-  /// (pop one level) · defaults (the default-rules menu, v2 P3.4).
+  /// A plan board or day board — the outline's merged task/temp-board
+  /// bar (P5.3), left to right: home (today's day board — P4.3) · back
+  /// (pop one level) · new item (the interval editor in CREATE mode) ·
+  /// delete mode (tap a row → confirmed delete) · checklist toggle
+  /// (P3.3) · show/hide completed (P3.3) · defaults (the default-rules
+  /// menu, v2 P3.4).
   plan,
 }
 
@@ -66,6 +73,7 @@ class BarButton extends StatefulWidget {
     required this.buttonKey,
     required this.icon,
     required this.onPressed,
+    this.onSecondaryTap,
     this.color = AppColors.text,
     this.focused = false,
     this.circularRing = true,
@@ -75,6 +83,16 @@ class BarButton extends StatefulWidget {
   final Key buttonKey;
   final IconData icon;
   final VoidCallback? onPressed;
+
+  /// P5.3 — the button's QUICK ACTION (the outline's right-click /
+  /// long-press vocabulary): fires on the secondary tap over the same
+  /// 46×46 target as the primary tap (the IconButton itself only ever
+  /// answers the primary). The main bar wires it — Calendar opens the
+  /// non-default view, Library saves the open timer to a folder — while
+  /// Settings and New Event keep it null (the outline defines no quick
+  /// action for them).
+  final VoidCallback? onSecondaryTap;
+
   final Color color;
 
   /// Keyboard-focus ring (acceptance keyboard navigation).
@@ -92,6 +110,15 @@ class _BarButtonState extends State<BarButton> {
 
   @override
   Widget build(BuildContext context) {
+    final button = FocusRing(
+      focused: widget.focused,
+      circular: widget.circularRing,
+      child: IconButton(
+        key: widget.buttonKey,
+        icon: Icon(widget.icon, size: 26, color: widget.color),
+        onPressed: widget.onPressed,
+      ),
+    );
     return MouseRegion(
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
@@ -104,15 +131,15 @@ class _BarButtonState extends State<BarButton> {
               ? Colors.white.withValues(alpha: 0.08)
               : null,
         ),
-        child: FocusRing(
-          focused: widget.focused,
-          circular: widget.circularRing,
-          child: IconButton(
-            key: widget.buttonKey,
-            icon: Icon(widget.icon, size: 26, color: widget.color),
-            onPressed: widget.onPressed,
-          ),
-        ),
+        // The quick action wraps the button content (secondary taps never
+        // reach the IconButton); no wrapper when there is none to keep
+        // the plain buttons' widget tree untouched.
+        child: widget.onSecondaryTap == null
+            ? button
+            : GestureDetector(
+                onSecondaryTapDown: (_) => widget.onSecondaryTap!(),
+                child: button,
+              ),
       ),
     );
   }

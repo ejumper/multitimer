@@ -36,6 +36,44 @@ confirmation step. The old interval-list overlay (Tab / the list button)
 is retired (v2 P2.3); Tab cycles sections like everywhere else and does
 nothing on the board's single section.
 
+## Bottom bars + quick actions
+
+Every page renders its own pill bar. The MAIN bar (the board root), left
+to right: **Settings · Calendar · Library · New Event**.
+
+Right click is a button's **quick action** — only where one is defined
+(left click always does the normal page jump):
+
+| Button | Right click (quick action) |
+| --- | --- |
+| Settings | nothing — no quick action is defined |
+| Calendar | opens the Calendar on the **non-default view**: week when the default-view setting is month, month when it is week |
+| Library | saves the currently open timer into a folder (the folder picker opens; nothing navigates) |
+| New Event | nothing — no quick action is defined |
+
+## Plan / day board bar
+
+The plan board's and day board's bar, left to right: **home · back ·
+new item · delete mode · checklist toggle · show/hide completed ·
+defaults menu**. Day boards additionally reveal prev/next-day chevrons
+at the window edges on hover (outside the reading column).
+
+- **home** — today's day board (or the plan the Home setting names);
+  **back** — one level back.
+- **new item** — opens the interval editor in CREATE mode for this plan:
+  fill it in and back saves the new interval into the plan (a blank form
+  saves nothing).
+- **delete mode** — the button turns red while armed. Tap an interval
+  row → confirm dialog → the item is deleted from the plan (a group
+  takes its whole subtree); Cancel or clicking away keeps it. The mode
+  stays armed across deletes until the button is tapped again. While
+  armed, the row's completion circle doesn't toggle — the tap asks to
+  delete instead; right-click still jumps to the interval.
+- **checklist toggle** — switches checklist/chain mode (the tooltip
+  names the current one); **show/hide completed** — the completed
+  section's visibility; **defaults menu** — the plan's default rules
+  (make default for all days / a weekday / a month day).
+
 ## Reset confirmation
 
 | Key | Action |

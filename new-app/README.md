@@ -18,6 +18,41 @@ new-app/
 The app depends on the engine via a path dependency
 (`apps/planner/pubspec.yaml` → `../../packages/planner_engine`).
 
+## v2 — the day planner
+
+v2 (`v2/PLAN/` build plan, `v2/v2-outline.md` outline) turns the v1
+interval timer into a day planner; v1's plan and docs stay under `v1/`.
+Same app shell — a board screen plus a per-page pill-shaped bottom bar:
+
+- **List view**: the dial is gone — the board renders the plan as
+  editor-style rows (live `<left>/<total>` slots, left→right fills, group
+  repeat countdowns), the current row rides near the center, and a
+  right-click on a row jumps the run to it.
+- **Completion**: every item carries a checkmark (Enter = ✓ at holds, one
+  "not completed" button, Reset clears the marks). All-Open plans act as
+  **checklists**: checked rows sink into a `Completed` section after a
+  3-second un-check window, with show/hide on the bar and a
+  checklist/chain mode toggle.
+- **Library**: the folder-organized home of plans (routines, task lists,
+  templates) — create/rename/delete/drag-reorder lists and folders, its
+  own bar (home · new list · delete list), and save-to-folder via
+  right-click on the board's Library button.
+- **Calendar & days**: a week/month list of days with their interval
+  counts (today highlighted), a popup date-setter, hover-revealed edge
+  chevrons; tapping a day opens that day's board, and days lazy-fork
+  their plan on the first write (reads never fork).
+- **New Events**: quick capture of a dated interval into a day's plan
+  (Save / Save & edit timer), overlapping times refused, past-due events
+  saved and flagged late.
+- **Settings**: New events override default timer, Home (current day vs a
+  specific plan), Interval Options defaults, Calendar default view, and
+  the Bottom Bar section — each setting feeds its consumer.
+- **Bottom bars & quick actions**: every page renders its own bar; on the
+  main bar, right-click Calendar opens the **non-default view** and
+  right-click Library saves the open timer to a folder (Settings and New
+  Event have no quick action). The plan board's bar carries home · back ·
+  new item · delete mode · checklist · show/hide completed · defaults.
+
 ## Toolchain
 
 - Flutter SDK via snap (`sudo snap install flutter --classic`), which also
