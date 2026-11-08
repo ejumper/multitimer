@@ -6,6 +6,7 @@ import 'package:planner_engine/planner_engine.dart';
 import 'app_controller.dart';
 import 'board_screen.dart';
 import 'bottom_bar.dart';
+import 'day_navigation.dart';
 import 'format.dart';
 import 'interval_rows.dart';
 import 'theme.dart';
@@ -25,8 +26,9 @@ import 'theme.dart';
 /// inline, and a long-press drag reorders plans within/between folders
 /// (the flat entry list keeps the section landmarks the drop math walks).
 ///
-/// Own bar (P3.1's page-contextual bars): **home** (pop to the board
-/// root) · **new list** (all-open plan on TOP of the current folder,
+/// Own bar (P3.1's page-contextual bars): **home** (today's day board —
+/// P4.3, falling back to the board root when nothing claims today) ·
+/// **new list** (all-open plan on TOP of the current folder,
 /// focused rename) · **delete list** (delete mode: tap a plan → confirmed
 /// delete).
 ///
@@ -165,7 +167,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
         BarButton(
           buttonKey: const Key('bar-home'),
           icon: Icons.home,
-          onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
+          // P4.3: Home = today's day board (homeDayDate is the P5.2 seam).
+          onPressed: () => unawaited(openHome(context, controller)),
         ),
         BarButton(
           buttonKey: const Key('bar-new-list'),
@@ -517,10 +520,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
     await Navigator.of(context).push(
       AppPageRoute<void>(
-        builder: (_) => BoardScreen(planController, bar: BoardBar.plan),
+        builder: (_) => BoardScreen(
+          planController,
+          bar: BoardBar.plan,
+          ownsController: true, // disposed when the route is gone
+        ),
       ),
     );
-    planController.dispose();
     _openingPlan = false;
     if (mounted) await _reload();
   }

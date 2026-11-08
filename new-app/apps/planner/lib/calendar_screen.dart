@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:planner_engine/planner_engine.dart';
 
 import 'app_controller.dart';
-import 'board_screen.dart';
 import 'bottom_bar.dart';
+import 'day_navigation.dart';
 import 'theme.dart';
 
 /// The Calendar page (v2 P4.2): the outline's calendar view — a LIST OF
@@ -35,8 +35,9 @@ import 'theme.dart';
 /// seam — a read-only open (P4.1; the fork happens on the day board's
 /// first write — P4.3 completes the day-board story).
 ///
-/// Own bar (P3.1's page-contextual bars): **home** (pop to the board
-/// root) · **view toggle** (week ↔ month) · **date setter** (a popup
+/// Own bar (P3.1's page-contextual bars): **home** (today's day board —
+/// P4.3, falling back to the board root when nothing claims today) ·
+/// **view toggle** (week ↔ month) · **date setter** (a popup
 /// month-grid picker: the shown month's day numbers in a simple
 /// 7-column grid with month stepping; picking a day sets the shown range
 /// + the highlight).
@@ -177,36 +178,16 @@ class _CalendarScreenState extends State<CalendarScreen> {
     unawaited(_reload());
   }
 
-  /// Tapping a day row: THAT DAY'S BOARD — a second [AppController]
-  /// bound via P4.1's `dayDate` seam driving the standard [BoardScreen]
-  /// with the plan bar's home/back (P4.3 replaces this with the full
-  /// day-board story). The open is READ-ONLY: `init(dayDate:)` renders
-  /// the resolved placeholder and materializes nothing. Disposed on pop
-  /// (its 1 Hz ticker dies with it); the calendar reloads afterwards in
-  /// case the day's plan was edited there.
+  /// Tapping a day row: THAT DAY'S BOARD through [openDayBoard] (P4.3 —
+  /// the full day-board story: a READ-ONLY open — `init(dayDate:)`
+  /// renders the resolved placeholder and materializes nothing — plus
+  /// the step chevrons and the plan bar's home/back). Guarded against a
+  /// double-tap across the async init/push seam; the calendar reloads
+  /// afterwards in case the day's plan was edited there.
   Future<void> _openDay(DateTime date) async {
     if (_openingDay) return;
     _openingDay = true;
-    final dayController = AppController(
-      store: controller.store,
-      clock: controller.clock,
-      notifier: controller.notifier,
-      player: controller.player,
-      soundsDir: controller.soundsDir,
-      soundListing: controller.soundListing,
-    );
-    await dayController.init(dayDate: date);
-    if (!mounted) {
-      dayController.dispose();
-      _openingDay = false;
-      return;
-    }
-    await Navigator.of(context).push(
-      AppPageRoute<void>(
-        builder: (_) => BoardScreen(dayController, bar: BoardBar.plan),
-      ),
-    );
-    dayController.dispose();
+    await openDayBoard(context, controller, date: date);
     _openingDay = false;
     if (mounted) unawaited(_reload());
   }
@@ -286,7 +267,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
         BarButton(
           buttonKey: const Key('bar-home'),
           icon: Icons.home,
-          onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
+          // P4.3: Home = today's day board (homeDayDate is the P5.2 seam).
+          onPressed: () => unawaited(openHome(context, controller)),
         ),
         BarButton(
           buttonKey: const Key('bar-view-toggle'),

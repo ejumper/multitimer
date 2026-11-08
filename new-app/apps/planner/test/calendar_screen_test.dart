@@ -12,8 +12,9 @@ import 'fakes.dart';
 /// Calendar page widget tests (v2 P4.2): the outline's calendar view.
 ///
 /// Pinned here: the main bar's Calendar button is ALIVE and pushes the
-/// page (home returns) with its own bar (home · view toggle · date
-/// setter) · WEEK rows = 7 days with `Monday … name + count` read
+/// page (home lands on today's day board — P4.3) with its own bar (home
+/// · view toggle · date setter) · WEEK rows = 7 days with `Monday … name
+/// + count` read
 /// THROUGH the placeholder (no materialization: every shown day's
 /// `dayPlanId` stays null and no fork timer exists) · MONTH rows = the
 /// shown month's days, same row shape · today highlighted with the
@@ -22,7 +23,9 @@ import 'fakes.dart';
 /// highlighted · the edge chevrons hover-reveal and page week (±7 days)
 /// and month (±1 month) both ways · the view toggle switches week ↔
 /// month · tapping a day opens THAT DAY'S board through the `dayDate`
-/// seam (read-only) and back/home return.
+/// seam (read-only); back returns to the Calendar, home lands on
+/// TODAY'S day board (P4.3 — falling back to the board root when
+/// nothing claims today).
 ///
 /// Fixture (saved BEFORE init): `Errands` (3 Open intervals, created
 /// first so the boot board binds IT) and `Routine` (2 intervals, count
@@ -267,7 +270,9 @@ void main() {
       reason: 'left→right: home · view toggle · date setter (P4.2 rule 5)',
     );
 
-    // Home pops the Calendar — the board root is back.
+    // Home (P4.3) lands on TODAY'S day board: the Calendar pops with the
+    // stack's return to the root, and today's board (Routine — the
+    // global default claims today) pushes on top of the root.
     await tester.tap(
       find.descendant(
         of: find.byKey(const Key('calendar-bar')),
@@ -276,6 +281,26 @@ void main() {
     );
     await settle(tester);
     expect(find.byKey(const Key('calendar-page')), findsNothing);
+    expect(
+      find.byKey(const Key('plan-bar')),
+      findsOneWidget,
+      reason: 'today\u2019s day board is what Home landed on',
+    );
+    expect(find.byKey(const Key('row-r1')), findsOneWidget);
+    expect(
+      find.byKey(const Key('main-bar'), skipOffstage: false),
+      findsOneWidget,
+      reason: 'the stack sits on the root with today\u2019s board over it',
+    );
+    // Back from Home = the board root (the pop happened before the push).
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const Key('plan-bar')),
+        matching: find.byKey(const Key('bar-back')),
+      ),
+    );
+    await settle(tester);
+    expect(find.byKey(const Key('plan-bar')), findsNothing);
     expect(find.byKey(const Key('main-bar')), findsOneWidget);
 
     controller.dispose();
@@ -650,7 +675,7 @@ void main() {
 
   // ── P4.2 rule 3: tap → that day's board ────────────────────────────────
 
-  testWidgets('tapping_a_day_opens_that_days_board_and_home_returns', (
+  testWidgets('tapping_a_day_opens_that_days_board_back_returns_and_home_lands_on_today', (
     tester,
   ) async {
     await pumpBoard(tester);
@@ -682,7 +707,10 @@ void main() {
     expect(find.byKey(Key('row-r1')), findsNothing);
     expect(find.byKey(const Key('calendar-page')), findsOneWidget);
 
-    // Open again; HOME pops to the board root — the Calendar goes too.
+    // Open again; HOME (P4.3) lands on TODAY'S day board — the Calendar
+    // and the Monday board go with the pop to the root (today resolves
+    // Routine through the global default), and today's board stays on
+    // top of the root.
     await tester.tap(find.byKey(rowKey));
     await settle(tester);
     expect(find.byKey(const Key('plan-bar')), findsOneWidget);
@@ -693,8 +721,22 @@ void main() {
       ),
     );
     await settle(tester);
-    expect(find.byKey(const Key('plan-bar')), findsNothing);
     expect(find.byKey(const Key('calendar-page')), findsNothing);
+    expect(
+      find.byKey(const Key('plan-bar')),
+      findsOneWidget,
+      reason: 'Home pushed a day board instead of only popping',
+    );
+    expect(find.byKey(const Key('row-r1')), findsOneWidget);
+    // Back from Home = the board root.
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const Key('plan-bar')),
+        matching: find.byKey(const Key('bar-back')),
+      ),
+    );
+    await settle(tester);
+    expect(find.byKey(const Key('plan-bar')), findsNothing);
     expect(find.byKey(const Key('main-bar')), findsOneWidget);
 
     controller.dispose();

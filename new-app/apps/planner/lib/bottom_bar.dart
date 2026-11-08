@@ -50,8 +50,8 @@ enum BoardBar {
   /// Home: Settings · Calendar · Library · New Event.
   main,
 
-  /// A plan board: home (pop to the board root) · back (pop one level) ·
-  /// defaults (the default-rules menu, v2 P3.4).
+  /// A plan board or day board: home (today's day board — P4.3) · back
+  /// (pop one level) · defaults (the default-rules menu, v2 P3.4).
   plan,
 }
 

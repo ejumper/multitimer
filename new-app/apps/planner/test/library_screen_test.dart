@@ -646,6 +646,9 @@ void main() {
     await store.close();
   });
 
+  // P4.3's Home FALLBACK pin: this fixture has NO rules, so nothing
+  // claims today (materializeDay would return null) and Home stays the
+  // plain pop-to-the-board-root — homeDayDate's null branch.
   testWidgets('plan_board_home_pops_to_the_board_root', (tester) async {
     await pumpBoard(tester);
     await openLibrary(tester);

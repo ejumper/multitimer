@@ -7,6 +7,7 @@ import 'package:planner_engine/planner_engine.dart';
 import 'app_controller.dart';
 import 'bottom_bar.dart';
 import 'calendar_screen.dart';
+import 'day_navigation.dart';
 import 'defaults_menu.dart';
 import 'editor_controller.dart';
 import 'editor_screen.dart';
@@ -37,13 +38,28 @@ import 'time_adjust_modal.dart';
 /// [BoardScreen] serves as the home board ([BoardBar.main]: Settings ·
 /// Calendar · Library · New Event) and as a Library plan's board
 /// ([BoardBar.plan]: home · back · defaults (P3.4)).
+///
+/// P4.3 — bound to a calendar day (`controller.dayDate`), the board also
+/// renders the calendar's hover-revealed edge GUTTERS: chevrons at the
+/// window edges' vertical center that step to the previous/next day (the
+/// day swiping — a plain plan board builds none), and its plan-bar Home
+/// lands on today's day board ([openHome]).
 class BoardScreen extends StatefulWidget {
-  const BoardScreen(this.controller, {super.key, this.bar = BoardBar.main});
+  const BoardScreen(this.controller, {
+    super.key,
+    this.bar = BoardBar.main,
+    this.ownsController = false,
+  });
 
   final AppController controller;
 
   /// Which bottom bar this board renders (P3.1's page-contextual bars).
   final BoardBar bar;
+
+  /// Route-owned lifecycle: a PUSHED board (day boards, plan boards)
+  /// disposes its controller when the ROUTE is removed — after the exit
+  /// animation — never at pop-start (the exiting route still rebuilds).
+  final bool ownsController;
 
   @override
   State<BoardScreen> createState() => _BoardScreenState();
@@ -97,6 +113,16 @@ class _BoardScreenState extends State<BoardScreen> {
   /// land straight in the completed section instead of waiting again.
   bool _sinksInitialized = false;
 
+  // ── v2 P4.3: day boards — the step chevrons ───────────────────────────
+
+  /// Edge-chevron hover state (the reveal) — date-bound boards only.
+  bool _hoverLeft = false;
+  bool _hoverRight = false;
+
+  /// The async init/push double-tap guard of the day-step chevrons (the
+  /// calendar's day-open guard, [openDayBoard]).
+  bool _openingDay = false;
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -105,20 +131,89 @@ class _BoardScreenState extends State<BoardScreen> {
         nav: _nav,
         onKey: _onKey,
         child: SafeArea(
-          child: Center(
-            child: ConstrainedBox(
-              // The list reads at the editor's column width (520) — rows
-              // like the editor's, on a wide desktop window.
-              constraints: const BoxConstraints(maxWidth: 520),
-              child: ListenableBuilder(
-                listenable: Listenable.merge([controller, _nav]),
-                builder: (context, _) => _buildBoard(context),
-              ),
+          // P4.3: a DATE-bound board sits BETWEEN the two edge gutters
+          // (they own the window edges and never cover the board); a
+          // plain plan board keeps the bare centered column.
+          child: controller.dayDate == null
+              ? Center(child: _boardColumn(context))
+              : Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _edgeNav(left: true),
+                    Expanded(child: Center(child: _boardColumn(context))),
+                    _edgeNav(left: false),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
+
+  /// The reading column (the list reads at the editor's column width —
+  /// 520 — rows like the editor's, on a wide desktop window) around the
+  /// live board.
+  Widget _boardColumn(BuildContext context) => ConstrainedBox(
+    constraints: const BoxConstraints(maxWidth: 520),
+    child: ListenableBuilder(
+      listenable: Listenable.merge([controller, _nav]),
+      builder: (context, _) => _buildBoard(context),
+    ),
+  );
+
+  /// P4.3's day swiping — one window-edge gutter beside the reading
+  /// column (the calendar's chevron pattern, mirrored): the mouse region
+  /// REVEALS its chevron — hidden until the pointer enters the strip,
+  /// [AnimatedOpacity] for the fade — at the gutter's vertical center.
+  /// Present ONLY on date-bound boards ([build] builds no gutters
+  /// otherwise): left steps to the PREVIOUS day, right to the NEXT.
+  Widget _edgeNav({required bool left}) {
+    final revealed = left ? _hoverLeft : _hoverRight;
+    return MouseRegion(
+      key: Key(left ? 'day-gutter-left' : 'day-gutter-right'),
+      onEnter: (_) => setState(() {
+        if (left) {
+          _hoverLeft = true;
+        } else {
+          _hoverRight = true;
+        }
+      }),
+      onExit: (_) => setState(() {
+        if (left) {
+          _hoverLeft = false;
+        } else {
+          _hoverRight = false;
+        }
+      }),
+      child: SizedBox(
+        width: 56,
+        child: Align(
+          alignment: Alignment.center,
+          child: AnimatedOpacity(
+            key: Key(left ? 'day-prev-reveal' : 'day-next-reveal'),
+            opacity: revealed ? 1.0 : 0.0,
+            duration: const Duration(milliseconds: 150),
+            child: BarButton(
+              buttonKey: Key(left ? 'day-prev' : 'day-next'),
+              icon: left ? Icons.chevron_left : Icons.chevron_right,
+              onPressed: () => unawaited(_stepDay(left ? -1 : 1)),
             ),
           ),
         ),
       ),
     );
+  }
+
+  /// P4.3 — the chevron press: push the NEIGHBOURING day's board over
+  /// this one (one open at a time — the init/push double-tap guard).
+  /// This board stays underneath with its controller alive, so back
+  /// walks the days the user swiped through; its controller is disposed
+  /// by whoever pushed IT once this route pops.
+  Future<void> _stepDay(int direction) async {
+    final date = controller.dayDate;
+    if (date == null || _openingDay) return;
+    _openingDay = true;
+    await openDayBoard(context, controller, date: addDays(date, direction));
+    _openingDay = false;
   }
 
   Widget _buildBoard(BuildContext context) {
@@ -1008,8 +1103,10 @@ class _BoardScreenState extends State<BoardScreen> {
     );
   }
 
-  /// P3.1 — a plan board's bar (P3.2): home pops to the board root (the
-  /// Library goes with it), back pops one level to the Library.
+  /// P3.1 — a plan board's bar (P3.2): home lands on TODAY'S day board
+  /// (P4.3 — falling back to the board root when nothing claims today;
+  /// back then returns to wherever Home was pressed from), back pops one
+  /// level to the Library.
   ///
   /// v2 P3.3 — the checklist affordances: `btn-checklist` flips the
   /// board's mode (tooltip names the CURRENT mode; the default is the
@@ -1026,7 +1123,8 @@ class _BoardScreenState extends State<BoardScreen> {
         BarButton(
           buttonKey: const Key('bar-home'),
           icon: Icons.home,
-          onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
+          // P4.3: Home = today's day board (homeDayDate is the P5.2 seam).
+          onPressed: () => unawaited(openHome(context, controller)),
         ),
         BarButton(
           buttonKey: const Key('bar-back'),
@@ -1278,6 +1376,9 @@ class _BoardScreenState extends State<BoardScreen> {
     }
     _sinkTimers.clear();
     _listScroll.dispose();
+    if (widget.ownsController) {
+      widget.controller.dispose(); // route-owned (pushed boards)
+    }
     super.dispose();
   }
 
