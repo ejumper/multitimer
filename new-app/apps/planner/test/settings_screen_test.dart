@@ -1,6 +1,7 @@
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:planner/app_background.dart';
 import 'package:planner/app_controller.dart';
 import 'package:planner/board_screen.dart';
 import 'package:planner/settings_service.dart';
@@ -397,4 +398,34 @@ void main() {
     controller.dispose();
     await store.close();
   });
+
+  // v2 (user request): the solid-background toggle — off by default
+  // (transparent), on paints #161616 live and persists.
+  testWidgets('solid_background_toggle_flips_and_persists', (tester) async {
+    await pumpRootBoard(tester);
+    await openSettings(tester);
+
+    // Default: OFF — the transparent-window look.
+    expect(
+      tester.widget<Switch>(find.byKey(const Key('set-solid-background'))).value,
+      isFalse,
+    );
+    expect(appBackground.value, Colors.transparent);
+
+    await tester.tap(find.byKey(const Key('set-solid-background')));
+    await settle(tester);
+    expect(appBackground.value, solidBackgroundColor); // painted live
+
+    // Persisted: reopen shows it on with the paint restored.
+    await tester.tap(find.byKey(const Key('bar-home')));
+    await settle(tester);
+    appBackground.value = Colors.transparent; // simulate a fresh boot
+    await openSettings(tester);
+    expect(
+      tester.widget<Switch>(find.byKey(const Key('set-solid-background'))).value,
+      isTrue,
+    );
+    expect(appBackground.value, isNot(Colors.transparent));
+  });
+
 }

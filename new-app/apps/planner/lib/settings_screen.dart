@@ -245,6 +245,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: () =>
                 unawaited(_settings.setCalendarDefaultView(kCalendarViewMonth)),
           ),
+          _sectionHeader('APPEARANCE'),
+          _switchCard(
+            switchKey: const Key('set-solid-background'),
+            title: 'Solid background',
+            subtitle: 'Paint #161616 behind the windows instead of transparency',
+            value: _settings.solidBackground,
+            onChanged: (value) =>
+                unawaited(_settings.setSolidBackground(value)),
+          ),
           _sectionHeader('BOTTOM BAR'),
           _homeEchoRow(plan),
         ],

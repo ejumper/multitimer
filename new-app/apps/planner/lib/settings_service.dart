@@ -15,7 +15,8 @@
 /// engine (CONVENTIONS §2's layer rule).
 library;
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'app_background.dart';
 import 'package:planner_engine/planner_engine.dart';
 
 /// The `settings` table keys.
@@ -25,6 +26,7 @@ const String kSettingIntervalAutoFinish = 'interval.autoFinish';
 const String kSettingIntervalDuration = 'interval.duration';
 const String kSettingIntervalTime = 'interval.time';
 const String kSettingCalendarDefaultView = 'calendar.defaultView';
+const String kSettingSolidBackground = 'appearance.solidBackground';
 
 /// Wire values of [kSettingCalendarDefaultView] (stored as given — the
 /// same name-mapping style the default rules' wire values use).
@@ -43,6 +45,9 @@ class SettingsService extends ChangeNotifier {
   /// Whether new events (dated intervals) start with the capture's
   /// Overwrite Default Timer toggle ON (default OFF).
   bool eventOverridesDefault = false;
+
+  /// v2 (user request): solid #161616 background instead of transparency.
+  bool solidBackground = false;
 
   /// Home = this plan's board, or null for the current day's timer.
   /// Stored as the empty string when cleared (the table has no delete;
@@ -69,6 +74,12 @@ class SettingsService extends ChangeNotifier {
   /// Reads every key fresh from the store (typed, defaults for unset
   /// keys) and notifies. Repeatable — a later call re-reads.
   Future<void> load() async {
+    solidBackground = await _readBool(kSettingSolidBackground, false);
+    // The paint follows the setting everywhere a service loads (the root
+    // listens to [appBackground]) — one source of truth.
+    appBackground.value = solidBackground
+        ? solidBackgroundColor
+        : Colors.transparent;
     eventOverridesDefault = await _readBool(
       kSettingEventOverridesDefault,
       false,
@@ -104,6 +115,15 @@ class SettingsService extends ChangeNotifier {
   Future<void> setEventOverridesDefault(bool value) async {
     eventOverridesDefault = value;
     await store.setSetting(kSettingEventOverridesDefault, value ? '1' : '0');
+    _notify();
+  }
+
+  /// v2 (user request): persists AND repaints immediately — the root's
+  /// ColoredBox listens to [appBackground].
+  Future<void> setSolidBackground(bool value) async {
+    solidBackground = value;
+    await store.setSetting(kSettingSolidBackground, value ? '1' : '0');
+    appBackground.value = value ? solidBackgroundColor : Colors.transparent;
     _notify();
   }
 

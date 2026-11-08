@@ -13,6 +13,8 @@ import 'adapters/mp3_player.dart';
 import 'adapters/planner_store.dart';
 import 'adapters/system_clock.dart';
 import 'alert_handler.dart';
+import 'app_background.dart';
+import 'settings_service.dart';
 import 'app_controller.dart';
 import 'board_screen.dart';
 import 'theme.dart';
@@ -87,6 +89,12 @@ Future<void> main() async {
   // closes for real.
   windowManager.addListener(_CloseBehavior(appController));
 
+  // v2 (user request): paint the saved background before the first frame
+  // (load() syncs [appBackground] — no write, just the paint).
+  final bootSettings = SettingsService(appController.store);
+  await bootSettings.load();
+  bootSettings.dispose();
+
   runApp(PlannerApp(controller: appController));
 }
 
@@ -159,6 +167,13 @@ class PlannerApp extends StatelessWidget {
       title: 'Planner',
       debugShowCheckedModeBanner: false,
       theme: buildPlannerTheme(),
+      // v2 (user request): the solid-background preference paints behind
+      // the (transparent) pages — one notifier, live flips.
+      builder: (context, child) => ValueListenableBuilder<Color>(
+        valueListenable: appBackground,
+        builder: (_, color, child) => ColoredBox(color: color, child: child!),
+        child: child,
+      ),
       home: BoardScreen(controller),
     );
   }
