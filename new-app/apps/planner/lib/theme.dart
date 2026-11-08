@@ -47,6 +47,16 @@ abstract final class AppColors {
   /// Destructive actions (delete, reset) — the ONLY UI color besides the
   /// timer/interval swatch colors (greyscale-UI rule).
   static const Color danger = Color(0xFFFF4D4D);
+
+  /// Calendar day-row highlight fill (v2 P4.2): the background behind
+  /// TODAY's row and the date-setter's chosen day on the Calendar page —
+  /// the light-blue accent tinted translucent (the interval-chip tinting
+  /// rule), distinct from the plain [card] row fill.
+  static const Color highlight = Color(0x3300A8FF);
+
+  /// Calendar day-row highlight border (v2 P4.2) — pairs with [highlight]
+  /// in place of the plain rows' [cardBorder].
+  static const Color highlightBorder = lightBlue;
 }
 
 /// Symmetric cross-fade route transition (all platforms).

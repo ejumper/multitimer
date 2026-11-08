@@ -10,8 +10,8 @@ import 'fakes.dart';
 
 /// Navigation shell + Library widget tests (v2 P3.1/P3.2).
 ///
-/// Pinned here: the board's main bar — four buttons in order, only
-/// Library live · open/close the Library (home) · plan-row meta (item
+/// Pinned here: the board's main bar — four buttons in order, Calendar
+/// (P4.2) + Library live · open/close the Library (home) · plan-row meta (item
 /// count for all-Open plans vs total duration, mixed fixtures) · the
 /// created/modified row date · new-list lands on top of the CURRENT
 /// folder (root fallback) and focuses its rename · delete mode → confirm
@@ -260,7 +260,7 @@ void main() {
 
   // ── P3.1: the navigation shell ───────────────────────────────────────
 
-  testWidgets('main_bar_four_buttons_in_order_only_library_live', (
+  testWidgets('main_bar_four_buttons_in_order_calendar_and_library_live', (
     tester,
   ) async {
     await pumpBoard(tester);
@@ -280,8 +280,9 @@ void main() {
       ],
       reason: 'left→right: Settings · Calendar · Library · New Event',
     );
-    // Only Library is live in P3.1/P3.2; the rest are present-but-disabled
-    // until their chunks.
+    // Library is live since P3.1/P3.2 and Calendar since P4.2 (it pushes
+    // the Calendar page); Settings and New Event stay present-but-
+    // disabled until their chunks.
     expect(
       tester
           .widget<IconButton>(find.byKey(const Key('bar-settings')))
@@ -292,7 +293,7 @@ void main() {
       tester
           .widget<IconButton>(find.byKey(const Key('bar-calendar')))
           .onPressed,
-      isNull,
+      isNotNull,
     );
     expect(
       tester.widget<IconButton>(find.byKey(const Key('bar-library'))).onPressed,

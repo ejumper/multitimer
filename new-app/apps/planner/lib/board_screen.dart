@@ -6,6 +6,7 @@ import 'package:planner_engine/planner_engine.dart';
 
 import 'app_controller.dart';
 import 'bottom_bar.dart';
+import 'calendar_screen.dart';
 import 'defaults_menu.dart';
 import 'editor_controller.dart';
 import 'editor_screen.dart';
@@ -965,13 +966,15 @@ class _BoardScreenState extends State<BoardScreen> {
   }
 
   /// P3.1 — the board's bottom bar (the MAIN bar): Settings · Calendar ·
-  /// Library · New Event, left to right. Only Library is live in these
-  /// chunks; the other three are present-but-disabled until their phase
+  /// Library · New Event, left to right. Library is live since P3.2 and
+  /// Calendar since P4.2 (it pushes [CalendarScreen]); Settings and New
+  /// Event stay present-but-disabled until their phase
   /// (TODO(micro): default hidden-until-live — the P5.3 chunk completes
   /// the styling).
   ///
   /// Library: tap opens the Library page; right-click is its quick action
   /// — save the currently open timer as a new plan in a folder (P3.2).
+  /// Calendar: tap opens the Calendar page (P4.2).
   Widget _mainBar(BuildContext context) {
     return BottomBar(
       key: const Key('main-bar'),
@@ -984,7 +987,7 @@ class _BoardScreenState extends State<BoardScreen> {
         BarButton(
           buttonKey: const Key('bar-calendar'),
           icon: Icons.calendar_month,
-          onPressed: null, // TODO(micro): Calendar page (P4.2)
+          onPressed: () => unawaited(_openCalendar(context)),
         ),
         GestureDetector(
           key: const Key('bar-library-actions'),
@@ -1067,6 +1070,14 @@ class _BoardScreenState extends State<BoardScreen> {
   Future<void> _openLibrary(BuildContext context) =>
       Navigator.of(context)
           .push(AppPageRoute<void>(builder: (_) => LibraryScreen(controller)));
+
+  /// P4.2 — the Calendar page: same push pattern as the Library (the
+  /// board stays the route root underneath; the Calendar renders its own
+  /// bar).
+  Future<void> _openCalendar(BuildContext context) =>
+      Navigator.of(context).push(
+        AppPageRoute<void>(builder: (_) => CalendarScreen(controller)),
+      );
 
   /// Reset confirmation: nothing happens without an explicit confirm —
   /// Cancel and the barrier tap just dismiss.
